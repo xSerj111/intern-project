@@ -1,22 +1,29 @@
 {
-  "name": "intern-project",
+  "name": "innogram",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "workspaces": [
-    "apps/*".
-    "packages/*"
-  ].
+  "description": "Innogram - Social Media Application",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*"],
   "scripts": {
-    "build": "turbo run build",
     "dev": "turbo run dev",
-    "lint": "turbo run lint"
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "type-check": "turbo run type-check",
+    "clean": "turbo run clean",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "db:migrate": "turbo run db:migrate",
+    "db:seed": "turbo run db:seed"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
   "devDependencies": {
-    "turbo": "latest"
+    "turbo": "^1.10.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.0.0",
+    "eslint": "^8.0.0",
+    "@typescript-eslint/eslint-plugin": "^6.0.0",
+    "@typescript-eslint/parser": "^6.0.0",
+    "eslint-config-prettier": "^9.0.0",
+    "eslint-plugin-prettier": "^5.0.0"
   }
 }
