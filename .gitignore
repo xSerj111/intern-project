@@ -98,3 +98,5 @@ temp/
 init-script.sh
 
 repomix-output.xml
+
+/generated/prisma
