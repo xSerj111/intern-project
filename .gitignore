@@ -98,9 +98,10 @@ temp/
 init-script.sh
 
 repomix-output.xml
+# Prisma
+**/generated/prisma/
 
-/generated/prisma
-
-
+packages/shared/generated
+packages/shared/src/prisma/generated/
 
 /prisma/libs/prisma/prisma
