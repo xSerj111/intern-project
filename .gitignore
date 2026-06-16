@@ -96,3 +96,5 @@ temp/
 
 # Initialization script
 init-script.sh
+
+repomix-output.xml

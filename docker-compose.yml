@@ -5,9 +5,9 @@ services:
     image: postgres:15
     container_name: innogram-postgres
     environment:
-      POSTGRES_DB: innogram
-      POSTGRES_USER: innogram_user
-      POSTGRES_PASSWORD: innogram_password
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
@@ -29,8 +29,8 @@ services:
     image: rabbitmq:3-management
     container_name: innogram-rabbitmq
     environment:
-      RABBITMQ_DEFAULT_USER: innogram
-      RABBITMQ_DEFAULT_PASS: innogram_password
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
     ports:
       - "5672:5672"
       - "15672:15672"
