@@ -6,10 +6,7 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,
-    "baseUrl": ".",
-    "paths": {
-      "@repo/shared": ["packages/shared/src/index.ts"],
-      "@repo/shared/*": ["packages/shared/src/*"]
-    }
+    "moduleResolution": "node",
+    "baseUrl": "."
   }
 }
