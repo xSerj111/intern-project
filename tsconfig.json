@@ -1,36 +1,15 @@
 {
   "compilerOptions": {
-    "experimentalDecorators": true,
-    "emitDecoratorMetadata": true,
     "target": "ES2022",
     "lib": ["ES2022"],
-    "allowJs": true,
-    "skipLibCheck": true,
-    "ignoreDeprecations": "6.0",
     "strict": true,
-    "forceConsistentCasingInFileNames": true,
-    "noEmit": true,
+    "skipLibCheck": true,
     "esModuleInterop": true,
-    "module": "esnext",
-    "moduleResolution": "node",
     "resolveJsonModule": true,
-    "isolatedModules": true,
-    "jsx": "preserve",
-    "incremental": true,
-    "plugins": [
-      {
-        "name": "next"
-      }
-    ],
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./*"],
-      "@/shared/*": ["./packages/shared/*"],
-      "@/types/*": ["./packages/types/*"],
       "@repo/shared": ["packages/shared/src/index.ts"],
       "@repo/shared/*": ["packages/shared/src/*"]
     }
-  },
-  "include": ["**/*.ts", "**/*.tsx", "**/*.js", "**/*.jsx"],
-  "exclude": ["node_modules", "dist", "build", ".next"]
+  }
 }
