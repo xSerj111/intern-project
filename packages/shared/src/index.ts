@@ -1,1 +1,0 @@
-export * from './database/entities/user.entity';
