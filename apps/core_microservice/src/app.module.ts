@@ -2,8 +2,12 @@ import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { User } from '@repo/shared';
 import { ConfigModule, ConfigService } from '@nestjs/config'
+import { Comment } from './entities/comment.entity';
+import { UserProfile } from './entities/user-profile.entity';
+import { Follow } from './entities/follow.entity';
+import { Post } from './entities/post.entity';
+import { Like } from './entities/like.entity';
 
 
 
@@ -23,7 +27,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config'
         password: config.get<string>('POSTGRES_PASSWORD'),
         database: config.get<string>('POSTGRES_DB'),
 
-        entities: [User],
+        entities: [Comment, UserProfile, Follow, Post, Like],
         synchronize: false,
 
       }),

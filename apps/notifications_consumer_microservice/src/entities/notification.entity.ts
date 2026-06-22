@@ -1,4 +1,4 @@
-import { Column, Index, PrimaryGeneratedColumn } from "typeorm";
+import { Column, CreateDateColumn, DeleteDateColumn, Index, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
 
 @Entity('notifications')
 export class Notification {
