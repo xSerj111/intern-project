@@ -15,6 +15,10 @@ import { CommentLike } from './entities/comment-like.entity';
 import { Asset } from './entities/asset.entity';
 import { PostAsset } from './entities/post-asset.entity';
 import { ProfileToProfileConfiguration } from './entities/profile-to-profile-configuration.entity';
+import { Chat } from './entities/chat.entity';
+import { ChatParticipant } from './entities/chat-participant.entity';
+import { Message } from './entities/message.entity';
+import { MessageAsset } from './entities/message-asset.entity';
 
 @Module({
   imports: [
@@ -39,7 +43,7 @@ import { ProfileToProfileConfiguration } from './entities/profile-to-profile-con
         // Target the Core database
         database: config.get<string>('DB_NAME_CORE', 'innogram_core'),
         
-        entities: [UserProfile, Post, Comment, Follow, PostLike, CommentLike, Asset, PostAsset, ProfileToProfileConfiguration],
+        entities: [UserProfile, Post, Comment, Follow, PostLike, CommentLike, Asset, PostAsset, ProfileToProfileConfiguration, Chat, ChatParticipant, Message, MessageAsset],
         synchronize: false, // Strict migrations mode
       }),
     }),
