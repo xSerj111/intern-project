@@ -3,6 +3,7 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm'
+import { Notification } from './entities/notification.entity';
 
 
 @Module({
@@ -21,7 +22,7 @@ import { TypeOrmModule } from '@nestjs/typeorm'
         password: config.get<string>('POSTGRES_PASSWORD'),
         database: config.get<string>('POSTGRES_DB'),
 
-        entities: [],
+        entities: [Notification],
         synchronize: false,
 
       }),
