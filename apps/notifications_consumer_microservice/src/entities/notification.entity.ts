@@ -1,0 +1,4 @@
+@Entity
+export class Notification {
+
+}
