@@ -14,29 +14,29 @@ import { Post } from './post.entity';
 @Entity('comments')
 export class Comment {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ type: 'uuid' })
-  postId: string;
+  postId!: string;
 
   @ManyToOne(() => Post, (post) => post.comments, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'postId' })
-  post: Post;
+  post!: Post;
 
   // Logical reference to AuthUser
   @Index()
   @Column({ type: 'uuid' })
-  authorId: string;
+  authorId!: string;
 
   @Column({ type: 'text' })
-  content: string;
+  content!: string;
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn()
-  updatedAt: Date;
+  updatedAt!: Date;
 
   @DeleteDateColumn()
-  deletedAt: Date;
+  deletedAt!: Date;
 }
