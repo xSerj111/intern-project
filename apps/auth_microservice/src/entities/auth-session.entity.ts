@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
 import { AuthUser } from './auth-user.entity';
 
 @Entity('auth_sessions')
@@ -11,10 +11,18 @@ export class AuthSession {
 
   @Column()
   expiresAt: Date;
+  
+  // Added security tracking fields
+  @Column({ type: 'varchar', nullable: true })
+  ipAddress: string;
+
+  @Column({ type: 'varchar', nullable: true })
+  userAgent: string;
 
   @CreateDateColumn()
   createdAt: Date;
 
-  @ManyToOne(() => AuthUser)
+  @ManyToOne(() => AuthUser, { onDelete: 'CASCADE'})
+  @JoinColumn({ name: 'userId' }) // Explicitly names the DB column 'userId'
   user: AuthUser;
 }

@@ -1,4 +1,11 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn } from 'typeorm';
+import { 
+  Entity, 
+  PrimaryGeneratedColumn, 
+  Column, 
+  CreateDateColumn, 
+  UpdateDateColumn,
+  DeleteDateColumn
+} from 'typeorm';
 
 @Entity('auth_users')
 export class AuthUser {
@@ -14,6 +21,17 @@ export class AuthUser {
   @Column({ default: false })
   isEmailVerified: boolean;
 
+  // Optional roles array for future RBAC (Role-Based Access Control)
+  @Column({ type: 'simple-array', nullable: true })
+  roles: string[];
+
   @CreateDateColumn()
   createdAt: Date;
+
+  @UpdateDateColumn()
+  updatedAt: Date;
+
+  // Essential for the event-driven soft-delete strategy
+  @DeleteDateColumn()
+  deletedAt: Date;
 }
