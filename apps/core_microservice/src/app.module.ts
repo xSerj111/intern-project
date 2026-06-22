@@ -14,6 +14,7 @@ import { PostLike } from './entities/post-like.entity';
 import { CommentLike } from './entities/comment-like.entity';
 import { Asset } from './entities/asset.entity';
 import { PostAsset } from './entities/post-asset.entity';
+import { ProfileToProfileConfiguration } from './entities/profile-to-profile-configuration.entity';
 
 @Module({
   imports: [
@@ -38,7 +39,7 @@ import { PostAsset } from './entities/post-asset.entity';
         // Target the Core database
         database: config.get<string>('DB_NAME_CORE', 'innogram_core'),
         
-        entities: [UserProfile, Post, Comment, Follow, PostLike, CommentLike, Asset, PostAsset],
+        entities: [UserProfile, Post, Comment, Follow, PostLike, CommentLike, Asset, PostAsset, ProfileToProfileConfiguration],
         synchronize: false, // Strict migrations mode
       }),
     }),
