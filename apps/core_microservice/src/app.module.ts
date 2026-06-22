@@ -10,6 +10,8 @@ import { UserProfile } from './entities/user-profile.entity';
 import { Post } from './entities/post.entity';
 import { Comment } from './entities/comment.entity';
 import { Follow } from './entities/follow.entity';
+import { PostLike } from './entities/post-like.entity';
+import { CommentLike } from './entities/comment-like.entity';
 
 @Module({
   imports: [
@@ -34,7 +36,7 @@ import { Follow } from './entities/follow.entity';
         // Target the Core database
         database: config.get<string>('DB_NAME_CORE', 'innogram_core'),
         
-        entities: [UserProfile, Post, Comment, Follow],
+        entities: [UserProfile, Post, Comment, Follow, PostLike, CommentLike],
         synchronize: false, // Strict migrations mode
       }),
     }),
