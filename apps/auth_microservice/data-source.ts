@@ -8,18 +8,16 @@ dotenv.config({ path: join(__dirname, '../../.env') });
 
 export const AppDataSource = new DataSource({
   type: 'postgres',
-  host: process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT || '5432', 10),
-  username: process.env.DB_USER || 'postgres',
-  password: process.env.DB_PASSWORD || 'postgres',
-  // Specific database for the Auth microservice
+  host: process.env.POSTGRES_HOST || 'localhost',
+  port: parseInt(process.env.POSTGRES_PORT || '5432', 10),
+  username: process.env.POSTGRES_USER || 'postgres',
+  password: process.env.POSTGRES_PASSWORD || 'postgres',
+  
+  // We keep this specific to Auth so we don't mix tables with Core
   database: process.env.DB_NAME_AUTH || 'innogram_auth',
   
-  // 🚨 CRITICAL: Turn off synchronize because we are now using migrations!
   synchronize: false, 
   logging: true,
-  
-  // Dynamically load all entities and migrations
   entities: [join(__dirname, 'src/**/*.entity{.ts,.js}')],
   migrations: [join(__dirname, 'src/migrations/*{.ts,.js}')],
 });

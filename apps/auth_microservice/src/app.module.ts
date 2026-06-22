@@ -20,28 +20,19 @@ import * as path from 'path';
     TypeOrmModule.forRootAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
-      useFactory: (config: ConfigService) => {
-        const dbConnection = {
-          host: config.get('POSTGRES_HOST'),
-          port: config.get('POSTGRES_PORT'),
-          user: config.get('POSTGRES_USER'),
-          password: config.get('POSTGRES_PASSWORD'),
-          db: config.get('POSTGRES_DB'),
-        };
-
-        console.log('CONFIG dbConnection:', dbConnection);
-
-        return {
-          type: 'postgres',
-          host: dbConnection.host,
-          port: parseInt(dbConnection.port || '5432', 10),
-          username: dbConnection.user,
-          password: dbConnection.password,
-          database: dbConnection.db,
-          entities: [AuthUser, AuthSession],
-          synchronize: false,
-        };
-      },
+      useFactory: (config: ConfigService) => ({
+        type: 'postgres',
+        host: config.get<string>('POSTGRES_HOST', 'localhost'),
+        port: config.get<number>('POSTGRES_PORT', 5432),
+        username: config.get<string>('POSTGRES_USER', 'postgres'),
+        password: config.get<string>('POSTGRES_PASSWORD', 'postgres'),
+        
+        
+        database: config.get<string>('DB_NAME_AUTH', 'innogram_auth'),
+        
+        entities: [AuthUser, AuthSession],
+        synchronize: false,
+      }),
     }),
   ],
   controllers: [AppController],
