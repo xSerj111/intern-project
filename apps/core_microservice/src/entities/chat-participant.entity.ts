@@ -14,26 +14,26 @@ import { UserProfile } from './user-profile.entity';
 @Index(['chatId', 'userId'], { unique: true }) // A user can only be in a specific chat once
 export class ChatParticipant {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ type: 'uuid' })
-  chatId: string;
+  chatId!: string;
 
   @ManyToOne(() => Chat, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'chatId' })
-  chat: Chat;
+  chat!: Chat;
 
   @Column({ type: 'uuid' })
-  userId: string;
+  userId!: string;
 
   @ManyToOne(() => UserProfile, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'userId' })
-  user: UserProfile;
+  user!: UserProfile;
 
   // e.g., 'ADMIN' or 'MEMBER'
   @Column({ type: 'varchar', length: 20, default: 'MEMBER' })
-  role: string;
+  role!: string;
 
   @CreateDateColumn()
-  joinedAt: Date;
+  joinedAt!: Date;
 }

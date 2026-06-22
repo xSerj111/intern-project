@@ -14,23 +14,23 @@ import { Post } from './post.entity';
 @Index(['postId', 'userId'], { unique: true }) // Prevent duplicate likes on a post
 export class PostLike {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ type: 'uuid' })
-  postId: string;
+  postId!: string;
 
   @ManyToOne(() => Post, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'postId' })
-  post: Post;
+  post!: Post;
 
   // Logical reference to AuthUser
   @Index()
   @Column({ type: 'uuid' })
-  userId: string;
+  userId!: string;
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 
   @DeleteDateColumn()
-  deletedAt: Date; 
+  deletedAt!: Date; 
 }

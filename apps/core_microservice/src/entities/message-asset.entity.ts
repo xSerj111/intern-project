@@ -14,25 +14,25 @@ import { Asset } from './asset.entity';
 @Index(['messageId', 'assetId'], { unique: true })
 export class MessageAsset {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ type: 'uuid' })
-  messageId: string;
+  messageId!: string;
 
   @ManyToOne(() => Message, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'messageId' })
-  message: Message;
+  message!: Message;
 
   @Column({ type: 'uuid' })
-  assetId: string;
+  assetId!: string;
 
   @ManyToOne(() => Asset, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'assetId' })
-  asset: Asset;
+  asset!: Asset;
 
   @Column({ type: 'int', default: 0 })
-  displayOrder: number;
+  displayOrder!: number;
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 }

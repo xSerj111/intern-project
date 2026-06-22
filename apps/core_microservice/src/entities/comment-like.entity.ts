@@ -14,23 +14,23 @@ import { Comment } from './comment.entity';
 @Index(['commentId', 'userId'], { unique: true }) // Prevent duplicate likes on a comment
 export class CommentLike {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column({ type: 'uuid' })
-  commentId: string;
+  commentId!: string;
 
   @ManyToOne(() => Comment, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'commentId' })
-  comment: Comment;
+  comment!: Comment;
 
   // Logical reference to AuthUser
   @Index()
   @Column({ type: 'uuid' })
-  userId: string;
+  userId!: string;
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 
   @DeleteDateColumn()
-  deletedAt: Date; 
+  deletedAt!: Date; 
 }

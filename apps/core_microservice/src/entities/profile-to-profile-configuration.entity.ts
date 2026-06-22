@@ -14,38 +14,38 @@ import { UserProfile } from './user-profile.entity';
 @Index(['actorId', 'targetId'], { unique: true }) // Prevent duplicate config rows between the same two users
 export class ProfileToProfileConfiguration {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   // The profile who is setting the configuration
   @Column({ type: 'uuid' })
-  actorId: string;
+  actorId!: string;
 
   @ManyToOne(() => UserProfile, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'actorId' })
-  actor: UserProfile;
+  actor!: UserProfile;
 
   // The profile being targeted/configured
   @Column({ type: 'uuid' })
-  targetId: string;
+  targetId!: string;
 
   @ManyToOne(() => UserProfile, { onDelete: 'CASCADE' })
   @JoinColumn({ name: 'targetId' })
-  target: UserProfile;
+  target!: UserProfile;
 
   // --- Configuration Toggles ---
   
   @Column({ type: 'boolean', default: false })
-  isMuted: boolean;
+  isMuted!: boolean;
 
   @Column({ type: 'boolean', default: false })
-  isBlocked: boolean;
+  isBlocked!: boolean;
 
   @Column({ type: 'boolean', default: false })
-  isCloseFriend: boolean;
+  isCloseFriend!: boolean;
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn()
-  updatedAt: Date;
+  updatedAt!: Date;
 }

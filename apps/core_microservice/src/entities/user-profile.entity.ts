@@ -3,30 +3,30 @@ import { Column, CreateDateColumn, DeleteDateColumn, Entity, Index, PrimaryGener
 @Entity('user_profiles')
 export class UserProfile {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Index()
   @Column({ type: 'uuid', unique: true })
-  authUserId: string;
+  authUserId!: string;
 
   @Column({ type: "varchar", length: 50, unique: true })
-  username: string;
+  username!: string;
 
   @Column({ type: 'varchar', length: 100 })
-  displayName: string;
+  displayName!: string;
 
   @Column({ type: 'text', nullable: true })
-  bio: string;
+  bio?: string;
 
   @Column({ type: 'varchar', nullable: true })
-  avatarUrl: string;
+  avatarUrl?: string;
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn()
-  updatedAt: Date;
+  updatedAt!: Date;
 
   @DeleteDateColumn()
-  deletedAt: Date;
+  deletedAt!: Date;
 }

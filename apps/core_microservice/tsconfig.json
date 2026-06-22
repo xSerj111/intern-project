@@ -22,7 +22,7 @@
     "noImplicitAny": false,
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false,
-    "strictPropertyInitialization": false,
+    "strictPropertyInitialization": true,
     
     "paths": {
       "@repo/shared/*": ["../shared/src/"],

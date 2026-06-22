@@ -11,22 +11,22 @@ import {
 @Index(['followerId', 'followingId'], { unique: true }) // Prevent duplicate follows
 export class Follow {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   // Logical reference: The user who is initiating the follow
   @Index()
   @Column({ type: 'uuid' })
-  followerId: string;
+  followerId!: string;
 
   // Logical reference: The user being followed
   @Index()
   @Column({ type: 'uuid' })
-  followingId: string;
+  followingId!: string;
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 
   // Allows preserving historical follow data while visually "unfollowing"
   @DeleteDateColumn()
-  deletedAt: Date;
+  deletedAt!: Date;
 }

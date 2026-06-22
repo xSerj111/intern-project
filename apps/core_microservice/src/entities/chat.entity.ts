@@ -10,22 +10,22 @@ import {
 @Entity('chats')
 export class Chat {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   // 'DIRECT' (1-on-1) or 'GROUP'
   @Column({ type: 'varchar', length: 20, default: 'DIRECT' })
-  type: string; 
+  type!: string; 
 
   // Only really used for GROUP chats (e.g., "Weekend Trip")
   @Column({ type: 'varchar', nullable: true })
-  title: string;
+  title?: string;
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 
   @UpdateDateColumn()
-  updatedAt: Date;
+  updatedAt!: Date;
 
   @DeleteDateColumn()
-  deletedAt: Date;
+  deletedAt!: Date;
 }
