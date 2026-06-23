@@ -37,6 +37,10 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { User } from "@repo/shared";
+import { ProfilesModule } from './profiles/profiles.module';
+import { PostsModule } from './posts/posts.module';
+import { CommentsModule } from './comments/comments.module';
+import { ChatsModule } from './chats/chats.module';
 let AppModule = (() => {
     let _classDecorators = [Module({
             imports: [
