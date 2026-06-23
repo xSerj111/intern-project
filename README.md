@@ -73,7 +73,7 @@ innogram/
 - Real-time features
 
 ### Authentication Microservice (Port 3002)
-- NestJS service
+- Express.js service
 - JWT token management
 - OAuth 2.0 integration
 - Session management

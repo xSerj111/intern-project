@@ -1,5 +1,4 @@
 {
-  "extends": "../../tsconfig.json",
   "compilerOptions": {
     "module": "nodenext",
     "moduleResolution": "nodenext",
@@ -21,14 +20,6 @@
     "forceConsistentCasingInFileNames": true,
     "noImplicitAny": false,
     "strictBindCallApply": false,
-    "noFallthroughCasesInSwitch": false,
-    "strictPropertyInitialization": false,
-    
-    "paths": {
-      "@repo/shared/*": ["../shared/src/"],
-      "@repo/shared": ["../shared/src/index.ts"]
-    },
-  
-    
+    "noFallthroughCasesInSwitch": false
   }
 }
