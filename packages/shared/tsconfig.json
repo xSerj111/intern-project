@@ -3,11 +3,12 @@
   "compilerOptions": {
     "outDir": "dist",
     "rootDir": "src",
+    "declaration": true,
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
     "module": "commonjs",
     "target": "ES2022",
     "skipLibCheck": true
   },
-  "include": ["src", "index.ts"]
+  "include": ["src/**/*"]
 }
