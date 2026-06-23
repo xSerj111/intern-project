@@ -4,25 +4,25 @@ import { AuthUser } from './auth-user.entity';
 @Entity('auth_sessions')
 export class AuthSession {
   @PrimaryGeneratedColumn('uuid')
-  id: string;
+  id!: string;
 
   @Column()
-  refreshToken: string;
+  refreshToken!: string;
 
   @Column()
-  expiresAt: Date;
+  expiresAt!: Date;
   
   // Added security tracking fields
   @Column({ type: 'varchar', nullable: true })
-  ipAddress: string;
+  ipAddress?: string;
 
   @Column({ type: 'varchar', nullable: true })
-  userAgent: string;
+  userAgent?: string;
 
   @CreateDateColumn()
-  createdAt: Date;
+  createdAt!: Date;
 
   @ManyToOne(() => AuthUser, { onDelete: 'CASCADE'})
   @JoinColumn({ name: 'userId' }) // Explicitly names the DB column 'userId'
-  user: AuthUser;
+  user!: AuthUser;
 }
