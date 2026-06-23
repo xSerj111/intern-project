@@ -6,9 +6,12 @@ import {
   UpdateDateColumn, 
   DeleteDateColumn, 
   OneToMany, 
-  Index 
+  Index, 
+  ManyToOne,
+  JoinColumn
 } from 'typeorm';
 import { Comment } from './comment.entity';
+import { UserProfile } from './user-profile.entity';
 
 @Entity('posts')
 export class Post {
@@ -18,6 +21,10 @@ export class Post {
   @Index()
   @Column({ type: 'uuid' })
   authorId!: string;
+
+  @ManyToOne(() => UserProfile)
+  @JoinColumn({ name: 'authorId' })
+  author!: UserProfile;
 
   @Column({ type: 'text' })
   content!: string;
