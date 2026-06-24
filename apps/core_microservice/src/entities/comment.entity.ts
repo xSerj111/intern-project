@@ -10,6 +10,7 @@ import {
   Index
 } from 'typeorm';
 import { Post } from './post.entity';
+import { UserProfile } from './user-profile.entity';
 
 @Entity('comments')
 export class Comment {
@@ -27,6 +28,10 @@ export class Comment {
   @Index()
   @Column({ type: 'uuid' })
   authorId!: string;
+
+  @ManyToOne(() => UserProfile)
+  @JoinColumn({ name: 'authorId'})
+  author!: UserProfile;
 
   @Column({ type: 'text' })
   content!: string;
