@@ -19,14 +19,18 @@ import { Chat } from './entities/chat.entity';
 import { ChatParticipant } from './entities/chat-participant.entity';
 import { Message } from './entities/message.entity';
 import { MessageAsset } from './entities/message-asset.entity';
+import { ProfilesModule } from './profiles/profiles.module';
+import { PostsModule } from './posts/posts.module';
+import { CommentsModule } from './comments/comments.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: [
-        path.resolve(process.cwd(), '.env'),
-        path.resolve(process.cwd(), '../../.env'),
+        // path.resolve(process.cwd(), '.env'),
+        // path.resolve(process.cwd(), '../../.env'),
+        '.env', '../../.env'
       ],
     }),
 
@@ -47,8 +51,11 @@ import { MessageAsset } from './entities/message-asset.entity';
         synchronize: false, // Strict migrations mode
       }),
     }),
+    ProfilesModule,
+    PostsModule,
+    CommentsModule,
   ],
-  controllers: [AppController],
-  providers: [AppService],
+  // controllers: [AppController],
+  // providers: [AppService],
 })
 export class AppModule {}

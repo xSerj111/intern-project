@@ -6,14 +6,16 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthUser } from './entities/auth-user.entity';
 import { AuthSession } from './entities/auth-session.entity';
 import * as path from 'path';
+import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: [
-        path.resolve(process.cwd(), '.env'),
-        path.resolve(process.cwd(), '../../.env'),
+        // path.resolve(process.cwd(), '.env'),
+        // path.resolve(process.cwd(), '../../.env'),
+        '.env', '../../.env',
       ],
     }),
 
@@ -34,8 +36,9 @@ import * as path from 'path';
         synchronize: false,
       }),
     }),
+    UsersModule
   ],
-  controllers: [AppController],
-  providers: [AppService],
+  // controllers: [AppController],
+  // providers: [AppService],
 })
 export class AppModule {}
