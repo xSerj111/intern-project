@@ -24,6 +24,15 @@ export class Comment {
   @JoinColumn({ name: 'postId' })
   post!: Post;
 
+  //ID for the parent comment (nullable because top-level comments have no parents)
+  @Column({ type: 'uuid', nullable: true })
+  parentId?: string;
+
+  // if the parent comment deleted, nested also deleted
+  @ManyToOne(() => Comment, { onDelete: 'CASCADE', nullable: true })
+  @JoinColumn({ name: 'parentId' })
+  parent?: Comment;
+
   // Logical reference to AuthUser
   @Index()
   @Column({ type: 'uuid' })

@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { CreatePostDto } from '@repo/shared';
+import { CreatePostDto, UpdatePostDto } from '@repo/shared';
 import { Post } from 'src/entities/post.entity';
 import { Repository } from 'typeorm';
 
@@ -35,6 +35,16 @@ export class PostsService {
       throw new NotFoundException(`Post with ID ${id} not found`);
     }
     return post;
+  }
+
+  async updatePost(id: string, updatePostDto: UpdatePostDto): Promise<Post> {
+    const post = await this.getPost(id);
+
+    if (updatePostDto.content) {
+      post.content = updatePostDto.content;
+    }
+
+    return this.postRepository.save(post);
   }
 
   async softDeletePost(id: string): Promise<void> {

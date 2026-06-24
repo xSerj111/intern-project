@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, IsUUID, MaxLength } from "class-validator";
+import { IsNotEmpty, IsOptional, IsString, IsUUID, MaxLength } from "class-validator";
 
 export class CreateCommentDto {
   @IsUUID()
@@ -11,4 +11,9 @@ export class CreateCommentDto {
   @IsNotEmpty()
   @MaxLength(300, { message: 'Comments cannot exceed 300 characters' })
   content!: string;
+
+  // Option ID of the comment being replied to
+  @IsOptional()
+  @IsUUID()
+  parentId?: string;
 }

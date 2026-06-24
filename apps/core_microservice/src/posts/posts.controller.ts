@@ -1,6 +1,6 @@
 import { Controller, Get, Post as HttpPost, Body, Patch, Param, Delete, HttpCode, HttpStatus } from '@nestjs/common';
 import { PostsService } from './posts.service';
-import { CreatePostDto } from '@repo/shared';
+import { CreatePostDto, UpdatePostDto } from '@repo/shared';
 
 @Controller('posts')
 export class PostsController {
@@ -14,6 +14,14 @@ export class PostsController {
   @Get(':id')
   async getPost(@Param('id') id: string) {
     return this.postsService.getPost(id);
+  }
+
+  @Patch(':id')
+  async updatePost(
+    @Param('id') id: string,
+    @Body() updatePostDto: UpdatePostDto,
+  ) {
+    return this.postsService.updatePost(id, updatePostDto);
   }
 
   @Delete(':id')
