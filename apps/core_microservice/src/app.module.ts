@@ -1,61 +1,35 @@
 import { Module } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { ConfigModule, ConfigService } from '@nestjs/config';
-import * as path from 'path';
 
-// Import all Core entities
-import { UserProfile } from './entities/user-profile.entity';
-import { Post } from './entities/post.entity';
-import { Comment } from './entities/comment.entity';
-import { Follow } from './entities/follow.entity';
-import { PostLike } from './entities/post-like.entity';
-import { CommentLike } from './entities/comment-like.entity';
-import { Asset } from './entities/asset.entity';
-import { PostAsset } from './entities/post-asset.entity';
-import { ProfileToProfileConfiguration } from './entities/profile-to-profile-configuration.entity';
-import { Chat } from './entities/chat.entity';
-import { ChatParticipant } from './entities/chat-participant.entity';
-import { Message } from './entities/message.entity';
-import { MessageAsset } from './entities/message-asset.entity';
-import { ProfilesModule } from './profiles/profiles.module';
-import { PostsModule } from './posts/posts.module';
-import { CommentsModule } from './comments/comments.module';
+import { AppConfigModule } from './config/app-config.module';
+import { AppConfigService } from './config/app-config.service';
+import { ProfilesModule } from './modules/profiles/profiles.module';
+import { PostsModule } from './modules/posts/posts.module';
+import { CommentsModule } from './modules/comments/comments.module';
+import { ChatsModule } from './modules/chats/chats.module';
+import { AssetsModule } from './modules/assets/assets.module';
+import { FollowsModule } from './modules/follows/follows.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({
-      isGlobal: true,
-      envFilePath: [
-        // path.resolve(process.cwd(), '.env'),
-        // path.resolve(process.cwd(), '../../.env'),
-        '.env', '../../.env'
-      ],
-    }),
+    AppConfigModule,
 
     TypeOrmModule.forRootAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        type: 'postgres',
-        host: config.get<string>('POSTGRES_HOST', 'localhost'),
-        port: config.get<number>('POSTGRES_PORT', 5432),
-        username: config.get<string>('POSTGRES_USER', 'postgres'),
-        password: config.get<string>('POSTGRES_PASSWORD', 'postgres'),
-        
-        // Target the Core database
-        database: config.get<string>('DB_NAME_CORE', 'innogram_core'),
-        
-        entities: [UserProfile, Post, Comment, Follow, PostLike, CommentLike, Asset, PostAsset, ProfileToProfileConfiguration, Chat, ChatParticipant, Message, MessageAsset],
-        synchronize: false, // Strict migrations mode
+      inject: [AppConfigService],
+      // Entities are registered by each feature module via TypeOrmModule.forFeature();
+      // autoLoadEntities pulls them in, so the root never lists entities itself.
+      useFactory: (config: AppConfigService) => ({
+        ...config.postgres,
+        autoLoadEntities: true,
       }),
     }),
+
     ProfilesModule,
     PostsModule,
     CommentsModule,
+    ChatsModule,
+    AssetsModule,
+    FollowsModule,
   ],
-  // controllers: [AppController],
-  // providers: [AppService],
 })
 export class AppModule {}

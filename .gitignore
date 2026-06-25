@@ -10,6 +10,19 @@ build/
 .next/
 out/
 
+# Monorepo task caches (Turbo / Nx)
+.turbo/
+.nx/cache
+.nx/workspace-data
+
+# TypeScript incremental build info
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+
+# Editor / OS backup files
+*.save
+*~
+
 # Environment variables
 .env
 .env.local

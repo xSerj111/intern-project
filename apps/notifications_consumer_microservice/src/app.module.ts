@@ -26,7 +26,10 @@ import { Notification } from './entities/notification.entity';
         port: config.get<number>('POSTGRES_PORT', 5432),
         username: config.get<string>('POSTGRES_USER', 'postgres'),
         password: config.get<string>('POSTGRES_PASSWORD', 'postgres'),
-        database: config.get<string>('DB_NAME_NOTIFICATIONS', 'innogram_notifications'),
+        database: config.get<string>(
+          'DB_NAME_NOTIFICATIONS',
+          'innogram_notifications',
+        ),
         entities: [Notification],
         synchronize: false,
       }),

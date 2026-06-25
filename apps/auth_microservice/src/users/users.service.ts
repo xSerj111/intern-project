@@ -2,9 +2,8 @@ import { ConflictException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { AuthUser } from 'src/entities/auth-user.entity';
 import { Repository } from 'typeorm';
-import { CreateUserDto } from '@repo/shared'
+import { CreateUserDto } from '@repo/shared';
 import * as bcrypt from 'bcrypt';
-
 
 @Injectable()
 export class UsersService {
@@ -17,7 +16,9 @@ export class UsersService {
     const { email, password } = createUserDto;
 
     // Check if user already exists
-    const existingUser = await this.usersRepository.findOne({ where: { email } });
+    const existingUser = await this.usersRepository.findOne({
+      where: { email },
+    });
     if (existingUser) {
       throw new ConflictException('Email is already registered');
     }
@@ -42,7 +43,4 @@ export class UsersService {
   async findByEmail(email: string): Promise<AuthUser | null> {
     return this.usersRepository.findOne({ where: { email } });
   }
- 
-
-  
 }

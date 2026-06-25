@@ -15,7 +15,8 @@ import { UsersModule } from './users/users.module';
       envFilePath: [
         // path.resolve(process.cwd(), '.env'),
         // path.resolve(process.cwd(), '../../.env'),
-        '.env', '../../.env',
+        '.env',
+        '../../.env',
       ],
     }),
 
@@ -28,15 +29,14 @@ import { UsersModule } from './users/users.module';
         port: config.get<number>('POSTGRES_PORT', 5432),
         username: config.get<string>('POSTGRES_USER', 'postgres'),
         password: config.get<string>('POSTGRES_PASSWORD', 'postgres'),
-        
-        
+
         database: config.get<string>('DB_NAME_AUTH', 'innogram_auth'),
-        
+
         entities: [AuthUser, AuthSession],
         synchronize: false,
       }),
     }),
-    UsersModule
+    UsersModule,
   ],
   // controllers: [AppController],
   // providers: [AppService],
