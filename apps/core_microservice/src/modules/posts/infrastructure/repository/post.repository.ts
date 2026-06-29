@@ -8,6 +8,7 @@ import type { PostProps } from '../../domain/interfaces/post.props';
 
 @Injectable()
 export class PostRepository extends TypeormRepositoryBase<Post, PostProps> {
+
   public static readonly entity = Post;
   // Joined by default so reads include the post's author profile.
   protected relations: string[] = ['author'];

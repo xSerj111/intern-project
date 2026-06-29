@@ -1,3 +1,4 @@
+import { TypeormEntityBase } from '@repo/shared';
 import {
   Entity,
   PrimaryGeneratedColumn,
@@ -5,13 +6,14 @@ import {
   CreateDateColumn,
   Index,
   DeleteDateColumn,
+  Unique,
 } from 'typeorm';
+import { FollowProps } from '../interfaces/follow.props';
 
 @Entity('follows')
-@Index(['followerId', 'followingId'], { unique: true }) // Prevent duplicate follows
-export class Follow {
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
+@Unique(['followerId', 'followingId'])
+// @Index(['followerId', 'followingId'], { unique: true }) // Prevent duplicate follows
+export class Follow extends TypeormEntityBase implements FollowProps{
 
   // Logical reference: The user who is initiating the follow
   @Index()
@@ -23,10 +25,10 @@ export class Follow {
   @Column({ type: 'uuid' })
   followingId!: string;
 
-  @CreateDateColumn()
-  createdAt!: Date;
-
-  // Allows preserving historical follow data while visually "unfollowing"
-  @DeleteDateColumn()
-  deletedAt!: Date;
+  static create(props: FollowProps): Follow {
+    const follow = new Follow();
+    follow.followerId = props.followerId;
+    follow.followingId = props.followerId;
+    return follow;
+  }
 }
