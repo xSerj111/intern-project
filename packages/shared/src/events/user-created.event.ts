@@ -4,5 +4,5 @@ export class UserCreatedEvent {
     public readonly email: string,
     public readonly handle: string,
     public readonly timestap: Date,
-  ) {} 
+  ) {}
 }

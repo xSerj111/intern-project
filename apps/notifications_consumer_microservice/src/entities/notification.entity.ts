@@ -1,8 +1,15 @@
-import { Column, CreateDateColumn, DeleteDateColumn, Entity, Index, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
+import {
+  Column,
+  CreateDateColumn,
+  DeleteDateColumn,
+  Entity,
+  Index,
+  PrimaryGeneratedColumn,
+  UpdateDateColumn,
+} from 'typeorm';
 
 @Entity('notifications')
 export class Notification {
-
   @PrimaryGeneratedColumn()
   id!: string;
 
@@ -15,7 +22,6 @@ export class Notification {
   @Index()
   @Column({ type: 'varchar', length: 50 })
   type!: string;
-
 
   // Flexible payload to store event-specific data (e.g., { actorId: '...', postId: '...' })
   // 'jsonb' is highly optimized in PostgreSQL
@@ -34,5 +40,4 @@ export class Notification {
   // Supports eventual consistency and user data deletion
   @DeleteDateColumn()
   deletedAt!: Date;
-
 }
