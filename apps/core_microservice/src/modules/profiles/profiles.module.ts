@@ -5,10 +5,12 @@ import { ProfileToProfileConfiguration } from './domain/entities/profile-to-prof
 import { ProfilesService } from './profiles.service';
 import { ProfilesController } from './profiles.controller';
 import { UserProfileRepository } from './infrastructure/repository/user-profile.repository';
+import { LoggerModule } from '@repo/shared';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([UserProfile, ProfileToProfileConfiguration]),
+    LoggerModule.forFeature('ProfilesService'),
   ],
   controllers: [ProfilesController],
   providers: [ProfilesService, UserProfileRepository],
