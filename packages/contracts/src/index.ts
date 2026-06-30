@@ -3,3 +3,4 @@
 export * from "./common";
 export * from "./profiles";
 export * from './follows';
+export * from './chats';
