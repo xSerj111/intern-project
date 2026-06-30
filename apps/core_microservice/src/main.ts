@@ -2,14 +2,16 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { DomainExceptionFilter } from '@repo/shared';
+import { DomainExceptionFilter, WinstonLogger } from '@repo/shared';
 import { AppConfigService } from './config/app-config.service';
 import 'reflect-metadata';
 import * as cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, {
+    logger: new WinstonLogger('CoreSystem'),
+  });
 
   // 1. HELMET - Ustawia bezpieczne nagłówki HTTP (np. ukrywa X-Powered-By)
   app.use(helmet());
