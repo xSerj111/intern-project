@@ -1,30 +1,28 @@
-import { ValidationPipe } from '@nestjs/common';
-import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { DomainExceptionFilter, WinstonLogger } from '@repo/shared';
-import 'reflect-metadata';
+import dotenv from 'dotenv';
+import { resolve } from 'path';
+import { WinstonLogger } from '@repo/shared';
+import app from './app';
+import { initDatabase } from './config/database';
 
-async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
-    logger: new WinstonLogger('AuthSystem'),
+// Load .env from monorepo root first, then local
+dotenv.config({ path: resolve(__dirname, '../../.env') });
+dotenv.config();
+
+const logger = new WinstonLogger('AuthMicroservice');
+
+async function bootstrap(): Promise<void> {
+  try {
+    await initDatabase();
+    logger.info('Database connection established');
+  } catch (err) {
+    logger.error('Failed to connect to database', { error: err });
+    process.exit(1);
+  }
+
+  const port = process.env.PORT || 3001;
+  app.listen(port, () => {
+    logger.info(`Auth Microservice running on port ${port}`);
   });
-
-  // Validate & sanitize incoming DTOs; map domain errors -> HTTP (shared infra).
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-  app.useGlobalFilters(new DomainExceptionFilter());
-
-  const config = new DocumentBuilder()
-    .setTitle('Innogram Auth Api')
-    .setDescription('The identity and authentication layer for Innogram')
-    .setVersion('1.0')
-    .addTag('Users')
-    .build();
-
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api', app, document);
-
-  await app.listen(process.env.PORT || 3001);
-  console.log(`Auth microservice runs on ${process.env.PORT}`);
 }
+
 bootstrap();
