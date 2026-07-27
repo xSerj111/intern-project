@@ -2,11 +2,11 @@ import type { DataSource } from 'typeorm';
 import type { WinstonLogger } from '@repo/shared';
 // Załóżmy, że mamy encję i dto w shared:
 import {
-  AuthUser,
   CreateUserDto,
   UniqueConstraintViolationError,
   EntityNotFoundError,
 } from '@repo/shared';
+import { AuthUser } from 'src/entities/auth-user.entity';
 import * as bcrypt from 'bcrypt';
 
 export class UsersService {

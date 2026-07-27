@@ -1,28 +1,30 @@
-import dotenv from 'dotenv';
-import { resolve } from 'path';
-import { WinstonLogger } from '@repo/shared';
-import app from './app';
-import { initDatabase } from './config/database';
-
-// Load .env from monorepo root first, then local
-dotenv.config({ path: resolve(__dirname, '../../.env') });
+import * as dotenv from 'dotenv';
 dotenv.config();
 
-const logger = new WinstonLogger('AuthMicroservice');
+import { WinstonLogger } from '@repo/shared';
+import { initDatabase } from './config/database';
+import { createApp } from './app';
 
-async function bootstrap(): Promise<void> {
+async function bootstrap() {
+  const logger = new WinstonLogger('AuthMicroservice');
+
   try {
-    await initDatabase();
-    logger.info('Database connection established');
-  } catch (err) {
-    logger.error('Failed to connect to database', { error: err });
+    // 1. Inicjalizacja bazy danych (funkcja wygenerowana przez DeepCode)
+    const dataSource = await initDatabase();
+    logger.debug('Database connected successfully');
+
+    // 2. Inicjalizacja aplikacji Express z wstrzykniętymi zależnościami
+    const app = createApp(dataSource, logger);
+    const port = process.env.PORT || 3001;
+
+    // 3. Uruchomienie serwera
+    app.listen(port, () => {
+      logger.info(`Auth Microservice is running on port ${port}`);
+    });
+  } catch (error) {
+    logger.error('Failed to start Auth Microservice', { error });
     process.exit(1);
   }
-
-  const port = process.env.PORT || 3001;
-  app.listen(port, () => {
-    logger.info(`Auth Microservice running on port ${port}`);
-  });
 }
 
 bootstrap();
