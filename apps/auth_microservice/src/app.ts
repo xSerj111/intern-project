@@ -5,6 +5,7 @@ import { WinstonLogger } from '@repo/shared';
 import { createUsersRouter } from './routes/users.routes';
 import { errorHandler } from './middleware/error-handler.middleware';
 import { UsersService } from './services/users.service';
+import { setupSwagger } from './config/swagger';
 
 const app = express();
 
@@ -22,6 +23,8 @@ export function createApp(
 
   app.use(cors());
   app.use(express.json());
+
+  setupSwagger(app);
 
   const usersService = new UsersService(dataSource, logger);
 
