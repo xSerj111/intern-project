@@ -3,6 +3,7 @@ import {
   EntityNotFoundError,
   UniqueConstraintViolationError,
   DatabaseQueryError,
+  UnauthorizedError,
 } from '@repo/shared';
 import { NextFunction, Request, Response } from 'express';
 
@@ -22,6 +23,7 @@ export function errorHandler(
   if (err instanceof EntityNotFoundError) status = 404;
   else if (err instanceof UniqueConstraintViolationError) status = 409;
   else if (err instanceof DatabaseQueryError) status = 500;
+  else if (err instanceof UnauthorizedError) status = 401;
 
   res.status(status).json({
     statusCode: status,

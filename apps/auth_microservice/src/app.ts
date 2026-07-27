@@ -1,20 +1,15 @@
 import express, { Application } from 'express';
 import cors from 'cors';
 import { DataSource } from 'typeorm';
-import { WinstonLogger } from '@repo/shared';
+import type { WinstonLogger } from '@repo/shared';
+
 import { createUsersRouter } from './routes/users.routes';
+import { createAuthRouter } from './routes/auth.routes';
 import { errorHandler } from './middleware/error-handler.middleware';
 import { UsersService } from './services/users.service';
+import { AuthService } from './services/auth.service';
 import { setupSwagger } from './config/swagger';
 import { RedisService } from './services/redis.service';
-
-const app = express();
-
-// Global middlewares
-app.use(express.json());
-app.use(cors());
-
-// Routes and error handler will be added in Phase 3
 
 export function createApp(
   dataSource: DataSource,
@@ -29,8 +24,10 @@ export function createApp(
   setupSwagger(app);
 
   const usersService = new UsersService(dataSource, logger);
+  const authService = new AuthService(usersService, redisService, logger); // <-- DODANE
 
   app.use('/users', createUsersRouter(usersService));
+  app.use('/auth', createAuthRouter(authService)); // <-- DODANE
 
   app.use(errorHandler);
 

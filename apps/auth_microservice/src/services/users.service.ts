@@ -53,4 +53,9 @@ export class UsersService {
     const { passwordHash: _, ...safeUser } = user;
     return safeUser;
   }
+
+  async findByEmailWithPassword(email: string): Promise<AuthUser | null> {
+    const repo = this.dataSource.getRepository(AuthUser);
+    return repo.findOne({ where: { email } });
+  }
 }

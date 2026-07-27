@@ -27,3 +27,9 @@ export class EntityNotFoundError extends DomainError {
     super(`${entity} not found for criteria ${JSON.stringify(criteria)}`);
   }
 }
+
+export class UnauthorizedError extends DomainError {
+  constructor(message = "Invalid credentials") {
+    super(message);
+  }
+}
