@@ -6,7 +6,7 @@ import {
   UniqueConstraintViolationError,
   EntityNotFoundError,
 } from '@repo/shared';
-import { AuthUser } from 'src/entities/auth-user.entity';
+import { AuthUser } from '../entities/auth-user.entity';
 import * as bcrypt from 'bcrypt';
 
 export class UsersService {

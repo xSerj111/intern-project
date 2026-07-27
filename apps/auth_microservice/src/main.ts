@@ -1,5 +1,8 @@
+import 'reflect-metadata';
 import * as dotenv from 'dotenv';
-dotenv.config();
+import * as path from 'path';
+
+dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 
 import { WinstonLogger } from '@repo/shared';
 import { initDatabase } from './config/database';
