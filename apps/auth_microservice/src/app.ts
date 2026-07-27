@@ -6,6 +6,7 @@ import { createUsersRouter } from './routes/users.routes';
 import { errorHandler } from './middleware/error-handler.middleware';
 import { UsersService } from './services/users.service';
 import { setupSwagger } from './config/swagger';
+import { RedisService } from './services/redis.service';
 
 const app = express();
 
@@ -18,6 +19,7 @@ app.use(cors());
 export function createApp(
   dataSource: DataSource,
   logger: WinstonLogger,
+  redisService: RedisService,
 ): Application {
   const app = express();
 
