@@ -1,4 +1,5 @@
 import { WinstonLogger } from '@repo/shared';
+import { Redis } from 'ioredis';
 
 export class RedisService {
   constructor(
