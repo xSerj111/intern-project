@@ -42,4 +42,4 @@ export class ProfilesService {
     this.logger.debug('Profile updated', { props: { profileId: updatedProfile.id } });
     return updatedProfile;
   }
-}
+}3
