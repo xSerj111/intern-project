@@ -1,8 +1,5 @@
 import 'reflect-metadata';
-import * as dotenv from 'dotenv';
-import * as path from 'path';
-
-dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
+import { env } from './config/env';
 
 import { WinstonLogger } from '@repo/shared';
 import { initDatabase } from './config/database';
@@ -23,7 +20,7 @@ async function bootstrap() {
 
     // 2. Inicjalizacja aplikacji Express z wstrzykniętymi zależnościami
     const app = createApp(dataSource, logger, redisService);
-    const port = process.env.PORT || 3001;
+    const port = env.app.port;
 
     // 3. Uruchomienie serwera
     const server = app.listen(port, () => {

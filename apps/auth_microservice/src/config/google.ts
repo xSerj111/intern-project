@@ -1,5 +1,5 @@
+import { env } from './env';
+
 export const googleConfig = {
-  clientId:
-    process.env.GOOGLE_CLIENT_ID ||
-    'dev-google-client-id.apps.googleusercontent.com',
+  clientId: env.google.clientId,
 };
