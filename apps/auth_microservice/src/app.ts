@@ -2,6 +2,8 @@ import express, { Application } from 'express';
 import cors from 'cors';
 import { DataSource } from 'typeorm';
 import type { WinstonLogger } from '@repo/shared';
+import { BcryptService } from './infrastructure/crypto/crypto.service';
+import { AuthUserRepository } from './infrastructure/repositories/auth-user.repository';
 
 import { createUsersRouter } from './routes/users.routes';
 import { createAuthRouter } from './routes/auth.routes';
@@ -9,7 +11,7 @@ import { errorHandler } from './middleware/error-handler.middleware';
 import { UsersService } from './services/users.service';
 import { AuthService } from './services/auth.service';
 import { setupSwagger } from './config/swagger';
-import { RedisService } from './services/redis.service';
+import { RedisService } from './infrastructure/cache/redis.service';
 
 export function createApp(
   dataSource: DataSource,
@@ -23,8 +25,21 @@ export function createApp(
 
   setupSwagger(app);
 
-  const usersService = new UsersService(dataSource, logger);
-  const authService = new AuthService(usersService, redisService, logger); // <-- DODANE
+  const cryptoService = new BcryptService();
+
+  const authUserRepository = new AuthUserRepository(dataSource);
+
+  const usersService = new UsersService(
+    authUserRepository,
+    logger,
+    cryptoService,
+  );
+  const authService = new AuthService(
+    usersService,
+    redisService,
+    logger,
+    cryptoService,
+  ); // <-- DODANE
 
   app.use('/users', createUsersRouter(usersService));
   app.use('/auth', createAuthRouter(authService)); // <-- DODANE

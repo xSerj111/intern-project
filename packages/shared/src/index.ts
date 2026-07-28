@@ -6,6 +6,7 @@ export * from "./dtos/core/create-post.dto";
 export * from "./dtos/core/create-comment.dto";
 export * from "./dtos/core/update-post.dto";
 export * from "./dtos/core/update-comment.dto";
+export * from "./dtos/auth/google-login.dto";
 
 // Events
 export * from "./events/user-created.event";
