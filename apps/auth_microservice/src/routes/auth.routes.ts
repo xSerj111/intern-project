@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { AuthService } from '../services/auth.service';
 import { validateBody } from '../middleware/validate.middleware';
-import { LoginDto } from '@repo/shared';
+import { GoogleLoginDto, LoginDto } from '@repo/shared';
 
 export function createAuthRouter(authService: AuthService): Router {
   const router = Router();
@@ -40,6 +40,22 @@ export function createAuthRouter(authService: AuthService): Router {
       next(error);
     }
   });
+
+  /**
+   * Google OAuth 2.0 login
+   */
+  router.post(
+    '/google',
+    validateBody(GoogleLoginDto),
+    async (req, res, next) => {
+      try {
+        const result = await authService.loginWithGoogle(req.body);
+        res.status(200).json(result);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
 
   return router;
 }
