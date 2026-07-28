@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import bcrypt from 'bcrypt';
+import { ICryptoService } from './crypto.service';
 import { GoogleLoginDto, UnauthorizedError, WinstonLogger } from '@repo/shared';
 import { UsersService } from './users.service';
 import { RedisService } from './redis.service';
@@ -20,6 +20,7 @@ export class AuthService {
     private readonly usersService: UsersService,
     private readonly redisService: RedisService,
     private readonly logger: WinstonLogger,
+    private readonly cryptoService: ICryptoService,
   ) {}
 
   async login(dto: LoginDto): Promise<LoginResult> {
@@ -32,7 +33,10 @@ export class AuthService {
       throw new UnauthorizedError('Invalid email or password');
     }
 
-    const isValid = await bcrypt.compare(dto.password, user.passwordHash);
+    const isValid = await this.cryptoService.compare(
+      dto.password,
+      user.passwordHash,
+    );
     if (!isValid) {
       this.logger.debug('Login failed: invalid password', {
         props: { userId: user.id },

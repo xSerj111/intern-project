@@ -2,6 +2,7 @@ import express, { Application } from 'express';
 import cors from 'cors';
 import { DataSource } from 'typeorm';
 import type { WinstonLogger } from '@repo/shared';
+import { BcryptService } from './services/crypto.service';
 
 import { createUsersRouter } from './routes/users.routes';
 import { createAuthRouter } from './routes/auth.routes';
@@ -23,8 +24,15 @@ export function createApp(
 
   setupSwagger(app);
 
-  const usersService = new UsersService(dataSource, logger);
-  const authService = new AuthService(usersService, redisService, logger); // <-- DODANE
+  const cryptoService = new BcryptService();
+
+  const usersService = new UsersService(dataSource, logger, cryptoService);
+  const authService = new AuthService(
+    usersService,
+    redisService,
+    logger,
+    cryptoService,
+  ); // <-- DODANE
 
   app.use('/users', createUsersRouter(usersService));
   app.use('/auth', createAuthRouter(authService)); // <-- DODANE

@@ -1,5 +1,6 @@
 import type { DataSource } from 'typeorm';
 import type { WinstonLogger } from '@repo/shared';
+import { ICryptoService } from './crypto.service';
 // Załóżmy, że mamy encję i dto w shared:
 import {
   CreateUserDto,
@@ -7,12 +8,13 @@ import {
   EntityNotFoundError,
 } from '@repo/shared';
 import { AuthUser } from '../entities/auth-user.entity';
-import * as bcrypt from 'bcrypt';
+
 
 export class UsersService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly logger: WinstonLogger,
+    private readonly cryptoService: ICryptoService,
   ) {}
 
   async registerUser(
@@ -29,7 +31,7 @@ export class UsersService {
       );
     }
 
-    const passwordHash = await bcrypt.hash(dto.password, 10);
+    const passwordHash = await this.cryptoService.hash(dto.password, 10);
     const user = repo.create({
       email: dto.email,
       passwordHash,
