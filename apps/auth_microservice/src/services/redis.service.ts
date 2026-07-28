@@ -1,7 +1,8 @@
 import { WinstonLogger } from '@repo/shared';
 import { Redis } from 'ioredis';
+import { ICacheService } from './interfaces/cache.service';
 
-export class RedisService {
+export class RedisService implements ICacheService {
   constructor(
     private readonly client: Redis,
     private readonly logger: WinstonLogger,

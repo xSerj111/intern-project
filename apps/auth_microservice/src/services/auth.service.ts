@@ -8,6 +8,7 @@ import { LoginDto } from '@repo/shared';
 import { AuthUser } from '../entities/auth-user.entity';
 import { OAuth2Client } from 'google-auth-library';
 import { googleConfig } from '../config/google';
+import { ICacheService } from './interfaces/cache.service';
 
 export interface LoginResult {
   accessToken: string;
@@ -18,7 +19,7 @@ export interface LoginResult {
 export class AuthService {
   constructor(
     private readonly usersService: UsersService,
-    private readonly redisService: RedisService,
+    private readonly cacheService: ICacheService,
     private readonly logger: WinstonLogger,
     private readonly cryptoService: ICryptoService,
   ) {}
@@ -90,7 +91,7 @@ export class AuthService {
     );
 
     const redisKey = `refresh_token:${refreshToken}`;
-    await this.redisService.setWithExpiry(
+    await this.cacheService.setWithExpiry(
       redisKey,
       String(user.id),
       refreshTtlSeconds,
