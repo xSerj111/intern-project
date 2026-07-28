@@ -3,6 +3,7 @@ import cors from 'cors';
 import { DataSource } from 'typeorm';
 import type { WinstonLogger } from '@repo/shared';
 import { BcryptService } from './services/crypto.service';
+import { AuthUserRepository } from './repositories/auth-user.repository';
 
 import { createUsersRouter } from './routes/users.routes';
 import { createAuthRouter } from './routes/auth.routes';
@@ -26,7 +27,13 @@ export function createApp(
 
   const cryptoService = new BcryptService();
 
-  const usersService = new UsersService(dataSource, logger, cryptoService);
+  const authUserRepository = new AuthUserRepository(dataSource);
+
+  const usersService = new UsersService(
+    authUserRepository,
+    logger,
+    cryptoService,
+  );
   const authService = new AuthService(
     usersService,
     redisService,

@@ -14,27 +14,30 @@ const requireEnv = (key: string, defaultValue?: string): string => {
 
 export const env = {
   app: {
-    port: parseInt(requireEnv('PORT', '3001'), 10),
+    // Auth service domyślnie działa na 3002 (zgodnie z AUTH_SERVICE_URL z .env)
+    port: parseInt(process.env.PORT || '3002', 10),
   },
   db: {
-    host: requireEnv('DB_HOST', '127.0.0.1'),
-    port: parseInt(requireEnv('DB_PORT', '5432'), 10),
-    username: requireEnv('DB_USER', 'postgres'),
-    password: requireEnv('DB_PASSWORD', 'secret'),
-    database: requireEnv('DB_NAME', 'innogram'),
+    host: requireEnv('POSTGRES_HOST', 'localhost'),
+    port: parseInt(requireEnv('POSTGRES_PORT', '5432'), 10),
+    username: requireEnv('POSTGRES_USER', 'innogram_user'),
+    password: requireEnv('POSTGRES_PASSWORD', 'innogram_password'),
+    database: requireEnv('POSTGRES_DB', 'innogram'),
   },
   redis: {
-    url: requireEnv('REDIS_URL', 'redis://localhost:6379'),
+    host: requireEnv('REDIS_HOST', 'localhost'),
+    port: parseInt(requireEnv('REDIS_PORT', '6379'), 10),
+    password: process.env.REDIS_PASSWORD || undefined, // Hasło może być puste
   },
   jwt: {
-    accessTokenSecret: requireEnv('JWT_ACCESS_SECRET', 'default-dev-secret'),
-    accessTokenExpiry: requireEnv('JWT_ACCESS_EXPIRY', '15m'),
-    refreshTokenExpiry: requireEnv('JWT_REFRESH_EXPIRY', '7d'),
+    accessTokenSecret: requireEnv(
+      'JWT_SECRET',
+      'your-super-secret-jwt-key-here',
+    ),
+    accessTokenExpiry: requireEnv('JWT_EXPIRES_IN', '15m'),
+    refreshTokenExpiry: requireEnv('JWT_REFRESH_EXPIRES_IN', '7d'),
   },
   google: {
-    clientId: requireEnv(
-      'GOOGLE_CLIENT_ID',
-      'dev-google-client-id.apps.googleusercontent.com',
-    ),
+    clientId: requireEnv('GOOGLE_CLIENT_ID', 'your-google-client-id'),
   },
 } as const;
