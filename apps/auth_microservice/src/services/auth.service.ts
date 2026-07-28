@@ -7,7 +7,7 @@ import { jwtConfig } from '../config/jwt';
 import { LoginDto } from '@repo/shared';
 import { AuthUser } from '../entities/auth-user.entity';
 import { OAuth2Client } from 'google-auth-library';
-import { googleConfig } from 'src/config/google';
+import { googleConfig } from '../config/google';
 
 export interface LoginResult {
   accessToken: string;
@@ -77,7 +77,7 @@ export class AuthService {
     const accessToken = jwt.sign(
       { sub: user.id, email: user.email },
       jwtConfig.accessTokenSecret,
-      { expiresIn: jwtConfig.accessTokenExpiry },
+      { expiresIn: jwtConfig.accessTokenExpiry as any },
     );
 
     const refreshToken = jwtConfig.generateRefreshToken();

@@ -1,6 +1,10 @@
 import { DataSource } from 'typeorm';
 import { AuthUser } from '../entities/auth-user.entity';
 import { AuthSession } from '../entities/auth-session.entity';
+import * as dotenv from 'dotenv';
+import * as path from 'path';
+
+dotenv.config({ path: path.resolve(__dirname, '../../../../.env') });
 
 export const AppDataSource = new DataSource({
   type: 'postgres',

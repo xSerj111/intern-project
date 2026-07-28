@@ -10,7 +10,7 @@ export function createAuthRouter(authService: AuthService): Router {
    * @openapi
    * /auth/login:
    *   post:
-   *     summary: Authenticate user and return tokens
+   *     summary: Authenticate user using email and password
    *     tags: [Auth]
    *     requestBody:
    *       required: true
@@ -29,6 +29,8 @@ export function createAuthRouter(authService: AuthService): Router {
    *     responses:
    *       200:
    *         description: Login successful
+   *       400:
+   *         description: Bad Request (validation errors)
    *       401:
    *         description: Invalid credentials
    */
@@ -42,7 +44,29 @@ export function createAuthRouter(authService: AuthService): Router {
   });
 
   /**
-   * Google OAuth 2.0 login
+   * @openapi
+   * /auth/google:
+   *   post:
+   *     summary: Authenticate or register user using Google ID Token
+   *     tags: [Auth]
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             type: object
+   *             required: [idToken]
+   *             properties:
+   *               idToken:
+   *                 type: string
+   *                 description: The JWT ID token issued by Google
+   *     responses:
+   *       200:
+   *         description: Login successful
+   *       400:
+   *         description: Bad Request (missing token)
+   *       401:
+   *         description: Invalid or expired Google token
    */
   router.post(
     '/google',
