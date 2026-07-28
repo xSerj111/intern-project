@@ -1,6 +1,6 @@
 import { DataSource } from 'typeorm';
-import { AuthUser } from '../entities/auth-user.entity';
-import { AuthSession } from '../entities/auth-session.entity';
+import { AuthUser } from '../domain/entities/auth-user.entity';
+import { AuthSession } from '../domain/entities/auth-session.entity';
 import * as dotenv from 'dotenv';
 import * as path from 'path';
 import { env } from './env';

@@ -1,14 +1,14 @@
 import jwt from 'jsonwebtoken';
-import { ICryptoService } from './crypto.service';
+import { ICryptoService } from '../infrastructure/crypto/crypto.service';
 import { GoogleLoginDto, UnauthorizedError, WinstonLogger } from '@repo/shared';
 import { UsersService } from './users.service';
-import { RedisService } from './redis.service';
+import { RedisService } from '../infrastructure/cache/redis.service';
 import { jwtConfig } from '../config/jwt';
 import { LoginDto } from '@repo/shared';
-import { AuthUser } from '../entities/auth-user.entity';
+import { AuthUser } from '../domain/entities/auth-user.entity';
 import { OAuth2Client } from 'google-auth-library';
 import { googleConfig } from '../config/google';
-import { ICacheService } from './interfaces/cache.service';
+import { ICacheService } from '../domain/interfaces/cache.service';
 
 export interface LoginResult {
   accessToken: string;

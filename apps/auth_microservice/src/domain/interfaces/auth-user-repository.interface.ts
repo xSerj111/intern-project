@@ -1,4 +1,4 @@
-import { AuthUser } from '../../entities/auth-user.entity';
+import { AuthUser } from '../entities/auth-user.entity';
 import { RepositoryPort } from '@repo/shared';
 
 // Definiujemy, jakie dodatkowe metody biznesowe ma nasze repozytorium,

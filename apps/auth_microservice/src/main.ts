@@ -5,7 +5,7 @@ import { WinstonLogger } from '@repo/shared';
 import { initDatabase } from './config/database';
 import { createApp } from './app';
 import { createRedisClient } from './config/redis';
-import { RedisService } from './services/redis.service';
+import { RedisService } from './infrastructure/cache/redis.service';
 
 async function bootstrap() {
   const logger = new WinstonLogger('AuthMicroservice');

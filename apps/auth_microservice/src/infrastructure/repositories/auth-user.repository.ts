@@ -1,7 +1,7 @@
 import { TypeormRepositoryBase } from '@repo/shared';
 import { DataSource, Repository } from 'typeorm';
-import { AuthUser } from '../entities/auth-user.entity';
-import { IAuthUserRepository } from '../services/interfaces/auth-user-repository.interface';
+import { AuthUser } from '../../domain/entities/auth-user.entity';
+import { IAuthUserRepository } from '../../domain/interfaces/auth-user-repository.interface';
 
 export class AuthUserRepository
   extends TypeormRepositoryBase<AuthUser, any>

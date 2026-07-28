@@ -1,15 +1,14 @@
 import type { DataSource } from 'typeorm';
 import type { WinstonLogger } from '@repo/shared';
-import { ICryptoService } from './crypto.service';
+import { ICryptoService } from '../infrastructure/crypto/crypto.service';
 // Załóżmy, że mamy encję i dto w shared:
 import {
   CreateUserDto,
   UniqueConstraintViolationError,
   EntityNotFoundError,
 } from '@repo/shared';
-import { AuthUser } from '../entities/auth-user.entity';
-import { IAuthUserRepository } from './interfaces/auth-user-repository.interface';
-
+import { AuthUser } from '../domain/entities/auth-user.entity';
+import { IAuthUserRepository } from '../domain/interfaces/auth-user-repository.interface';
 
 export class UsersService {
   constructor(
@@ -21,7 +20,6 @@ export class UsersService {
   async registerUser(
     dto: CreateUserDto,
   ): Promise<Omit<AuthUser, 'passwordHash'>> {
-
     const existing = await this.userRepository.findByEmail(dto.email);
     if (existing) {
       throw new UniqueConstraintViolationError(
@@ -36,7 +34,6 @@ export class UsersService {
     user.email = dto.email;
     user.passwordHash = passwordHash;
     user.isEmailVerified = false;
-
 
     const savedUser = await this.userRepository.save(user);
     this.logger.debug('User registered', { props: { userId: savedUser.id } });
@@ -59,7 +56,7 @@ export class UsersService {
   async findOrCreateByGoogle(
     email: string,
     googleId: string,
-  ): Promise<AuthUser> {    
+  ): Promise<AuthUser> {
     let user = await this.userRepository.findByEmail(email);
 
     if (user) {
