@@ -1,28 +1,61 @@
-import { ValidationPipe } from '@nestjs/common';
-import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { DomainExceptionFilter } from '@repo/shared';
 import 'reflect-metadata';
+import * as dotenv from 'dotenv';
+import * as path from 'path';
+
+dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
+
+import { WinstonLogger } from '@repo/shared';
+import { initDatabase } from './config/database';
+import { createApp } from './app';
+import { createRedisClient } from './config/redis';
+import { RedisService } from './services/redis.service';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const logger = new WinstonLogger('AuthMicroservice');
 
-  // Validate & sanitize incoming DTOs; map domain errors -> HTTP (shared infra).
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-  app.useGlobalFilters(new DomainExceptionFilter());
+  try {
+    // 1. Inicjalizacja bazy danych (funkcja wygenerowana przez DeepCode)
+    const dataSource = await initDatabase();
+    logger.debug('Database connected successfully');
 
-  const config = new DocumentBuilder()
-    .setTitle('Innogram Auth Api')
-    .setDescription('The identity and authentication layer for Innogram')
-    .setVersion('1.0')
-    .addTag('Users')
-    .build();
+    const redisClient = createRedisClient();
+    const redisService = new RedisService(redisClient, logger);
 
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api', app, document);
+    // 2. Inicjalizacja aplikacji Express z wstrzykniętymi zależnościami
+    const app = createApp(dataSource, logger, redisService);
+    const port = process.env.PORT || 3001;
 
-  await app.listen(process.env.PORT || 3001);
-  console.log(`Auth microservice runs on ${process.env.PORT}`);
+    // 3. Uruchomienie serwera
+    const server = app.listen(port, () => {
+      logger.info(`Auth Microservice is running on port ${port}`);
+    });
+
+    // Wdrożenie "Graceful Shutdown"
+    const shutdown = async (signal: string) => {
+      logger.info(`${signal} recieved, shutting down gracefully...`);
+      server.close();
+      try {
+        await redisClient.quit();
+        logger.debug('Redis disconnected');
+      } catch (err) {
+        logger.error('Error disconnecting Redis', { error: err });
+      }
+      try {
+        await dataSource.destroy();
+        logger.debug('Database disconnected');
+      } catch (err) {
+        logger.error('Error disconnecting database', { error: err });
+      }
+      logger.info('Graceful shutdown complete');
+      process.exit(0);
+    };
+
+    process.on('SIGINT', () => shutdown('SIGINT'));
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+  } catch (error) {
+    logger.error('Failed to start Auth Microservice', { error });
+    process.exit(1);
+  }
 }
+
 bootstrap();

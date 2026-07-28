@@ -196,7 +196,8 @@ export abstract class TypeormRepositoryBase<
       const result = await this.repository.save(entity);
       this.logger.debug(`[${entity.constructor.name}] persisted ${result.id}`);
       return result;
-    } catch (err: unknown) {
+    } 
+    catch (err: unknown) {
       if (
         isTypeOrmError(err) &&
         err.driverError?.code === PostgresErrorCode.UniqueViolation

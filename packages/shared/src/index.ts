@@ -1,5 +1,6 @@
 // DTOs
 export * from "./dtos/auth/create-user.dto";
+export * from "./dtos/auth/login.dto";
 export * from "./dtos/core/update-profile.dto";
 export * from "./dtos/core/create-post.dto";
 export * from "./dtos/core/create-comment.dto";

@@ -6,10 +6,12 @@ import { Chat } from './domain/entities/chat.entity';
 import { ChatParticipant } from './domain/entities/chat-participant.entity';
 import { Message } from './domain/entities/message.entity';
 import { MessageAsset } from './domain/entities/message-asset.entity';
+import { LoggerModule } from '@repo/shared';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Chat, ChatParticipant, Message, MessageAsset]),
+    LoggerModule.forFeature('ChatsService'),
   ],
   controllers: [ChatsController],
   providers: [ChatsService],

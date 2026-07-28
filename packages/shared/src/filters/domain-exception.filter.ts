@@ -35,6 +35,14 @@ export class DomainExceptionFilter implements ExceptionFilter {
 
     if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
       this.logger.error(exception.message, { error: exception });
+    } else {
+      // 400-499: Domain/biznes errors -> we log as a warning for analysis
+      this.logger.warn(`Domain rule violation: ${exception.name}`, {
+        props: {
+          message: exception.message,
+          status
+        }
+      });
     }
 
     response.status(status).json({
