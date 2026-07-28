@@ -29,18 +29,15 @@ export function createUsersRouter(usersService: UsersService): Router {
    *       409:
    *         description: Email already in use
    */
-  router.post(
-    '/register',
-    validateBody(CreateUserDto),
-    async (req, res, next) => {
-      try {
-        const result = await usersService.registerUser(req.body);
-        res.status(201).json(result);
-      } catch (error) {
-        next(error);
-      }
-    },
-  );
+  router.post('/register', validateBody(CreateUserDto), async (req, res, next) => {
+    try {
+      const { email, password } = req.body;
+      const result = await usersService.registerUser(email, password);
+      res.status(201).json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
 
   router.get('/:id', async (req, res, next) => {
     try {

@@ -36,7 +36,8 @@ export function createAuthRouter(authService: AuthService): Router {
    */
   router.post('/login', validateBody(LoginDto), async (req, res, next) => {
     try {
-      const result = await authService.login(req.body);
+      const { email, password } = req.body;
+      const result = await authService.login(email, password);
       res.status(200).json(result);
     } catch (error) {
       next(error);
@@ -68,18 +69,15 @@ export function createAuthRouter(authService: AuthService): Router {
    *       401:
    *         description: Invalid or expired Google token
    */
-  router.post(
-    '/google',
-    validateBody(GoogleLoginDto),
-    async (req, res, next) => {
-      try {
-        const result = await authService.loginWithGoogle(req.body);
-        res.status(200).json(result);
-      } catch (error) {
-        next(error);
-      }
-    },
-  );
+  router.post('/google', validateBody(GoogleLoginDto), async (req, res, next) => {
+    try {
+      const { idToken } = req.body;
+      const result = await authService.loginWithGoogle(idToken);
+      res.status(200).json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
 
   return router;
 }

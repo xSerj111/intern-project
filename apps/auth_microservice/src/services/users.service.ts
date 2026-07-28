@@ -18,20 +18,21 @@ export class UsersService {
   ) {}
 
   async registerUser(
-    dto: CreateUserDto,
+    email: string,
+    password: string,
   ): Promise<Omit<AuthUser, 'passwordHash'>> {
-    const existing = await this.userRepository.findByEmail(dto.email);
+    const existing = await this.userRepository.findByEmail(email);
     if (existing) {
       throw new UniqueConstraintViolationError(
         'User with this email already exists',
-        dto.email,
+        email,
       );
     }
 
-    const passwordHash = await this.cryptoService.hash(dto.password, 10);
+    const passwordHash = await this.cryptoService.hash(password, 10);
 
     const user = new AuthUser();
-    user.email = dto.email;
+    user.email = email;
     user.passwordHash = passwordHash;
     user.isEmailVerified = false;
 
@@ -53,10 +54,7 @@ export class UsersService {
     return this.userRepository.findByEmail(email);
   }
 
-  async findOrCreateByGoogle(
-    email: string,
-    googleId: string,
-  ): Promise<AuthUser> {
+  async findOrCreateByGoogle(email: string, googleId: string): Promise<AuthUser> {
     let user = await this.userRepository.findByEmail(email);
 
     if (user) {

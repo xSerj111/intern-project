@@ -24,20 +24,17 @@ export class AuthService {
     private readonly cryptoService: ICryptoService,
   ) {}
 
-  async login(dto: LoginDto): Promise<LoginResult> {
-    const user = await this.usersService.findByEmailWithPassword(dto.email);
+  async login(email: string, password: string): Promise<LoginResult> {
+    const user = await this.usersService.findByEmailWithPassword(email);
 
     if (!user || !user.passwordHash) {
       this.logger.debug('Login failed: user not found', {
-        props: { email: dto.email },
+        props: { email: email },
       });
       throw new UnauthorizedError('Invalid email or password');
     }
 
-    const isValid = await this.cryptoService.compare(
-      dto.password,
-      user.passwordHash,
-    );
+    const isValid = await this.cryptoService.compare(password, user.passwordHash);
     if (!isValid) {
       this.logger.debug('Login failed: invalid password', {
         props: { userId: user.id },
@@ -49,11 +46,11 @@ export class AuthService {
     return this.generateTokensAndSession(user);
   }
 
-  async loginWithGoogle(dto: GoogleLoginDto): Promise<LoginResult> {
+  async loginWithGoogle(idToken: string): Promise<LoginResult> {
     try {
       const client = new OAuth2Client(googleConfig.clientId);
       const ticket = await client.verifyIdToken({
-        idToken: dto.idToken,
+        idToken: idToken,
         audience: googleConfig.clientId,
       });
 
@@ -86,16 +83,10 @@ export class AuthService {
     );
 
     const refreshToken = jwtConfig.generateRefreshToken();
-    const refreshTtlSeconds = this.parseExpiryToSeconds(
-      jwtConfig.refreshTokenExpiry,
-    );
+    const refreshTtlSeconds = this.parseExpiryToSeconds(jwtConfig.refreshTokenExpiry);
 
     const redisKey = `refresh_token:${refreshToken}`;
-    await this.cacheService.setWithExpiry(
-      redisKey,
-      String(user.id),
-      refreshTtlSeconds,
-    );
+    await this.cacheService.setWithExpiry(redisKey, String(user.id), refreshTtlSeconds);
 
     const { passwordHash: _, ...safeUser } = user;
     return { accessToken, refreshToken, user: safeUser };
