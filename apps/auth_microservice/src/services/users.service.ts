@@ -58,4 +58,36 @@ export class UsersService {
     const repo = this.dataSource.getRepository(AuthUser);
     return repo.findOne({ where: { email } });
   }
+
+  async findOrCreateByGoogle(
+    email: string,
+    googleId: string,
+  ): Promise<AuthUser> {
+    const repo = this.dataSource.getRepository(AuthUser);
+    let user = await repo.findOne({ where: { email } });
+
+    if (user) {
+      if (!user.googleId) {
+        user.googleId = googleId;
+        user.isEmailVerified = true;
+        user = await repo.save(user);
+        this.logger.debug('Linked Google account to existing user', {
+          props: { userId: user.id },
+        });
+      }
+      return user;
+    }
+
+    const newUser = repo.create({
+      email,
+      googleId,
+      isEmailVerified: true,
+    });
+
+    const savedUser = await repo.save(newUser);
+    this.logger.debug('Create new user via Google login', {
+      props: { userId: savedUser.id },
+    });
+    return savedUser;
+  }
 }
