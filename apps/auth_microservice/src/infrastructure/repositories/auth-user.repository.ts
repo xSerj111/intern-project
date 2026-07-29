@@ -1,5 +1,5 @@
 import { TypeormRepositoryBase } from '@repo/shared';
-import { DataSource, Repository } from 'typeorm';
+import { DataSource } from 'typeorm';
 import { AuthUser } from '../../domain/entities/auth-user.entity';
 import { IAuthUserRepository } from '../../domain/interfaces/auth-user-repository.interface';
 

@@ -44,7 +44,7 @@ export function createApp(
   );
 
   app.use('/users', createUsersRouter(usersService));
-  app.use('/auth', createAuthRouter(authService)); // <-- DODANE
+  app.use('/auth', createAuthRouter(authService));
 
   app.use(errorHandler);
 
