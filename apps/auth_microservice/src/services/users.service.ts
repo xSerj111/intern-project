@@ -2,11 +2,7 @@ import type { DataSource } from 'typeorm';
 import type { WinstonLogger } from '@repo/shared';
 import { ICryptoService } from '../infrastructure/crypto/crypto.service';
 // Załóżmy, że mamy encję i dto w shared:
-import {
-  CreateUserDto,
-  UniqueConstraintViolationError,
-  EntityNotFoundError,
-} from '@repo/shared';
+import { UniqueConstraintViolationError } from '@repo/shared';
 import { AuthUser } from '../domain/entities/auth-user.entity';
 import { IAuthUserRepository } from '../domain/interfaces/auth-user-repository.interface';
 
@@ -29,7 +25,7 @@ export class UsersService {
       );
     }
 
-    const passwordHash = await this.cryptoService.hash(password, 10);
+    const passwordHash = await this.cryptoService.hash(password);
 
     const user = new AuthUser();
     user.email = email;

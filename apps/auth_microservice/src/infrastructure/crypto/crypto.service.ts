@@ -6,8 +6,12 @@ export interface ICryptoService {
 }
 
 export class BcryptService implements ICryptoService {
-  async hash(data: string, saltOrRounds: number = 10): Promise<string> {
-    return bcrypt.hash(data, saltOrRounds);
+
+  constructor(private readonly defaultSaltRounds: number = 10) {}
+
+  async hash(data: string, saltOrRounds?: number): Promise<string> {
+    const rounds = saltOrRounds || this.defaultSaltRounds;
+    return bcrypt.hash(data, rounds);
   }
 
   async compare(data: string, encrypted: string): Promise<boolean> {

@@ -30,14 +30,14 @@ export const env = {
     password: process.env.REDIS_PASSWORD || undefined, // Hasło może być puste
   },
   jwt: {
-    accessTokenSecret: requireEnv(
-      'JWT_SECRET',
-      'your-super-secret-jwt-key-here',
-    ),
+    accessTokenSecret: requireEnv('JWT_SECRET', 'your-super-secret-jwt-key-here'),
     accessTokenExpiry: requireEnv('JWT_EXPIRES_IN', '15m'),
     refreshTokenExpiry: requireEnv('JWT_REFRESH_EXPIRES_IN', '7d'),
   },
   google: {
     clientId: requireEnv('GOOGLE_CLIENT_ID', 'your-google-client-id'),
+  },
+  crypto: {
+    saltRounds: parseInt(process.env.BCRYPT_SALT_ROUNDS || '10', 10),
   },
 } as const;

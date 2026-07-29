@@ -12,6 +12,7 @@ import { UsersService } from './services/users.service';
 import { AuthService } from './services/auth.service';
 import { setupSwagger } from './config/swagger';
 import { RedisService } from './infrastructure/cache/redis.service';
+import { env } from './config/env';
 
 export function createApp(
   dataSource: DataSource,
@@ -25,21 +26,12 @@ export function createApp(
 
   setupSwagger(app);
 
-  const cryptoService = new BcryptService();
+  const cryptoService = new BcryptService(env.crypto.saltRounds);
 
   const authUserRepository = new AuthUserRepository(dataSource);
 
-  const usersService = new UsersService(
-    authUserRepository,
-    logger,
-    cryptoService,
-  );
-  const authService = new AuthService(
-    usersService,
-    redisService,
-    logger,
-    cryptoService,
-  ); // <-- DODANE
+  const usersService = new UsersService(authUserRepository, logger, cryptoService);
+  const authService = new AuthService(usersService, redisService, logger, cryptoService); // <-- DODANE
 
   app.use('/users', createUsersRouter(usersService));
   app.use('/auth', createAuthRouter(authService)); // <-- DODANE
