@@ -1,16 +1,11 @@
-import jwt from 'jsonwebtoken';
 import { ICryptoService } from '../domain/interfaces/crypto.service.interface';
-import { GoogleLoginDto, UnauthorizedError, WinstonLogger } from '@repo/shared';
+import { UnauthorizedError, WinstonLogger } from '@repo/shared';
 import { UsersService } from './users.service';
-import { RedisService } from '../infrastructure/cache/redis.service';
-import { jwtConfig } from '../config/jwt';
-import { LoginDto } from '@repo/shared';
 import { AuthUser } from '../domain/entities/auth-user.entity';
-import { OAuth2Client } from 'google-auth-library';
-import { googleConfig } from '../config/google';
 import { ICacheService } from '../domain/interfaces/cache.service';
 import { IJwtService, JwtPayload } from '../domain/interfaces/jwt.service.interface';
 import { env } from '../config/env';
+import { IOAuthService } from '../domain/interfaces/oauth.service.interface';
 
 export interface LoginResult {
   accessToken: string;
@@ -25,6 +20,7 @@ export class AuthService {
     private readonly logger: WinstonLogger,
     private readonly cryptoService: ICryptoService,
     private readonly jwtService: IJwtService,
+    private readonly oauthService: IOAuthService,
   ) {}
 
   async login(email: string, password: string): Promise<LoginResult> {
@@ -51,23 +47,14 @@ export class AuthService {
 
   async loginWithGoogle(idToken: string): Promise<LoginResult> {
     try {
-      const client = new OAuth2Client(googleConfig.clientId);
-      const ticket = await client.verifyIdToken({
-        idToken: idToken,
-        audience: googleConfig.clientId,
-      });
-
-      const payload = ticket.getPayload();
-
-      if (!payload || !payload.email || !payload.sub) {
-        throw new UnauthorizedError('Invalid Google token payload');
-      }
+      const payload = await this.oauthService.verifyIdToken(idToken);
 
       const user = await this.usersService.findOrCreateByGoogle(
         payload.email,
         payload.sub,
       );
-      this.logger.debug('User logged in with Google', {
+
+      this.logger.debug(`User logged in with Google`, {
         props: { userId: user.id },
       });
 

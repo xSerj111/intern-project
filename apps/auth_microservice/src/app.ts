@@ -4,7 +4,7 @@ import { DataSource } from 'typeorm';
 import type { WinstonLogger } from '@repo/shared';
 import { BcryptService } from './infrastructure/crypto/crypto.service';
 import { AuthUserRepository } from './infrastructure/repositories/auth-user.repository';
-
+import { GoogleOAuthService } from './infrastructure/oauth/google-oauth.service';
 import { createUsersRouter } from './routes/users.routes';
 import { createAuthRouter } from './routes/auth.routes';
 import { errorHandler } from './middleware/error-handler.middleware';
@@ -31,6 +31,7 @@ export function createApp(
 
   const authUserRepository = new AuthUserRepository(dataSource);
   const jwtService = new JwtService();
+  const oauthService = new GoogleOAuthService();
 
   const usersService = new UsersService(authUserRepository, logger, cryptoService);
   const authService = new AuthService(
@@ -39,6 +40,7 @@ export function createApp(
     logger,
     cryptoService,
     jwtService,
+    oauthService,
   );
 
   app.use('/users', createUsersRouter(usersService));
