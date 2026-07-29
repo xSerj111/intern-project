@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { AuthService } from '../services/auth.service';
 import { validateBody } from '../middleware/validate.middleware';
 import { GoogleLoginDto, LoginDto } from '@repo/shared';
+import { requireAuth } from '../middleware/auth.middleware';
 
 export function createAuthRouter(authService: AuthService): Router {
   const router = Router();
@@ -77,6 +78,34 @@ export function createAuthRouter(authService: AuthService): Router {
     } catch (error) {
       next(error);
     }
+  });
+
+  /**
+   * @openapi
+   * components:
+   *   securitySchemes:
+   *     bearerAuth:
+   *       type: http
+   *       scheme: bearer
+   *       bearerFormat: JWT
+   *
+   * /auth/me:
+   *   get:
+   *     summary: Get current authenticated user's payload
+   *     tags: [Auth]
+   *     security:
+   *       - bearerAuth: []
+   *     responses:
+   *       200:
+   *         description: Returns the user payload extracted from JWT
+   *       401:
+   *         description: Unauthorized (missing or invalid token)
+   */
+  router.get('/me', requireAuth(authService), (req, res) => {
+    res.status(200).json({
+      statusCode: 200,
+      user: req.user,
+    });
   });
 
   return router;
