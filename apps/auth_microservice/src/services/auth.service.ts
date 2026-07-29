@@ -9,6 +9,8 @@ import { AuthUser } from '../domain/entities/auth-user.entity';
 import { OAuth2Client } from 'google-auth-library';
 import { googleConfig } from '../config/google';
 import { ICacheService } from '../domain/interfaces/cache.service';
+import { IJwtService, JwtPayload } from '../domain/interfaces/jwt.service.interface';
+import { env } from '../config/env';
 
 export interface LoginResult {
   accessToken: string;
@@ -22,6 +24,7 @@ export class AuthService {
     private readonly cacheService: ICacheService,
     private readonly logger: WinstonLogger,
     private readonly cryptoService: ICryptoService,
+    private readonly jwtService: IJwtService,
   ) {}
 
   async login(email: string, password: string): Promise<LoginResult> {
@@ -75,15 +78,24 @@ export class AuthService {
     }
   }
 
-  private async generateTokensAndSession(user: AuthUser): Promise<LoginResult> {
-    const accessToken = jwt.sign(
-      { sub: user.id, email: user.email },
-      jwtConfig.accessTokenSecret,
-      { expiresIn: jwtConfig.accessTokenExpiry as any },
-    );
+  async verifyToken(token: string): Promise<JwtPayload> {
+    try {
+      return this.jwtService.verifyAccessToken(token);
+    } catch (error) {
+      throw new UnauthorizedError('Invalid or expired access token');
+    }
+  }
 
-    const refreshToken = jwtConfig.generateRefreshToken();
-    const refreshTtlSeconds = this.parseExpiryToSeconds(jwtConfig.refreshTokenExpiry);
+  private async generateTokensAndSession(user: AuthUser): Promise<LoginResult> {
+    const accessToken = this.jwtService.signAccessToken({
+      sub: user.id,
+      email: user.email,
+    });
+
+    const refreshToken = this.jwtService.generateRefreshToken();
+    const refreshTtlSeconds = this.jwtService.parseExpiryToSeconds(
+      env.jwt.refreshTokenExpiry,
+    );
 
     const redisKey = `refresh_token:${refreshToken}`;
     await this.cacheService.setWithExpiry(redisKey, String(user.id), refreshTtlSeconds);
@@ -92,18 +104,4 @@ export class AuthService {
     return { accessToken, refreshToken, user: safeUser };
   }
 
-  private parseExpiryToSeconds(expiry: string): number {
-    const match = expiry.match(/^(\d+)([smhd])$/);
-    if (!match) return 604800; // 7 days default
-
-    const value = parseInt(match[1], 10);
-    const unit = match[2];
-    const multipliers: Record<string, number> = {
-      s: 1,
-      m: 60,
-      h: 3600,
-      d: 86400,
-    };
-    return value * (multipliers[unit] || 1);
-  }
 }
