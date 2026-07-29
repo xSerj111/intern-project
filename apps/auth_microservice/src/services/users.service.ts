@@ -1,7 +1,6 @@
 import type { DataSource } from 'typeorm';
 import type { WinstonLogger } from '@repo/shared';
-import { ICryptoService } from '../infrastructure/crypto/crypto.service';
-// Załóżmy, że mamy encję i dto w shared:
+import { ICryptoService } from '../domain/interfaces/crypto.service.interface';
 import { UniqueConstraintViolationError } from '@repo/shared';
 import { AuthUser } from '../domain/entities/auth-user.entity';
 import { IAuthUserRepository } from '../domain/interfaces/auth-user-repository.interface';

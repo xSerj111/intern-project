@@ -1,5 +1,5 @@
 import jwt from 'jsonwebtoken';
-import { ICryptoService } from '../infrastructure/crypto/crypto.service';
+import { ICryptoService } from '../domain/interfaces/crypto.service.interface';
 import { GoogleLoginDto, UnauthorizedError, WinstonLogger } from '@repo/shared';
 import { UsersService } from './users.service';
 import { RedisService } from '../infrastructure/cache/redis.service';
