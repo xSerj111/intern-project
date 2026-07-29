@@ -39,7 +39,7 @@ export function createApp(
     logger,
     cryptoService,
     jwtService,
-  ); // <-- DODANE
+  );
 
   app.use('/users', createUsersRouter(usersService));
   app.use('/auth', createAuthRouter(authService)); // <-- DODANE
