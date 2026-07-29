@@ -3,6 +3,7 @@ import { AuthService } from '../services/auth.service';
 import { validateBody } from '../middleware/validate.middleware';
 import { GoogleLoginDto, LoginDto } from '@repo/shared';
 import { requireAuth } from '../middleware/auth.middleware';
+import { RefreshTokenDto } from '@repo/shared';
 
 export function createAuthRouter(authService: AuthService): Router {
   const router = Router();
@@ -106,6 +107,59 @@ export function createAuthRouter(authService: AuthService): Router {
       statusCode: 200,
       user: req.user,
     });
+  });
+  /**
+   * @openapi
+   * /auth/refresh:
+   *   post:
+   *     summary: Refresh access token
+   *     tags: [Auth]
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             $ref: '#/components/schemas/RefreshTokenDto'
+   *     responses:
+   *       200:
+   *         description: New tokens generated
+   *       401:
+   *         description: Invalid or expired refresh token
+   */
+  router.post('/refresh', validateBody(RefreshTokenDto), async (req, res, next) => {
+    try {
+      const { refreshToken } = req.body;
+      const result = await authService.refreshToken(refreshToken);
+      res.status(200).json(result);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  /**
+   * @openapi
+   * /auth/logout:
+   *   post:
+   *     summary: Logout user and invalidate refresh token
+   *     tags: [Auth]
+   *     requestBody:
+   *       required: true
+   *       content:
+   *         application/json:
+   *           schema:
+   *             $ref: '#/components/schemas/RefreshTokenDto'
+   *     responses:
+   *       200:
+   *         description: Logged out successfully
+   */
+  router.post('/logout', validateBody(RefreshTokenDto), async (req, res, next) => {
+    try {
+      const { refreshToken } = req.body;
+      await authService.logout(refreshToken);
+      res.status(200).json({ message: 'Logged out successfully' });
+    } catch (error) {
+      next(error);
+    }
   });
 
   return router;

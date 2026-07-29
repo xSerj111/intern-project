@@ -86,6 +86,33 @@ export class AuthService {
     }
   }
 
+  async refreshToken(oldRefreshToken: string): Promise<LoginResult> {
+    const redisKey = `refresh_token:${oldRefreshToken}`;
+
+    const userId = await this.cacheService.get(redisKey);
+
+    if (!userId) {
+      this.logger.debug('Refresh token failed: token not found or expired in Redis');
+      throw new UnauthorizedError('Invalid or expired refresh token');
+    }
+
+    const user = await this.usersService.getUserById(userId);
+
+    await this.cacheService.delete(redisKey);
+
+    return this.generateTokensAndSession(user as AuthUser);
+  }
+
+  async logout(refreshToken: string): Promise<void> {
+    const redisKey = `refresh_token:${refreshToken}`;
+
+    const deletedCount = await this.cacheService.delete(redisKey);
+
+    if (deletedCount > 0) {
+      this.logger.debug('User logged out successfully, refresh token removed');
+    }
+  }
+
   private async generateTokensAndSession(user: AuthUser): Promise<LoginResult> {
     const accessToken = this.jwtService.signAccessToken({
       sub: user.id,
@@ -103,5 +130,4 @@ export class AuthService {
     const { passwordHash: _, ...safeUser } = user;
     return { accessToken, refreshToken, user: safeUser };
   }
-
 }

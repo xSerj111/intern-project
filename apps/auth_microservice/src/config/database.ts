@@ -1,6 +1,5 @@
 import { DataSource } from 'typeorm';
 import { AuthUser } from '../domain/entities/auth-user.entity';
-import { AuthSession } from '../domain/entities/auth-session.entity';
 import * as dotenv from 'dotenv';
 import * as path from 'path';
 import { env } from './env';
@@ -14,7 +13,7 @@ export const AppDataSource = new DataSource({
   username: env.db.username,
   password: env.db.password,
   database: env.db.database,
-  entities: [AuthUser, AuthSession],
+  entities: [AuthUser],
   synchronize: false,
   migrations: [__dirname + '/../migrations/*.ts'],
 });
