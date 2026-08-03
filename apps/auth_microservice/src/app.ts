@@ -1,3 +1,4 @@
+import helmet from 'helmet';
 import express, { Application } from 'express';
 import cors from 'cors';
 import { DataSource } from 'typeorm';
@@ -14,6 +15,7 @@ import { setupSwagger } from './config/swagger';
 import { RedisService } from './infrastructure/cache/redis.service';
 import { env } from './config/env';
 import { JwtService } from './infrastructure/jwt/jwt.service';
+import { HttpEventPublisher } from './infrastructure/events/http-event-publisher';
 
 export function createApp(
   dataSource: DataSource,
@@ -25,6 +27,17 @@ export function createApp(
   app.use(cors());
   app.use(express.json());
 
+  app.use(helmet());
+
+  app.use(
+    cors({
+      origin: env.app.allowedOrigins,
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization'],
+    }),
+  );
+
   setupSwagger(app);
 
   const cryptoService = new BcryptService(env.crypto.saltRounds);
@@ -32,8 +45,14 @@ export function createApp(
   const authUserRepository = new AuthUserRepository(dataSource);
   const jwtService = new JwtService();
   const oauthService = new GoogleOAuthService();
+  const eventPublisher = new HttpEventPublisher(logger);
 
-  const usersService = new UsersService(authUserRepository, logger, cryptoService);
+  const usersService = new UsersService(
+    authUserRepository,
+    logger,
+    cryptoService,
+    eventPublisher,
+  );
   const authService = new AuthService(
     usersService,
     redisService,
