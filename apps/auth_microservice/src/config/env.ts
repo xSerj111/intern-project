@@ -16,6 +16,7 @@ export const env = {
   app: {
     // Auth service domyślnie działa na 3002 (zgodnie z AUTH_SERVICE_URL z .env)
     port: parseInt(process.env.PORT || '3002', 10),
+    coreMicroserviceUrl: requireEnv('CORE_SERVICE_URL'),
   },
   db: {
     host: requireEnv('POSTGRES_HOST', 'localhost'),

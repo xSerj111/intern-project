@@ -3,6 +3,6 @@ export class UserCreatedEvent {
     public readonly authUserId: string,
     public readonly email: string,
     public readonly handle: string,
-    public readonly timestap: Date,
+    public readonly timestamp: Date,
   ) {}
 }

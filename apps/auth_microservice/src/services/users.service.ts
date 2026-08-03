@@ -1,15 +1,17 @@
 import type { DataSource } from 'typeorm';
 import type { WinstonLogger } from '@repo/shared';
 import { ICryptoService } from '../domain/interfaces/crypto.service.interface';
-import { UniqueConstraintViolationError } from '@repo/shared';
+import { UniqueConstraintViolationError, UserCreatedEvent } from '@repo/shared';
 import { AuthUser } from '../domain/entities/auth-user.entity';
 import { IAuthUserRepository } from '../domain/interfaces/auth-user-repository.interface';
+import { IEventPublisher } from '../domain/interfaces/event-publisher.interface';
 
 export class UsersService {
   constructor(
     private readonly userRepository: IAuthUserRepository,
     private readonly logger: WinstonLogger,
     private readonly cryptoService: ICryptoService,
+    private readonly eventPublisher: IEventPublisher,
   ) {}
 
   async registerUser(
@@ -33,6 +35,8 @@ export class UsersService {
 
     const savedUser = await this.userRepository.save(user);
     this.logger.debug('User registered', { props: { userId: savedUser.id } });
+
+    this.publishUserCreated(savedUser);
 
     const { passwordHash: _, ...safeUser } = savedUser;
     return safeUser;
@@ -73,6 +77,14 @@ export class UsersService {
     this.logger.debug('Create new user via Google login', {
       props: { userId: savedUser.id },
     });
+    this.publishUserCreated(savedUser);
+
     return savedUser;
+  }
+
+  private publishUserCreated(user: AuthUser): void {
+    const defaultHandle = user.email.split('@')[0];
+    const event = new UserCreatedEvent(user.id, user.email, defaultHandle, new Date());
+    this.eventPublisher.publishUserCreatedEvent(event);
   }
 }
