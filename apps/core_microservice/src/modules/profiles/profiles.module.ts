@@ -13,7 +13,7 @@ import { InternalEventsController } from '../internal-events/internal-events.con
     TypeOrmModule.forFeature([UserProfile, ProfileToProfileConfiguration]),
     LoggerModule.forFeature('ProfilesService'),
   ],
-  controllers: [ProfilesController, InternalEventsController],
+  controllers: [ProfilesController],
   providers: [ProfilesService, UserProfileRepository],
 })
 export class ProfilesModule {}

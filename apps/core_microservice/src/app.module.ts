@@ -9,6 +9,7 @@ import { CommentsModule } from './modules/comments/comments.module';
 import { ChatsModule } from './modules/chats/chats.module';
 import { AssetsModule } from './modules/assets/assets.module';
 import { FollowsModule } from './modules/follows/follows.module';
+import { InternalEventsModule } from './modules/internal-events/internal-events.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { FollowsModule } from './modules/follows/follows.module';
     ChatsModule,
     AssetsModule,
     FollowsModule,
+    InternalEventsModule,
   ],
 })
 export class AppModule {}
