@@ -64,7 +64,6 @@ export class S3StorageAdapter implements IFileStoragePort {
   }
 
   private buildPublicUrl(fileKey: string): string {
-    // ⬅️ ZMIANA: Pobieramy dane z naszego serwisu w 1 linijce
     const { endpoint, port, useSsl, bucketName } = this.appConfig.s3;
     const protocol = useSsl ? 'https' : 'http';
 
