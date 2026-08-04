@@ -1,20 +1,34 @@
-import { Inject, Injectable } from '@nestjs/common';
-import { CreatePostDto, type Logger, LoggerKey, UpdatePostDto } from '@repo/shared';
+import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
+import { type Logger, LoggerKey } from '@repo/shared';
+import { CreatePostDto } from './dto/create-post.dto';
+import { UpdatePostDto } from './dto/update-post.dto';
 import { Post } from './domain/entities/post.entity';
 import { PostRepository } from './infrastructure/repository/post.repository';
+import { PostAsset } from './domain/entities/post-asset.entity';
 
 @Injectable()
 export class PostsService {
   constructor(
     @Inject(LoggerKey) private readonly logger: Logger,
-    private readonly postRepository: PostRepository
+    private readonly postRepository: PostRepository,
   ) {}
 
-  async createPost(createPostDto: CreatePostDto): Promise<Post> {
+  async createPost(
+    userId: string,
+    createPostDto: CreatePostDto,
+  ): Promise<Post> {
+    const postAssets = createPostDto.assetIds?.map((assetId, index) => {
+      const asset = new PostAsset();
+      asset.assetId = assetId;
+      asset.displayOrder = index;
+      return asset;
+    });
+
     // Construction rules live in the entity factory (defaults status to draft).
     const post = Post.create({
-      authorId: createPostDto.authorId,
+      authorId: userId,
       content: createPostDto.content,
+      assets: postAssets,
     });
 
     const savedPost = await this.postRepository.save(post);
@@ -26,13 +40,23 @@ export class PostsService {
   async getPost(id: string): Promise<Post> {
     // author is joined via the repository's default relations.
     const retrievedPost = await this.postRepository.findOneByIdOrThrow(id);
-    this.logger.debug('Post retrieved', { props: { postId: retrievedPost.id } });
+    this.logger.debug('Post retrieved', {
+      props: { postId: retrievedPost.id },
+    });
 
     return retrievedPost;
   }
 
-  async updatePost(id: string, updatePostDto: UpdatePostDto): Promise<Post> {
+  async updatePost(
+    userId: string,
+    id: string,
+    updatePostDto: UpdatePostDto,
+  ): Promise<Post> {
     const post = await this.getPost(id);
+
+    if (post.authorId !== userId) {
+      throw new ForbiddenException('You are not allowed to update this post');
+    }
     if (updatePostDto.content) {
       post.content = updatePostDto.content;
     }
@@ -41,18 +65,29 @@ export class PostsService {
     return updatedPost;
   }
 
-  async softDeletePost(id: string): Promise<void> {
+  async softDeletePost(userId: string, id: string): Promise<void> {
     const post = await this.getPost(id);
+
+    if (post.authorId !== userId) {
+      throw new ForbiddenException('You are not allowed to delete this post');
+    }
+
     await this.postRepository.softDelete(post);
     this.logger.debug('Post soft-deleted', { props: { postId: post.id } });
   }
 
-  async publishPost(id: string): Promise<Post> {
+  async publishPost(userId: string, id: string): Promise<Post> {
     const post = await this.getPost(id);
+
+    if (post.authorId !== userId) {
+      throw new ForbiddenException('You are not allowed to publish this post');
+    }
     // publish() enforces the rule and throws InvalidPostStateError (-> HTTP 400).
     post.publish();
     const publishedPost = await this.postRepository.save(post);
-    this.logger.debug('Post published', { props: { postId: publishedPost.id } });
+    this.logger.debug('Post published', {
+      props: { postId: publishedPost.id },
+    });
     return publishedPost;
   }
 }
