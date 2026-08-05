@@ -8,7 +8,7 @@ import { PostAsset } from './domain/entities/post-asset.entity';
 import type { IFollowRepository } from '../follows/domain/interfaces/follow-repository.port';
 import { InjectRepository } from '@nestjs/typeorm';
 import { PostLike } from './domain/entities/post-like.entity';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 
 @Injectable()
 export class PostsService {
@@ -176,5 +176,36 @@ export class PostsService {
     });
 
     return { items, total };
+  }
+
+  async enrichPostsWithLikes(
+    userId: string,
+    posts: Post[],
+  ): Promise<Array<{ post: Post; likesCount: number; isLiked: boolean }>> {
+    if (!posts.length) return [];
+
+    const postIds = posts.map((p) => p.id);
+
+    const counts = await this.postLikeRepository
+      .createQueryBuilder('like')
+      .select('like.postId', 'postId')
+      .addSelect('COUNT(like.id)', 'count')
+      .where('like.postId IN (:...postIds)', { postIds })
+      .groupBy('like.postId')
+      .getRawMany();
+
+    const countMap = new Map(counts.map((c) => [c.postId, Number(c.count)]));
+
+    const userLikes = await this.postLikeRepository.find({
+      where: { userId, postId: In(postIds) },
+    });
+
+    const userLikeMap = new Set(userLikes.map((l) => l.postId));
+
+    return posts.map((post) => ({
+      post,
+      likesCount: countMap.get(post.id) || 0,
+      isLiked: userLikeMap.has(post.id),
+    }));
   }
 }
