@@ -108,4 +108,13 @@ export class PostsController {
   ): Promise<void> {
     await this.postsService.softDeletePost(userId, id);
   }
+
+  @HttpPost(':id/like')
+  @HttpCode(HttpStatus.OK)
+  async toggleLike(
+    @CurrentUser('sub') userId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<void> {
+    await this.postsService.toggleLike(userId, id);
+  }
 }

@@ -6,6 +6,9 @@ import { Post } from './domain/entities/post.entity';
 import { PostRepository } from './infrastructure/repository/post.repository';
 import { PostAsset } from './domain/entities/post-asset.entity';
 import type { IFollowRepository } from '../follows/domain/interfaces/follow-repository.port';
+import { InjectRepository } from '@nestjs/typeorm';
+import { PostLike } from './domain/entities/post-like.entity';
+import { Repository } from 'typeorm';
 
 @Injectable()
 export class PostsService {
@@ -14,8 +17,34 @@ export class PostsService {
     private readonly postRepository: PostRepository,
     @Inject(Symbol.for('IFollowRepository'))
     private readonly followRepository: IFollowRepository,
+    @InjectRepository(PostLike)
+    private readonly postLikeRepository: Repository<PostLike>,
   ) {}
 
+  async toggleLike(userId: string, postId: string): Promise<void> {
+    await this.getPost(postId);
+
+    const existingLike = await this.postLikeRepository.findOne({
+      where: { userId, postId },
+      withDeleted: true,
+    });
+
+    if (existingLike) {
+      if (existingLike.deletedAt) {
+        await this.postLikeRepository.restore(existingLike.id);
+        this.logger.debug('Post like restored', { props: { postId, userId } });
+      } else {
+        await this.postLikeRepository.softRemove(existingLike);
+        this.logger.debug('Post like soft-removed', {
+          props: { postId, userId },
+        });
+      }
+    } else {
+      const newLike = this.postLikeRepository.create({ userId, postId });
+      await this.postLikeRepository.save(newLike);
+      this.logger.debug('Post liked', { props: { postId, userId } });
+    }
+  }
   async getFeed(
     userId: string,
     page: number,
