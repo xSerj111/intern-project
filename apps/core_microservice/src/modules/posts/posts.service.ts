@@ -5,14 +5,39 @@ import { UpdatePostDto } from './dto/update-post.dto';
 import { Post } from './domain/entities/post.entity';
 import { PostRepository } from './infrastructure/repository/post.repository';
 import { PostAsset } from './domain/entities/post-asset.entity';
+import type { IFollowRepository } from '../follows/domain/interfaces/follow-repository.port';
 
 @Injectable()
 export class PostsService {
   constructor(
     @Inject(LoggerKey) private readonly logger: Logger,
     private readonly postRepository: PostRepository,
+    @Inject(Symbol.for('IFollowRepository'))
+    private readonly followRepository: IFollowRepository,
   ) {}
 
+  async getFeed(
+    userId: string,
+    page: number,
+    limit: number,
+  ): Promise<{ items: Post[]; total: number }> {
+    const follows = await this.followRepository.findFollowing(userId);
+    const followingIds = follows.map((f) => f.followingId);
+
+    const targetAuthorIds = [...followingIds, userId];
+
+    const [items, total] = await this.postRepository.getFeedForAuthors(
+      targetAuthorIds,
+      page,
+      limit,
+    );
+
+    this.logger.debug('Feed retrieved', {
+      props: { userId, count: items.length, total },
+    });
+
+    return { items, total };
+  }
   async createPost(
     userId: string,
     createPostDto: CreatePostDto,

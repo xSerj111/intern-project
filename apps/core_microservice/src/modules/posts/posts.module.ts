@@ -7,11 +7,13 @@ import { PostLike } from './domain/entities/post-like.entity';
 import { PostAsset } from './domain/entities/post-asset.entity';
 import { PostRepository } from './infrastructure/repository/post.repository';
 import { LoggerModule } from '@repo/shared';
+import { FollowsModule } from '../follows/follows.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Post, PostLike, PostAsset]), 
+    TypeOrmModule.forFeature([Post, PostLike, PostAsset]),
     LoggerModule.forFeature('PostsService'),
+    FollowsModule,
   ],
   controllers: [PostsController],
   providers: [PostsService, PostRepository],

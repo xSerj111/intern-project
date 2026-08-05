@@ -9,11 +9,13 @@ import {
   Delete,
   HttpCode,
   HttpStatus,
+  Query,
 } from '@nestjs/common';
 import { PostsService } from './posts.service';
 import { CreatePostDto, UpdatePostDto } from '@repo/shared';
 import { PostResponseDto } from './dto/post-response.dto';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
+import { FeedQueryDto } from './dto/feed-query.dto';
 
 @Controller('posts')
 export class PostsController {
@@ -27,6 +29,24 @@ export class PostsController {
     return new PostResponseDto(
       await this.postsService.createPost(userId, createPostDto),
     );
+  }
+
+  @Get('feed')
+  async getFeed(
+    @CurrentUser('sub') userId: string,
+    @Query() query: FeedQueryDto,
+  ) {
+    const { items, total } = await this.postsService.getFeed(
+      userId,
+      query.page,
+      query.limit,
+    );
+    return {
+      items: items.map((post) => new PostResponseDto(post)),
+      total,
+      page: query.page,
+      limit: query.limit,
+    };
   }
 
   @Get(':id')

@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Asset } from '../domain/entities/asset.entity';
+import { AssetProps } from '../domain/interfaces/asset-props';
 
 export class AssetResponseDto {
   @ApiProperty() id!: string;
@@ -8,11 +9,11 @@ export class AssetResponseDto {
   @ApiProperty() size!: number;
   @ApiProperty() createdAt!: string;
 
-  constructor(asset: Asset) {
-    this.id = asset.id;
-    this.url = asset.url;
-    this.mimeType = asset.mimeType;
-    this.size = asset.size;
-    this.createdAt = asset.createdAt.toISOString();
+  constructor(props: AssetProps) {
+    this.id = props.id;
+    this.url = props.url;
+    this.mimeType = props.mimeType;
+    this.size = props.size;
+    this.createdAt = props.createdAt.toISOString();
   }
 }
