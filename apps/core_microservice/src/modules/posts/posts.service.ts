@@ -90,4 +90,19 @@ export class PostsService {
     });
     return publishedPost;
   }
+
+  async archivePost(userId: string, id: string): Promise<Post> {
+    const post = await this.getPost(id);
+
+    if (post.authorId !== userId) {
+      throw new ForbiddenException('You are not allowed to archive this post');
+    }
+
+    post.archive();
+
+    const archivedPost = await this.postRepository.save(post);
+    this.logger.debug('Post archived', { props: { postId: archivedPost.id } });
+
+    return archivedPost;
+  }
 }

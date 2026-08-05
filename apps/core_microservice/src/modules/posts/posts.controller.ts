@@ -55,6 +55,14 @@ export class PostsController {
     return new PostResponseDto(await this.postsService.publishPost(userId, id));
   }
 
+  @HttpPost(':id/archive')
+  async archivePost(
+    @CurrentUser('sub') userId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<PostResponseDto> {
+    return new PostResponseDto(await this.postsService.archivePost(userId, id));
+  }
+
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT) // 204 No Content is the standard for successful deletes
   async deletePost(
