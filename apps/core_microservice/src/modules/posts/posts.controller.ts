@@ -16,6 +16,7 @@ import { CreatePostDto, UpdatePostDto } from '@repo/shared';
 import { PostResponseDto } from './dto/post-response.dto';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { FeedQueryDto } from './dto/feed-query.dto';
+import { SearchQueryDto } from './dto/search-query.dto';
 
 @Controller('posts')
 export class PostsController {
@@ -41,6 +42,22 @@ export class PostsController {
       query.page,
       query.limit,
     );
+    return {
+      items: items.map((post) => new PostResponseDto(post)),
+      total,
+      page: query.page,
+      limit: query.limit,
+    };
+  }
+
+  @Get('search')
+  async searchPosts(@Query() query: SearchQueryDto) {
+    const { items, total } = await this.postsService.searchPosts(
+      query.keyword,
+      query.page,
+      query.limit,
+    );
+
     return {
       items: items.map((post) => new PostResponseDto(post)),
       total,

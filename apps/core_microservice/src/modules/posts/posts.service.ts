@@ -130,4 +130,22 @@ export class PostsService {
 
     return archivedPost;
   }
+
+  async searchPosts(
+    keyword: string,
+    page: number,
+    limit: number,
+  ): Promise<{ items: Post[]; total: number }> {
+    const [items, total] = await this.postRepository.searchPublishedPosts(
+      keyword,
+      page,
+      limit,
+    );
+
+    this.logger.debug('Posts searched', {
+      props: { keyword, count: items.length, total },
+    });
+
+    return { items, total };
+  }
 }
