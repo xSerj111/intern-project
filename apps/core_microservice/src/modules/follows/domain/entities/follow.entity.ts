@@ -9,12 +9,12 @@ import {
   Unique,
 } from 'typeorm';
 import { FollowProps } from '../interfaces/follow.props';
+import { FollowStatus } from '../follow-status.enum';
 
 @Entity('follows')
 @Unique(['followerId', 'followingId'])
 // @Index(['followerId', 'followingId'], { unique: true }) // Prevent duplicate follows
-export class Follow extends TypeormEntityBase implements FollowProps{
-
+export class Follow extends TypeormEntityBase implements FollowProps {
   // Logical reference: The user who is initiating the follow
   @Index()
   @Column({ type: 'uuid' })
@@ -24,6 +24,13 @@ export class Follow extends TypeormEntityBase implements FollowProps{
   @Index()
   @Column({ type: 'uuid' })
   followingId!: string;
+
+  @Column({
+    type: 'enum',
+    enum: FollowStatus,
+    default: FollowStatus.ACCEPTED,
+  })
+  status!: FollowStatus;
 
   static create(props: FollowProps): Follow {
     const follow = new Follow();
