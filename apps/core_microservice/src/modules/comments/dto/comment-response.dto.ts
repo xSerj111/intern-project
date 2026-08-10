@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Comment } from '../domain/entities/comment.entity';
 
 /** Response DTO for a comment, built from the entity in its constructor. */
@@ -9,8 +9,8 @@ export class CommentResponseDto {
   @ApiProperty()
   postId: string;
 
-  @ApiProperty({ type: String, nullable: true })
-  parentId: string | null;
+  @ApiPropertyOptional({ type: String, nullable: true })
+  parentId?: string | null;
 
   @ApiProperty()
   authorId: string;
@@ -24,7 +24,20 @@ export class CommentResponseDto {
   @ApiProperty()
   updatedAt: string;
 
-  constructor(comment: Comment) {
+  @ApiProperty()
+  likesCount!: number;
+
+  @ApiProperty()
+  isLiked!: boolean;
+
+  @ApiProperty({ type: () => CommentResponseDto, isArray: true })
+  replies?: CommentResponseDto[];
+
+  constructor(
+    comment: Comment,
+    likesCount: number = 0,
+    isLiked: boolean = false,
+  ) {
     this.id = comment.id;
     this.postId = comment.postId;
     this.parentId = comment.parentId ?? null;
@@ -32,5 +45,8 @@ export class CommentResponseDto {
     this.content = comment.content;
     this.createdAt = comment.createdAt.toISOString();
     this.updatedAt = comment.updatedAt.toISOString();
+    this.likesCount = likesCount;
+    this.isLiked = isLiked;
+    this.replies = [];
   }
 }

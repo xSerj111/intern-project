@@ -37,15 +37,42 @@ export class CommentsController {
 
   // Example route: GET /comments/post/1234sd-123d-213132.....
   @Get('post/:postId')
+  @ApiOperation({ summary: 'Get comments thread for a post' })
   async getCommentsByPost(
     @CurrentUser('sub') userId: string,
     @Param('postId', ParseUUIDPipe) postId: string,
   ): Promise<CommentResponseDto[]> {
-    const comments = await this.commentsService.getCommentsByPost(
+    const flatComments = await this.commentsService.getCommentsByPost(
       userId,
       postId,
     );
-    return comments.map((comment) => new CommentResponseDto(comment));
+
+    const enriched = await this.commentsService.enrichCommentsWithLikes(
+      userId,
+      flatComments,
+    );
+
+    const dtos = enriched.map(
+      (e) => new CommentResponseDto(e.comment, e.likesCount, e.isLiked),
+    );
+
+    const commentMap = new Map<string, CommentResponseDto>();
+    const rootComments: CommentResponseDto[] = [];
+
+    dtos.forEach((dto) => {
+      if (dto.parentId) {
+        const parent = commentMap.get(dto.parentId);
+        if (parent) {
+          parent.replies?.push(dto);
+        } else {
+          rootComments.push(dto);
+        }
+      } else {
+        rootComments.push(dto);
+      }
+    });
+
+    return rootComments;
   }
 
   @Patch(':id')

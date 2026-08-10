@@ -131,4 +131,40 @@ export class CommentsService {
       this.logger.debug('Comment liked', { props: { commentId, userId } });
     }
   }
+
+  async enrichCommentsWithLikes(userId: string, comments: Comment[]) {
+    if (comments.length === 0) return [];
+
+    const commentIds = comments.map((c) => c.id);
+
+    const likesData = await this.commentLikeRepository
+      .createQueryBuilder('like')
+      .select('like.commentId', 'commentId')
+      .addSelect('COUNT(like.id)', 'likesCount')
+      .addSelect(
+        `SUM(CASE WHEN like.userId = :userId THEN 1 ELSE 0 END)`,
+        'isLiked',
+      )
+      .where('like.commentId IN (:...commentIds)', { commentIds })
+      .setParameter('userId', userId)
+      .groupBy('like.commentId')
+      .getRawMany();
+
+    const likesMap = new Map<string, { count: number; isLiked: boolean }>();
+    likesData.forEach((data) => {
+      likesMap.set(data.commentId, {
+        count: parseInt(data.likesCount || '0', 10),
+        isLiked: parseInt(data.isLiked || '0', 10) > 0,
+      });
+    });
+
+    return comments.map((comment) => {
+      const stats = likesMap.get(comment.id) || { count: 0, isLiked: false };
+      return {
+        comment,
+        likesCount: stats.count,
+        isLiked: stats.isLiked,
+      };
+    });
+  }
 }
