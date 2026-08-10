@@ -9,6 +9,9 @@ import type { IFollowRepository } from '../follows/domain/interfaces/follow-repo
 import { InjectRepository } from '@nestjs/typeorm';
 import { PostLike } from './domain/entities/post-like.entity';
 import { In, Repository } from 'typeorm';
+import { UserPrivacyPortKey } from '../follows/domain/interfaces/user-privacy.port';
+import type { IUserPrivacyPort } from '../follows/domain/interfaces/user-privacy.port';
+import { FollowStatus } from '../follows/domain/enums/follow-status.enum';
 
 @Injectable()
 export class PostsService {
@@ -19,6 +22,8 @@ export class PostsService {
     private readonly followRepository: IFollowRepository,
     @InjectRepository(PostLike)
     private readonly postLikeRepository: Repository<PostLike>,
+    @Inject(UserPrivacyPortKey)
+    private readonly userPrivacyPort: IUserPrivacyPort,
   ) {}
 
   async toggleLike(userId: string, postId: string): Promise<void> {
@@ -91,9 +96,31 @@ export class PostsService {
     return savedPost;
   }
 
-  async getPost(id: string): Promise<Post> {
+  async getPost(userId: string, id: string): Promise<Post> {
     // author is joined via the repository's default relations.
     const retrievedPost = await this.postRepository.findOneByIdOrThrow(id);
+
+    if (retrievedPost.authorId !== userId) {
+      const isPrivate = await this.userPrivacyPort.isUserPrivate(
+        retrievedPost.authorId,
+      );
+
+      if (isPrivate) {
+        const follow = await this.followRepository.findByFollowerAndFollowing(
+          userId,
+          retrievedPost.authorId,
+        );
+
+        if (!follow || follow.status !== FollowStatus.ACCEPTED) {
+          this.logger.warn('Unauthorized access attempt to private post', {
+            props: { userId, postId: id },
+          });
+          throw new ForbiddenException(
+            'This profile is private. You must follow them to see their posts.',
+          );
+        }
+      }
+    }
     this.logger.debug('Post retrieved', {
       props: { postId: retrievedPost.id },
     });
@@ -106,7 +133,7 @@ export class PostsService {
     id: string,
     updatePostDto: UpdatePostDto,
   ): Promise<Post> {
-    const post = await this.getPost(id);
+    const post = await this.getPost(userId, id);
 
     if (post.authorId !== userId) {
       throw new ForbiddenException('You are not allowed to update this post');
@@ -120,7 +147,7 @@ export class PostsService {
   }
 
   async softDeletePost(userId: string, id: string): Promise<void> {
-    const post = await this.getPost(id);
+    const post = await this.getPost(userId, id);
 
     if (post.authorId !== userId) {
       throw new ForbiddenException('You are not allowed to delete this post');
@@ -131,7 +158,7 @@ export class PostsService {
   }
 
   async publishPost(userId: string, id: string): Promise<Post> {
-    const post = await this.getPost(id);
+    const post = await this.getPost(userId, id);
 
     if (post.authorId !== userId) {
       throw new ForbiddenException('You are not allowed to publish this post');
@@ -146,7 +173,7 @@ export class PostsService {
   }
 
   async archivePost(userId: string, id: string): Promise<Post> {
-    const post = await this.getPost(id);
+    const post = await this.getPost(userId, id);
 
     if (post.authorId !== userId) {
       throw new ForbiddenException('You are not allowed to archive this post');
