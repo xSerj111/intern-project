@@ -14,6 +14,9 @@ import { Comment } from './domain/entities/comment.entity';
 import { CommentRepository } from './infrastructure/repository/comment.repository';
 import type { IPostVerificationPort } from './domain/interfaces/post-verification.port';
 import { PostVerificationPortKey } from './domain/interfaces/post-verification.port';
+import { InjectRepository } from '@nestjs/typeorm';
+import { CommentLike } from './domain/entities/comment-like.entity';
+import { Repository } from 'typeorm';
 
 @Injectable()
 export class CommentsService {
@@ -22,6 +25,8 @@ export class CommentsService {
     private readonly commentRepository: CommentRepository,
     @Inject(PostVerificationPortKey)
     private readonly postVerificationPort: IPostVerificationPort,
+    @InjectRepository(CommentLike)
+    private readonly commentLikeRepository: Repository<CommentLike>,
   ) {}
 
   async createComment(
@@ -98,5 +103,32 @@ export class CommentsService {
     this.logger.debug('Comment soft-deleted', {
       props: { commentId: comment.id },
     });
+  }
+
+  async toggleLike(userId: string, commentId: string): Promise<void> {
+    await this.commentRepository.findOneByIdOrThrow(commentId);
+
+    const existingLike = await this.commentLikeRepository.findOne({
+      where: { userId, commentId },
+      withDeleted: true,
+    });
+
+    if (existingLike) {
+      if (existingLike.deletedAt) {
+        await this.commentLikeRepository.restore(existingLike.id);
+        this.logger.debug('Comment like restored', {
+          props: { commentId, userId },
+        });
+      } else {
+        await this.commentLikeRepository.softRemove(existingLike);
+        this.logger.debug('Comment like soft-removed', {
+          props: { commentId, userId },
+        });
+      }
+    } else {
+      const newLike = this.commentLikeRepository.create({ userId, commentId });
+      await this.commentLikeRepository.save(newLike);
+      this.logger.debug('Comment liked', { props: { commentId, userId } });
+    }
   }
 }

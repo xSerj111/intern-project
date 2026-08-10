@@ -14,7 +14,7 @@ import {
 import { CommentsService } from './comments.service';
 import { CreateCommentDto, UpdateCommentDto } from '@repo/shared';
 import { CommentResponseDto } from './dto/comment-response.dto';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 
@@ -66,5 +66,15 @@ export class CommentsController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<void> {
     await this.commentsService.softDeleteComment(userId, id);
+  }
+
+  @HttpPost(':id/like')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Toggle like on a comment' })
+  async toggleLike(
+    @CurrentUser('sub') userId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<void> {
+    await this.commentsService.toggleLike(userId, id);
   }
 }
