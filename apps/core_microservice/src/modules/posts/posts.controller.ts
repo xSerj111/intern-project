@@ -97,7 +97,7 @@ export class PostsController {
     @CurrentUser('sub') userId: string,
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<PostResponseDto> {
-    const post = await this.postsService.getPost(id);
+    const post = await this.postsService.getPost(userId, id);
 
     const [enriched] = await this.postsService.enrichPostsWithLikes(userId, [
       post,

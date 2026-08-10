@@ -46,6 +46,9 @@ export class Post extends TypeormEntityBase {
   @Column({ type: 'enum', enum: PostStatus, default: PostStatus.Draft })
   status!: PostStatus;
 
+  @Column({ type: 'boolean', default: false })
+  authorIsPrivate!: boolean;
+
   @OneToMany('Comment', 'post')
   comments!: Comment[];
 

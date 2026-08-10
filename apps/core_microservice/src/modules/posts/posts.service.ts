@@ -27,7 +27,7 @@ export class PostsService {
   ) {}
 
   async toggleLike(userId: string, postId: string): Promise<void> {
-    await this.getPost(postId);
+    await this.getPost(userId, postId);
 
     const existingLike = await this.postLikeRepository.findOne({
       where: { userId, postId },

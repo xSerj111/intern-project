@@ -51,6 +51,7 @@ export class PostRepository extends TypeormRepositoryBase<Post, PostProps> {
       where: {
         content: ILike(`%${keyword}%`),
         status: PostStatus.Published,
+        authorIsPrivate: false,
       },
       relations: { author: true, assets: true },
       order: {
