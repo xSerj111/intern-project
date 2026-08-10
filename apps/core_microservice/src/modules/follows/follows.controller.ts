@@ -71,4 +71,35 @@ export class FollowsController {
   ): Promise<void> {
     return this.followsService.unfollow(followerId, followingId);
   }
+
+  @Get('requests')
+  @ApiOperation({
+    summary: 'Get pending follow requests (for private profiles',
+  })
+  async getRequests(
+    @CurrentUser('sub') userId: string,
+  ): Promise<FollowResponseDto[]> {
+    const requests = await this.followsService.getPendingRequests(userId);
+    return requests.map((req) => new FollowResponseDto(req));
+  }
+
+  @Post('requests/:followerId/accept')
+  @ApiOperation({ summary: 'Accept a pending follow request' })
+  async acceptRequest(
+    @CurrentUser('sub') userId: string,
+    @Param('followerId', ParseUUIDPipe) followerId: string,
+  ): Promise<FollowResponseDto> {
+    const follow = await this.followsService.acceptRequest(userId, followerId);
+    return new FollowResponseDto(follow);
+  }
+
+  @Post('request/:followerId/reject')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Reject a pending follow request' })
+  async rejectRequest(
+    @CurrentUser('sub') userId: string,
+    @Param('followerId', ParseUUIDPipe) followerId: string,
+  ): Promise<void> {
+    await this.followsService.rejectRequest(userId, followerId);
+  }
 }

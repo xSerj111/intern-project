@@ -1,7 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IFollowResponse } from '@repo/contracts';
 import { Follow } from '../domain/entities/follow.entity';
-import { FollowStatus } from '../domain/follow-status.enum';
+import { FollowStatus } from '../domain/enums/follow-status.enum';
 export class FollowResponseDto implements IFollowResponse {
   @ApiProperty() id: string;
   @ApiProperty() followerId: string;

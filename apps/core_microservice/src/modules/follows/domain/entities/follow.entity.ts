@@ -9,7 +9,7 @@ import {
   Unique,
 } from 'typeorm';
 import { FollowProps } from '../interfaces/follow.props';
-import { FollowStatus } from '../follow-status.enum';
+import { FollowStatus } from '../enums/follow-status.enum';
 
 @Entity('follows')
 @Unique(['followerId', 'followingId'])
@@ -36,6 +36,8 @@ export class Follow extends TypeormEntityBase implements FollowProps {
     const follow = new Follow();
     follow.followerId = props.followerId;
     follow.followingId = props.followerId;
+    follow.status = props.status ?? FollowStatus.ACCEPTED;
+
     return follow;
   }
 }
