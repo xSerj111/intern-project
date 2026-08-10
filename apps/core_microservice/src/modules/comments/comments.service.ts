@@ -17,6 +17,7 @@ import { PostVerificationPortKey } from './domain/interfaces/post-verification.p
 import { InjectRepository } from '@nestjs/typeorm';
 import { CommentLike } from './domain/entities/comment-like.entity';
 import { Repository } from 'typeorm';
+import { CommentThreadNode } from './domain/interfaces/comment-thread-node.interface';
 
 @Injectable()
 export class CommentsService {
@@ -130,6 +131,50 @@ export class CommentsService {
       await this.commentLikeRepository.save(newLike);
       this.logger.debug('Comment liked', { props: { commentId, userId } });
     }
+  }
+
+  async getCommentsTreeByPost(
+    userId: string,
+    postId: string,
+  ): Promise<CommentThreadNode[]> {
+    await this.postVerificationPort.verifyPostAccess(userId, postId);
+
+    const flatComments = await this.commentRepository.findByPost(postId);
+
+    const enriched = await this.enrichCommentsWithLikes(userId, flatComments);
+
+    const commentMap = new Map<string, CommentThreadNode>();
+
+    const rootNodes: CommentThreadNode[] = [];
+
+    enriched.forEach((e) => {
+      commentMap.set(e.comment.id, {
+        comment: e.comment,
+        likesCount: e.likesCount,
+        isLiked: e.isLiked,
+        replies: [],
+      });
+    });
+
+    enriched.forEach((e) => {
+      const node = commentMap.get(e.comment.id)!;
+
+      if (e.comment.parentId) {
+        const parent = commentMap.get(e.comment.parentId);
+        if (parent) {
+          parent.replies.push(node);
+        } else {
+          rootNodes.push(node);
+        }
+      } else {
+        rootNodes.push(node);
+      }
+    });
+
+    this.logger.debug('Comment tree built', {
+      props: { postId, rootNodesCount: rootNodes.length },
+    });
+    return rootNodes;
   }
 
   async enrichCommentsWithLikes(userId: string, comments: Comment[]) {

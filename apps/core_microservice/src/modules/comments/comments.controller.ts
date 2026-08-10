@@ -42,37 +42,22 @@ export class CommentsController {
     @CurrentUser('sub') userId: string,
     @Param('postId', ParseUUIDPipe) postId: string,
   ): Promise<CommentResponseDto[]> {
-    const flatComments = await this.commentsService.getCommentsByPost(
+    const commentTree = await this.commentsService.getCommentsTreeByPost(
       userId,
       postId,
     );
 
-    const enriched = await this.commentsService.enrichCommentsWithLikes(
-      userId,
-      flatComments,
-    );
+    const mapToDto = (node: any): CommentResponseDto => {
+      const dto = new CommentResponseDto(
+        node.comment,
+        node.likesCount,
+        node.isLiked,
+      );
+      dto.replies = node.replies.map((reply: any) => mapToDto(reply));
+      return dto;
+    };
 
-    const dtos = enriched.map(
-      (e) => new CommentResponseDto(e.comment, e.likesCount, e.isLiked),
-    );
-
-    const commentMap = new Map<string, CommentResponseDto>();
-    const rootComments: CommentResponseDto[] = [];
-
-    dtos.forEach((dto) => {
-      if (dto.parentId) {
-        const parent = commentMap.get(dto.parentId);
-        if (parent) {
-          parent.replies?.push(dto);
-        } else {
-          rootComments.push(dto);
-        }
-      } else {
-        rootComments.push(dto);
-      }
-    });
-
-    return rootComments;
+    return commentTree.map((node) => mapToDto(node));
   }
 
   @Patch(':id')
