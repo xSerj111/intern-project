@@ -93,7 +93,7 @@ export class FollowsController {
     return new FollowResponseDto(follow);
   }
 
-  @Post('request/:followerId/reject')
+  @Post('requests/:followerId/reject')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Reject a pending follow request' })
   async rejectRequest(

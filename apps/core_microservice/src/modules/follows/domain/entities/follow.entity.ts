@@ -35,7 +35,7 @@ export class Follow extends TypeormEntityBase implements FollowProps {
   static create(props: FollowProps): Follow {
     const follow = new Follow();
     follow.followerId = props.followerId;
-    follow.followingId = props.followerId;
+    follow.followingId = props.followingId;
     follow.status = props.status ?? FollowStatus.ACCEPTED;
 
     return follow;
