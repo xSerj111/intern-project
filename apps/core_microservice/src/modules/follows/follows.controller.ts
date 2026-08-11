@@ -8,6 +8,7 @@ import {
   Param,
   ParseUUIDPipe,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import {
@@ -21,6 +22,7 @@ import { CreateFollowDto } from './dto/create-follow.dto';
 import { FollowResponseDto } from './dto/follow-response.dto';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
+import { PaginationQueryDto } from './dto/pagination-query.dto';
 
 @ApiTags('Follows')
 @ApiBearerAuth()
@@ -44,25 +46,47 @@ export class FollowsController {
     return new FollowResponseDto(follow); // translate typeORM entity for JSON contract
   }
 
-  @Get(':userId/followers')
-  @ApiOperation({ summary: 'Get the list of followers for that user' })
-  async getFollowers(
-    @Param('userId', ParseUUIDPipe) userId: string,
-  ): Promise<FollowResponseDto[]> {
-    const followers = await this.followsService.getFollowers(userId);
-    return followers.map((f) => new FollowResponseDto(f));
+  @Get('users/:userId/followers')
+  @ApiOperation({ summary: 'Get paginated list of followers for a user' })
+  @ApiResponse({ status: 200, description: 'Paginated list of users' })
+  async getFollowersList(
+    @CurrentUser('sub') requesterId: string,
+    @Param('userId', ParseUUIDPipe) targetUserId: string,
+    @Query() query: PaginationQueryDto,
+  ) {
+    // Ustawiamy wartosci domyslne, jesli frontend ich nie poda
+    const limit = query.limit || 20;
+    // Matematyka paginacji: Strona 1 to offset 0. Strona 2 (przy limicie 20) to offset 20.
+    const offset = ((query.page || 1) - 1) * limit;
+
+    return this.followsService.getFollowersList(
+      requesterId,
+      targetUserId,
+      limit,
+      offset,
+    );
   }
 
-  @Get(':userId/following')
-  @ApiOperation({ summary: 'Get the list of users followed by the user' })
-  async getFollowing(
-    @Param('userId', ParseUUIDPipe) userId: string,
-  ): Promise<FollowResponseDto[]> {
-    const following = await this.followsService.getFollowing(userId);
-    return following.map((f) => new FollowResponseDto(f));
+  @Get('users/:userId/following')
+  @ApiResponse({ status: 200, description: 'Paginated list of users' })
+  @ApiOperation({ summary: 'Get paginated list of following for a user' })
+  async getFollowingList(
+    @CurrentUser('sub') requesterId: string,
+    @Param('userId', ParseUUIDPipe) targetUserId: string,
+    @Query() query: PaginationQueryDto,
+  ) {
+    const limit = query.limit || 20;
+    const offset = ((query.page || 1) - 1) * limit;
+
+    return this.followsService.getFollowingList(
+      requesterId,
+      targetUserId,
+      limit,
+      offset,
+    );
   }
 
-  @Delete(':followingId')
+  @Delete('users/:followingId')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Unfollow a user' })
   async unfollow(
