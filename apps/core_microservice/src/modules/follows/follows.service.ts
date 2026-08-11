@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
@@ -114,5 +115,74 @@ export class FollowsService {
       await this.followRepository.delete(follow);
       this.logger.debug('Follow removed', { props: { followId: follow.id } });
     }
+  }
+
+  async getFollowersList(
+    requesterId: string,
+    targetUserId: string,
+    limit: number,
+    offset: number,
+  ) {
+    const isProfilePrivate =
+      await this.userPrivacyPort.isUserPrivate(targetUserId);
+
+    if (isProfilePrivate && requesterId !== targetUserId) {
+      const followRelation =
+        await this.followRepository.findByFollowerAndFollowing(
+          requesterId,
+          targetUserId,
+        );
+
+      const isAcceptedFollower =
+        followRelation?.status === FollowStatus.ACCEPTED;
+
+      if (!isAcceptedFollower) {
+        throw new ForbiddenException(
+          'This profile is private. You must follow this user to see their followers.',
+        );
+      }
+    }
+    const [follows, totalCount] = await this.followRepository.getFollowers(
+      targetUserId,
+      limit,
+      offset,
+    );
+
+    return { follows, totalCount };
+  }
+
+  async getFollowingList(
+    requesterId: string,
+    targetUserId: string,
+    limit: number,
+    offset: number,
+  ) {
+    const isProfilePrivate =
+      await this.userPrivacyPort.isUserPrivate(targetUserId);
+
+    if (isProfilePrivate && requesterId !== targetUserId) {
+      const followRelation =
+        await this.followRepository.findByFollowerAndFollowing(
+          requesterId,
+          targetUserId,
+        );
+
+      const isAcceptedFollower =
+        followRelation?.status === FollowStatus.ACCEPTED;
+
+      if (!isAcceptedFollower) {
+        throw new ForbiddenException(
+          'This profile is private. You must follow this user to see who they are following.',
+        );
+      }
+    }
+
+    const [follows, totalCount] = await this.followRepository.getFollowing(
+      targetUserId,
+      limit,
+      offset,
+    );
+
+    return { follows, totalCount };
   }
 }
