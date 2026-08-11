@@ -8,18 +8,27 @@ import {
 import { LoggerKey, type Logger } from '@repo/shared';
 import { FollowRepository } from './infrastructure/repository/follow.repository';
 import { Follow } from './domain/entities/follow.entity';
-import { UserPrivacyPortKey } from './domain/interfaces/user-privacy.port';
-import type { IUserPrivacyPort } from './domain/interfaces/user-privacy.port';
+import {
+  UserPrivacyPortKey,
+  type IUserPrivacyPort,
+} from './domain/interfaces/user-privacy.port';
+import {
+  UserProfilePortKey,
+  type IUserProfilePort,
+  type UserProfileDto,
+} from './domain/interfaces/user-profile.port';
 import { FollowStatus } from './domain/enums/follow-status.enum';
+import { FollowUserResponseDto } from '../dto/follow-user-response.dto';
 
 @Injectable()
 export class FollowsService {
-  // injecting our adapter, not a standard TypeORM repo!!
   constructor(
     @Inject(LoggerKey) private readonly logger: Logger,
     private readonly followRepository: FollowRepository,
     @Inject(UserPrivacyPortKey)
     private readonly userPrivacyPort: IUserPrivacyPort,
+    @Inject(UserProfilePortKey)
+    private readonly userProfilePort: IUserProfilePort,
   ) {}
 
   async follow(followerId: string, followingId: string): Promise<Follow> {
@@ -31,7 +40,7 @@ export class FollowsService {
       followingId,
     );
     if (existing) {
-      return existing; //
+      return existing;
     }
 
     const isPrivate = await this.userPrivacyPort.isUserPrivate(followingId);
@@ -122,7 +131,7 @@ export class FollowsService {
     targetUserId: string,
     limit: number,
     offset: number,
-  ) {
+  ): Promise<{ items: FollowUserResponseDto[]; totalCount: number }> {
     const isProfilePrivate =
       await this.userPrivacyPort.isUserPrivate(targetUserId);
 
@@ -132,23 +141,40 @@ export class FollowsService {
           requesterId,
           targetUserId,
         );
-
-      const isAcceptedFollower =
-        followRelation?.status === FollowStatus.ACCEPTED;
-
-      if (!isAcceptedFollower) {
+      if (followRelation?.status !== FollowStatus.ACCEPTED) {
         throw new ForbiddenException(
           'This profile is private. You must follow this user to see their followers.',
         );
       }
     }
+
     const [follows, totalCount] = await this.followRepository.getFollowers(
       targetUserId,
       limit,
       offset,
     );
 
-    return { follows, totalCount };
+    if (follows.length === 0) {
+      return { items: [], totalCount: 0 };
+    }
+
+    const followerIds = follows.map((f) => f.followerId);
+    const profiles = await this.userProfilePort.getProfilesByIds(followerIds);
+
+    // Slownik umozliwiajacy szybki odczyt profili
+    const profilesMap = new Map<string, UserProfileDto>();
+    profiles.forEach((p) => profilesMap.set(p.id, p));
+
+    const items = follows.map((follow) => {
+      // Zabezpieczenie przed brakiem profilu (np. jesli usunieto uzytkownika z pominieciem procedur bazy)
+      const profile = profilesMap.get(follow.followerId) || {
+        id: follow.followerId,
+        username: 'Unknown User',
+      };
+      return new FollowUserResponseDto(follow, profile, true);
+    });
+
+    return { items, totalCount };
   }
 
   async getFollowingList(
@@ -156,7 +182,7 @@ export class FollowsService {
     targetUserId: string,
     limit: number,
     offset: number,
-  ) {
+  ): Promise<{ items: FollowUserResponseDto[]; totalCount: number }> {
     const isProfilePrivate =
       await this.userPrivacyPort.isUserPrivate(targetUserId);
 
@@ -166,11 +192,7 @@ export class FollowsService {
           requesterId,
           targetUserId,
         );
-
-      const isAcceptedFollower =
-        followRelation?.status === FollowStatus.ACCEPTED;
-
-      if (!isAcceptedFollower) {
+      if (followRelation?.status !== FollowStatus.ACCEPTED) {
         throw new ForbiddenException(
           'This profile is private. You must follow this user to see who they are following.',
         );
@@ -183,6 +205,24 @@ export class FollowsService {
       offset,
     );
 
-    return { follows, totalCount };
+    if (follows.length === 0) {
+      return { items: [], totalCount: 0 };
+    }
+
+    const followingIds = follows.map((f) => f.followingId);
+    const profiles = await this.userProfilePort.getProfilesByIds(followingIds);
+
+    const profilesMap = new Map<string, UserProfileDto>();
+    profiles.forEach((p) => profilesMap.set(p.id, p));
+
+    const items = follows.map((follow) => {
+      const profile = profilesMap.get(follow.followingId) || {
+        id: follow.followingId,
+        username: 'Unknown User',
+      };
+      return new FollowUserResponseDto(follow, profile, false);
+    });
+
+    return { items, totalCount };
   }
 }
