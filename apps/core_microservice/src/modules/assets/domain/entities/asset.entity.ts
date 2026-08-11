@@ -1,39 +1,33 @@
-import {
-  Entity,
-  PrimaryGeneratedColumn,
-  Column,
-  CreateDateColumn,
-  UpdateDateColumn,
-  DeleteDateColumn,
-} from 'typeorm';
+import { Entity, Column, Index } from 'typeorm';
+import { TypeormEntityBase } from '@repo/shared';
 
 @Entity('assets')
-export class Asset {
-  @PrimaryGeneratedColumn('uuid')
-  id!: string;
+export class Asset extends TypeormEntityBase {
+  @Index()
+  @Column({ type: 'uuid' })
+  uploaderId!: string;
 
-  // The actual CDN link or storage path
   @Column({ type: 'varchar' })
   url!: string;
 
-  // e.g., 'IMAGE', 'VIDEO', 'DOCUMENT'
-  @Column({ type: 'varchar', length: 50 })
-  type!: string;
+  @Column({ type: 'varchar', length: 100 })
+  mimeType!: string;
 
-  // e.g., 'image/jpeg', 'video/mp4' (useful for frontend rendering rules)
-  @Column({ type: 'varchar', length: 100, nullable: true })
-  mimeType?: string;
+  @Column({ type: 'int' })
+  size!: number;
 
-  // File size in bytes (useful for storage quotas and analytics)
-  @Column({ type: 'int', nullable: true })
-  size?: number;
-
-  @CreateDateColumn()
-  createdAt!: Date;
-
-  @UpdateDateColumn()
-  updatedAt!: Date;
-
-  @DeleteDateColumn()
-  deletedAt!: Date;
+  // Factory wymuszająca poprawne utworzenie obiektu
+  static create(props: {
+    uploaderId: string;
+    url: string;
+    mimeType: string;
+    size: number;
+  }): Asset {
+    const asset = new Asset();
+    asset.uploaderId = props.uploaderId;
+    asset.url = props.url;
+    asset.mimeType = props.mimeType;
+    asset.size = props.size;
+    return asset;
+  }
 }
