@@ -18,6 +18,12 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { CommentLike } from './domain/entities/comment-like.entity';
 import { Repository } from 'typeorm';
 import { CommentThreadNode } from './domain/interfaces/comment-thread-node.interface';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { UserMentionedEvent } from '@repo/shared';
+import {
+  UserSearchPortKey,
+  type IUserSearchPort,
+} from './domain/interfaces/user-search.port';
 
 @Injectable()
 export class CommentsService {
@@ -28,6 +34,9 @@ export class CommentsService {
     private readonly postVerificationPort: IPostVerificationPort,
     @InjectRepository(CommentLike)
     private readonly commentLikeRepository: Repository<CommentLike>,
+    @Inject(UserSearchPortKey)
+    private readonly userSearchPort: IUserSearchPort,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async createComment(
@@ -45,6 +54,34 @@ export class CommentsService {
       content: createCommentDto.content,
     });
     const savedComment = await this.commentRepository.save(comment);
+
+    // --- LOGIKA WZMIANEK ---
+    const mentionedHandles = this.extractMentionedHandles(
+      createCommentDto.content,
+    );
+
+    if (mentionedHandles.length > 0) {
+      // Szukamy identyfikatorow dla oznaczonych osob
+      const users =
+        await this.userSearchPort.getUsersIdsByHandles(mentionedHandles);
+
+      // Dla kazdego znalezionego uzytkownika wysylamy powiadomienie
+      users.forEach((user) => {
+        // Zabezpieczenie: nie mozna wyslac powiadomienia do samego siebie
+        if (user.id !== userId) {
+          this.eventEmitter.emit(
+            'user.mentioned',
+            new UserMentionedEvent(
+              userId, // kto oznacza
+              user.id, // kto jest oznaczony
+              'COMMENT', // gdzie (w komentarzu)
+              savedComment.id, // ID tego konkretnego komentarza
+            ),
+          );
+        }
+      });
+    }
+
     this.logger.debug('Comment created', {
       props: { commentId: savedComment.id },
     });
@@ -211,5 +248,16 @@ export class CommentsService {
         isLiked: stats.isLiked,
       };
     });
+  }
+
+  private extractMentionedHandles(content: string): string[] {
+    // Regex szuka slow zaczynajacych sie od @, zawierajacych litery, cyfry i podkreslenia
+    const mentionRegex = /@([a-zA-Z0-9_]+)/g;
+    const matches = [...content.matchAll(mentionRegex)];
+
+    // Zwracamy same nazwy bez znaku @ (np. 'jan_kowalski')
+    // Uzywamy Set, aby usunac duplikaty, jesli ktos oznaczyl ta sama osobe dwa razy
+    const handles = matches.map((match) => match[1]);
+    return Array.from(new Set(handles));
   }
 }
