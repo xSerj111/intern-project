@@ -18,7 +18,9 @@ import {
   type UserProfileDto,
 } from './domain/interfaces/user-profile.port';
 import { FollowStatus } from './domain/enums/follow-status.enum';
-import { FollowUserResponseDto } from '../dto/follow-user-response.dto';
+import { FollowUserResponseDto } from './dto/follow-user-response.dto';
+import { EventEmitter2 } from '@nestjs/event-emitter';
+import { UserFollowedEvent } from '@repo/shared';
 
 @Injectable()
 export class FollowsService {
@@ -29,6 +31,7 @@ export class FollowsService {
     private readonly userPrivacyPort: IUserPrivacyPort,
     @Inject(UserProfilePortKey)
     private readonly userProfilePort: IUserProfilePort,
+    private readonly eventEmitter: EventEmitter2,
   ) {}
 
   async follow(followerId: string, followingId: string): Promise<Follow> {
@@ -57,6 +60,14 @@ export class FollowsService {
     this.logger.debug('Follow created', {
       props: { followId: savedFollow.id },
     });
+
+    if (initialStatus === FollowStatus.ACCEPTED) {
+      this.eventEmitter.emit(
+        'user.followed',
+        new UserFollowedEvent(followerId, followingId),
+      );
+    }
+
     return savedFollow;
   }
 
@@ -79,6 +90,11 @@ export class FollowsService {
     this.logger.debug('Follow request accepted', {
       props: { followId: follow.id },
     });
+
+    this.eventEmitter.emit(
+      'user.followed',
+      new UserFollowedEvent(followerId, userId),
+    );
 
     return follow;
   }
