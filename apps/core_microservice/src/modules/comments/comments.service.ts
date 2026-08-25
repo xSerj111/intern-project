@@ -83,7 +83,7 @@ export class CommentsService {
   }
 
   async softDeleteComment(userId: string, id: string): Promise<void> {
-    const comment = await this.commentRepository.findOneByIdOrThrow(id);
+    const comment = await this.commentRepository.findByIdWithPost(id);
 
     if (!comment) {
       throw new NotFoundException('Comment not found.');

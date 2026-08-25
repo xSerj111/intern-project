@@ -17,5 +17,6 @@ import { FollowsModule } from '../follows/follows.module';
   ],
   controllers: [PostsController],
   providers: [PostsService, PostRepository],
+  exports: [PostsService],
 })
 export class PostsModule {}
