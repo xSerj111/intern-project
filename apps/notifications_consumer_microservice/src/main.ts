@@ -1,18 +1,21 @@
-import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
-import { DomainExceptionFilter, WinstonLogger } from '@repo/shared';
-import 'reflect-metadata';
+import { MicroserviceOptions, Transport } from '@nestjs/microservices';
+import { NotificationsModule } from './notifications/notifications.module';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
-    logger: new WinstonLogger('NotificationsSystem'),
-  });
-
-  // Validate & sanitize incoming DTOs; map domain errors -> HTTP (shared infra).
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-  app.useGlobalFilters(new DomainExceptionFilter());
-
-  await app.listen(process.env.PORT ?? 3000);
+  const app = await NestFactory.createMicroservice<MicroserviceOptions>(
+    NotificationsModule,
+    {
+      transport: Transport.RMQ,
+      options: {
+        urls: ['amqp://localhost:5672'], // Domyslny adres lokalnego RabbitMQ
+        queue: 'notifications_queue',
+        queueOptions: {
+          durable: true, // Kolejka przetrwa restart serwera
+        },
+      },
+    },
+  );
+  await app.listen();
 }
 bootstrap();
