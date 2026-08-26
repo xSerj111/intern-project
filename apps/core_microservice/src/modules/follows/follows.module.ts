@@ -7,6 +7,7 @@ import { FollowRepository } from './infrastructure/repository/follow.repository'
 import { LoggerModule } from '@repo/shared';
 import { ClientsModule, Transport } from '@nestjs/microservices';
 import { FollowRepositoryKey } from './domain/interfaces/follow-repository.port';
+import { UserPrivacyPortKey } from './domain/interfaces/user-privacy.port';
 
 @Module({
   imports: [
@@ -33,11 +34,19 @@ import { FollowRepositoryKey } from './domain/interfaces/follow-repository.port'
       provide: FollowRepositoryKey,
       useExisting: FollowRepository,
     },
+    {
+      provide: UserPrivacyPortKey,
+      // Temporary mock
+      useValue: {
+        isUserPrivate: async (userId: string) => false,
+      },
+    },
   ],
   exports: [
     FollowsService,
     // Eksportujemy ten symbol, żeby inne moduły mogły z niego korzystać
     FollowRepositoryKey,
+    UserPrivacyPortKey,
   ],
 })
 export class FollowsModule {}
