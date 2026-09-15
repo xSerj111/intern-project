@@ -1,17 +1,21 @@
 import { DataSource } from 'typeorm';
-import { AuthUser } from '../entities/auth-user.entity';
-import { AuthSession } from '../entities/auth-session.entity';
+import { AuthUser } from '../domain/entities/auth-user.entity';
+import * as dotenv from 'dotenv';
+import * as path from 'path';
+import { env } from './env';
+
+dotenv.config({ path: path.resolve(__dirname, '../../../../.env') });
 
 export const AppDataSource = new DataSource({
   type: 'postgres',
-  host: process.env.POSTGRES_HOST || 'localhost',
-  port: parseInt(process.env.POSTGRES_PORT || '5432', 10),
-  username: process.env.POSTGRES_USER || 'postgres',
-  password: process.env.POSTGRES_PASSWORD || 'postgres',
-  database: process.env.DB_NAME_AUTH || 'innogram_auth',
+  host: env.db.host,
+  port: env.db.port,
+  username: env.db.username,
+  password: env.db.password,
+  database: env.db.database,
+  entities: [AuthUser],
   synchronize: false,
-  logging: process.env.NODE_ENV !== 'production',
-  entities: [AuthUser, AuthSession],
+  migrations: [__dirname + '/../migrations/*.ts'],
 });
 
 export async function initDatabase(): Promise<DataSource> {

@@ -6,8 +6,11 @@ export class AuthUser extends TypeormEntityBase {
   @Column({ unique: true })
   email!: string;
 
-  @Column()
-  passwordHash!: string;
+  @Column({ nullable: true })
+  passwordHash?: string;
+
+  @Column({ nullable: true, unique: true })
+  googleId?: string;
 
   @Column({ default: false })
   isEmailVerified!: boolean;
