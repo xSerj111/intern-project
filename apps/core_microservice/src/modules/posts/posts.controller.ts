@@ -12,7 +12,8 @@ import {
   Query,
 } from '@nestjs/common';
 import { PostsService } from './posts.service';
-import { CreatePostDto, UpdatePostDto } from '@repo/shared';
+import { CreatePostDto } from './dto/create-post.dto';
+import { UpdatePostDto } from './dto/update-post.dto';
 import { PostResponseDto } from './dto/post-response.dto';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { FeedQueryDto } from './dto/feed-query.dto';
@@ -42,8 +43,20 @@ export class PostsController {
       query.page,
       query.limit,
     );
+
+    const enrichedItems = await this.postsService.enrichPostsWithLikes(
+      userId,
+      items,
+    );
+
     return {
-      items: items.map((post) => new PostResponseDto(post)),
+      items: enrichedItems.map(
+        (e) =>
+          new PostResponseDto(e.post, {
+            likesCount: e.likesCount,
+            isLiked: e.isLiked,
+          }),
+      ),
       total,
       page: query.page,
       limit: query.limit,
@@ -51,15 +64,29 @@ export class PostsController {
   }
 
   @Get('search')
-  async searchPosts(@Query() query: SearchQueryDto) {
+  async searchPosts(
+    @CurrentUser('sub') userId: string,
+    @Query() query: SearchQueryDto,
+  ) {
     const { items, total } = await this.postsService.searchPosts(
       query.keyword,
       query.page,
       query.limit,
     );
 
+    const enrichedItems = await this.postsService.enrichPostsWithLikes(
+      userId,
+      items,
+    );
+
     return {
-      items: items.map((post) => new PostResponseDto(post)),
+      items: enrichedItems.map(
+        (e) =>
+          new PostResponseDto(e.post, {
+            likesCount: e.likesCount,
+            isLiked: e.isLiked,
+          }),
+      ),
       total,
       page: query.page,
       limit: query.limit,
@@ -68,9 +95,19 @@ export class PostsController {
 
   @Get(':id')
   async getPost(
+    @CurrentUser('sub') userId: string,
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<PostResponseDto> {
-    return new PostResponseDto(await this.postsService.getPost(id));
+    const post = await this.postsService.getPost(userId, id);
+
+    const [enriched] = await this.postsService.enrichPostsWithLikes(userId, [
+      post,
+    ]);
+
+    return new PostResponseDto(enriched.post, {
+      likesCount: enriched.likesCount,
+      isLiked: enriched.isLiked,
+    });
   }
 
   @Patch(':id')
@@ -107,5 +144,14 @@ export class PostsController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<void> {
     await this.postsService.softDeletePost(userId, id);
+  }
+
+  @HttpPost(':id/like')
+  @HttpCode(HttpStatus.OK)
+  async toggleLike(
+    @CurrentUser('sub') userId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<void> {
+    await this.postsService.toggleLike(userId, id);
   }
 }

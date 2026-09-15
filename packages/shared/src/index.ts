@@ -2,15 +2,15 @@
 export * from "./dtos/auth/create-user.dto";
 export * from "./dtos/auth/login.dto";
 export * from "./dtos/core/update-profile.dto";
-export * from "./dtos/core/create-post.dto";
 export * from "./dtos/core/create-comment.dto";
-export * from "./dtos/core/update-post.dto";
 export * from "./dtos/core/update-comment.dto";
 export * from "./dtos/auth/google-login.dto";
 export * from "./dtos/auth/refresh-token.dto";
 
 // Events
 export * from "./events/user-created.event";
+export * from "./events/user-followed.event";
+export * from "./events/user-mentioned.event";
 
 // NOTE: API contracts (request/response interfaces) live in the dependency-free
 // `@repo/contracts` package so the frontend can import them without pulling in

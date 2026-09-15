@@ -29,4 +29,13 @@ export class CommentRepository extends TypeormRepositoryBase<
       order: { createdAt: 'DESC' },
     });
   }
+
+  async findByIdWithPost(id: string): Promise<Comment | null> {
+    return this.repository.findOne({
+      where: { id },
+      relations: {
+        post: true,
+      },
+    });
+  }
 }

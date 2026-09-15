@@ -1,7 +1,7 @@
 # DDD & Hexagonal Architecture Guide — Innogram Monorepo
 
 **Audience:** Backend and full-stack developers working in the Innogram codebase.  
-**Last updated:** 2026-08-03  
+**Last updated:** 2026-08-10  
 **Monorepo root:** `intern-project/`
 
 ---
@@ -364,6 +364,53 @@ export class Comment extends TypeormEntityBase {
 }
 ```
 
+And `PostAsset` (in `modules/posts`), establishing a **1:N relationship** with `Post` that preserves carousel display ordering:
+
+```typescript
+// modules/posts/domain/entities/post-asset.entity.ts
+import { Entity, Column, ManyToOne, JoinColumn } from 'typeorm';
+import { TypeormEntityBase } from '@repo/shared';
+import type { Post } from './post.entity';
+
+@Entity('post_assets')
+export class PostAsset extends TypeormEntityBase {
+  @Column({ type: 'uuid' })
+  postId!: string;
+
+  @ManyToOne(() => Post, (post) => post.assets)
+  @JoinColumn({ name: 'postId' })
+  post!: Post;
+
+  @Column()
+  assetUrl!: string;
+
+  @Column({ type: 'int', default: 0 })
+  displayOrder!: number;   // Preserves carousel ordering — asset[0], asset[1], etc.
+
+  @Column({ type: 'varchar', nullable: true })
+  assetType?: string;       // e.g. 'image', 'video'
+
+  static create(props: { postId: string; assetUrl: string; displayOrder: number; assetType?: string }): PostAsset {
+    const asset = new PostAsset();
+    asset.postId = props.postId;
+    asset.assetUrl = props.assetUrl;
+    asset.displayOrder = props.displayOrder;
+    asset.assetType = props.assetType;
+    return asset;
+  }
+}
+```
+
+The relationship is mapped on the `Post` side via `@OneToMany`:
+
+```typescript
+// Inside Post entity:
+@OneToMany(() => PostAsset, (asset) => asset.post, { cascade: true, eager: true })
+assets!: PostAsset[];
+```
+
+**Design rationale:** Assets are loaded eagerly with the post because the carousel is a core part of the post's visual presentation. The `displayOrder` integer field preserves the user-defined ordering of assets within the carousel, ensuring deterministic rendering regardless of database insertion order.
+
 #### Layer 2: Domain Interfaces (`domain/interfaces/`)
 
 Two kinds of interfaces live here:
@@ -457,7 +504,7 @@ The `DomainExceptionFilter` (registered globally in `main.ts`) catches all `Doma
 | `DatabaseQueryError` | 500 Internal Server Error |
 | Any other `DomainError` subclass (e.g. `InvalidDisplayNameError`) | 400 Bad Request |
 
-This means entities can throw business errors without knowing anything about HTTP.
+This means entities can throw business errors without knowing anything about HTTP. The same filter pattern also maps domain errors thrown during post archiving — if a user attempts to archive a post they do not own, an `UnauthorizedError` is raised (→ 401), providing **IDOR protection** at the architectural boundary rather than through ad-hoc checks in every controller.
 
 #### Layer 4: DTOs (`dto/`)
 
@@ -2617,6 +2664,374 @@ Write the SQL for the `bookmarks` table with columns `id`, `userId`, `postId`, t
 
 ---
 
+## 8. Advanced Domain Patterns & System Optimizations
+
+> **Note:** This section documents architectural patterns and design choices introduced in PR4 (Posts & Feed) and PR5 (Social Interactions, Follows, and Privacy), building on the hexagonal foundation described in Sections 3–6.
+
+### 8.1 Posts & Assets Module (PR4)
+
+#### 8.1.1 `PostAsset` — 1:N Carousel Relationship
+
+The `PostAsset` entity (detailed in [Section 3.2 Layer 1](#layer-1-domain-entities-domainentities)) establishes a **1:N relationship** with `Post` via `@ManyToOne`/`@OneToMany`. Each post may carry zero or more media assets (images, videos) rendered as a carousel in the client. The `displayOrder` integer field preserves the user-defined ordering:
+
+```
+Post (1) ──── (N) PostAsset
+                    ├── assetUrl
+                    ├── displayOrder   ← determines carousel position
+                    └── assetType
+```
+
+Assets are loaded eagerly (`eager: true`) because the carousel is part of the post's visual identity — lazy-loading would add latency for every feed render without meaningful savings.
+
+#### 8.1.2 DomainExceptionFilter: Global Error-to-HTTP Mapping
+
+The `DomainExceptionFilter` (registered globally in `main.ts`, described in [Section 3.2 Layer 3](#layer-3-domain-errors-domainerrors)) maps every `DomainError` subclass to an HTTP status code. This eliminates the need for try-catch blocks in controllers and ensures consistent error responses across the entire API surface:
+
+| Layer | Responsibility |
+|-------|---------------|
+| Domain entity | Throws `DomainError` subclass (e.g., `InvalidPostStateError`) |
+| Service | Propagates the error — no HTTP awareness |
+| DomainExceptionFilter | Catches the error, maps to HTTP 400/401/404/409 |
+
+#### 8.1.3 IDOR Protection During Post Archiving
+
+When archiving a post (`DELETE /posts/:id`), the service verifies that the authenticated user owns the post. If ownership fails, an `UnauthorizedError` is thrown and mapped to HTTP 401 by the `DomainExceptionFilter`. This follows the same IDOR protection pattern established in `ProfilesService.updateOwnProfile()` (see [Section 3.2 Layer 6](#layer-6-service-profilesservicets)).
+
+### 8.2 High-Performance Toggle Like & Data Loader Pattern (PR5 Stage 1)
+
+#### 8.2.1 `PostLike` Entity — Soft-Delete Composite Key
+
+The `PostLike` entity models a user's like on a post using a **unique composite index** `(userId, postId)` and TypeORM's `@DeleteDateColumn()` for soft-deletion:
+
+```typescript
+// modules/posts/domain/entities/post-like.entity.ts
+@Entity('post_likes')
+@Unique(['userId', 'postId'])     // One like per user per post
+export class PostLike extends TypeormEntityBase {
+  @Column({ type: 'uuid' })
+  userId!: string;
+
+  @Column({ type: 'uuid' })
+  postId!: string;
+
+  @DeleteDateColumn()
+  deletedAt!: Date | null;        // null = active like; non-null = unliked (soft-removed)
+}
+```
+
+The `@DeleteDateColumn()` enables the **Toggle Like** pattern without destroying data — unlike timestamps persist as audit trails.
+
+#### 8.2.2 Idempotent Toggle Like Endpoint
+
+The `POST /posts/:id/like` endpoint operates **idempotently** — calling it multiple times produces the same result as calling it once:
+
+```typescript
+// PostsService.toggleLike()
+async toggleLike(userId: string, postId: string): Promise<boolean> {
+  // Check if a soft-deleted record already exists
+  const existing = await this.postLikeRepository.findOne({
+    where: { userId, postId },
+    withDeleted: true,             // Include soft-deleted rows
+  });
+
+  if (existing) {
+    if (existing.deletedAt === null) {
+      // Already liked → unlike: soft-remove
+      await this.postLikeRepository.softRemove(existing);
+      return false;                 // "unliked"
+    } else {
+      // Was previously unliked → re-like: restore
+      await this.postLikeRepository.recover(existing);
+      return true;                  // "liked"
+    }
+  }
+
+  // First-time like: create
+  const like = PostLike.create({ userId, postId });
+  await this.postLikeRepository.save(like);
+  return true;                      // "liked"
+}
+```
+
+**Key design decisions:**
+
+| Aspect | Approach | Rationale |
+|--------|----------|-----------|
+| Idempotency | `softRemove` / `recover` cycle | No error on double-tap; client can safely retry |
+| Concurrency | Database unique constraint | Prevents duplicate active likes at the DB level |
+| Audit trail | Soft-delete instead of hard-delete | Analytics can query like/unlike history |
+| Atomic toggle | Single read-then-write | Two concurrent toggles may race; acceptable for likes |
+
+#### 8.2.3 Data Loader Pattern — Solving the N+1 Query Problem
+
+When fetching a paginated feed of posts with like counts and the current user's like status, a naive approach would issue **N queries** — one per post — to count likes and check the user's status. This is the classic N+1 problem.
+
+The solution uses a **Data Loader** pattern with `QueryBuilder`:
+
+```typescript
+// PostRepository / FeedRepository
+
+// 1. Fetch the paginated posts (1 query)
+const posts = await this.repository.find({
+  where: feedCriteria,
+  order: { createdAt: 'DESC' },
+  take: limit,
+  skip: offset,
+});
+
+const postIds = posts.map(p => p.id);
+
+// 2. Batch-count likes for ALL posts in a single query (1 query)
+const likeCounts = await this.postLikeRepository
+  .createQueryBuilder('like')
+  .select('like.postId', 'postId')
+  .addSelect('COUNT(*)', 'count')
+  .where('like.postId IN (:...postIds)', { postIds })
+  .andWhere('like.deletedAt IS NULL')
+  .groupBy('like.postId')
+  .getRawMany<{ postId: string; count: string }>();
+
+// 3. Batch-check current user's like status (1 query)
+const userLikes = await this.postLikeRepository
+  .createQueryBuilder('like')
+  .select('like.postId', 'postId')
+  .where('like.userId = :userId', { userId })
+  .andWhere('like.postId IN (:...postIds)', { postIds })
+  .andWhere('like.deletedAt IS NULL')
+  .getRawMany<{ postId: string }>();
+
+// 4. Pair in memory using Map and Set — O(1) per post
+const countMap = new Map(likeCounts.map(c => [c.postId, Number(c.count)]));
+const userLikeSet = new Set(userLikes.map(l => l.postId));
+
+const enrichedPosts = posts.map(post => ({
+  ...post,
+  likeCount: countMap.get(post.id) ?? 0,
+  isLikedByCurrentUser: userLikeSet.has(post.id),
+}));
+```
+
+**Performance characteristics:**
+
+| Stage | Queries | Complexity |
+|-------|---------|------------|
+| Naive approach | 1 + N (N = number of posts) | O(N) DB round-trips |
+| Data Loader | 3 total (posts + counts + user status) | O(1) DB round-trips |
+| In-memory pairing | Map.get + Set.has | O(1) per post, O(N) total |
+
+The `GROUP BY` + `COUNT` aggregation runs inside PostgreSQL, which is optimized for this workload. The `Map` and `Set` data structures in Node.js then provide constant-time lookup during the mapping phase, ensuring the enrichment step does not degrade regardless of page size.
+
+### 8.3 Follows Module, Privacy, & Dependency Inversion (PR5 Stage 2)
+
+#### 8.3.1 `Follow` Entity — Junction Table for One-Way Relationships
+
+The `Follow` entity acts as a **Junction Table** (associative entity) modeling one-way follow relationships:
+
+```typescript
+// modules/follows/domain/entities/follow.entity.ts
+export enum FollowStatus {
+  PENDING = 'pending',
+  ACCEPTED = 'accepted',
+}
+
+@Entity('follows')
+@Unique(['followerId', 'followingId'])
+export class Follow extends TypeormEntityBase {
+  @Column({ type: 'uuid' })
+  followerId!: string;       // The user who initiates the follow
+
+  @Column({ type: 'uuid' })
+  followingId!: string;      // The user being followed
+
+  @Column({ type: 'enum', enum: FollowStatus, default: FollowStatus.PENDING })
+  status!: FollowStatus;     // PENDING or ACCEPTED
+
+  static create(props: { followerId: string; followingId: string; status: FollowStatus }): Follow {
+    const follow = new Follow();
+    if (props.followerId === props.followingId) {
+      throw new SelfFollowError(props.followerId);
+    }
+    follow.followerId = props.followerId;
+    follow.followingId = props.followingId;
+    follow.status = props.status;
+    return follow;
+  }
+}
+```
+
+**Key invariants enforced in the `static create()` factory:**
+
+| Rule | Enforcement | Error |
+|------|-------------|-------|
+| No self-follow | `followerId === followingId` check in factory | `SelfFollowError` (→ 400) |
+| One relationship per pair | `@Unique(['followerId', 'followingId'])` | `UniqueConstraintViolationError` (→ 409) |
+
+#### 8.3.2 Approval Workflow — PENDING / ACCEPTED Status
+
+The `FollowStatus` enum models a privacy-aware follow workflow:
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING: Follow request sent to private profile
+    [*] --> ACCEPTED: Follow request sent to public profile
+    PENDING --> ACCEPTED: Private profile owner approves
+    PENDING --> [*]: Request cancelled / rejected
+    ACCEPTED --> [*]: Unfollow
+```
+
+**Business logic:**
+
+- When User A follows a **public** profile (User B): `Follow.create()` sets `status = ACCEPTED` immediately.
+- When User A follows a **private** profile (User B): `Follow.create()` sets `status = PENDING`. User B must explicitly approve the follow request.
+- The status check is performed by querying the user's privacy flag through the `IUserPrivacyPort` (see [Section 8.3.3](#833-dependency-inversion--iuserprivacyport)).
+
+#### 8.3.3 Dependency Inversion — `IUserPrivacyPort`
+
+To decouple the Follows and Posts modules from the concrete user profile implementation (which may change or be extracted to a separate microservice), a **Dependency Inversion** pattern is applied via a port interface:
+
+```typescript
+// modules/follows/domain/interfaces/user-privacy.port.ts
+export interface IUserPrivacyPort {
+  isProfilePrivate(userId: string): Promise<boolean>;
+}
+
+export const UserPrivacyPortKey = Symbol.for('IUserPrivacyPort');
+```
+
+The adapter implementation lives in the infrastructure layer and delegates to `UserProfile` lookups. In the NestJS module, the binding is:
+
+```typescript
+// follows.module.ts
+@Module({
+  providers: [
+    FollowsService,
+    FollowRepository,
+    {
+      provide: UserPrivacyPortKey,
+      useFactory: (profileRepo: UserProfileRepository) => new UserPrivacyAdapter(profileRepo),
+      inject: [UserProfileRepository],
+    },
+  ],
+})
+```
+
+This means `FollowsService` and `PostsService` depend on the `IUserPrivacyPort` **abstraction**, not on `UserProfile` directly. If the user privacy flag is later moved to an external microservice, only the adapter changes — the domain services remain untouched.
+
+#### 8.3.4 Feed-Level Privacy Protection
+
+Privacy enforcement occurs at **two levels** — both at the repository layer, ensuring that unauthorized data never reaches application memory:
+
+**Level 1 — Feed queries (paginated):**
+
+```typescript
+// FeedRepository
+async getFeed(userId: string, limit: number, offset: number): Promise<Post[]> {
+  return this.postRepository
+    .createQueryBuilder('post')
+    // Include only posts from authors the user follows with ACCEPTED status
+    .innerJoin('follows', 'follow',
+      'follow.followingId = post.authorId AND follow.followerId = :userId AND follow.status = :status',
+      { userId, status: FollowStatus.ACCEPTED }
+    )
+    .orderBy('post.createdAt', 'DESC')
+    .take(limit)
+    .skip(offset)
+    .getMany();
+}
+```
+
+The `INNER JOIN` with `follow.status = 'accepted'` guarantees that posts from private profiles the user has not been approved to follow are **never fetched from the database**. This is enforced at the SQL level, not filtered in application memory — the privacy boundary is the database query itself.
+
+**Level 2 — Single post retrieval:**
+
+When a user requests a specific post (`GET /posts/:id`), the repository additionally verifies the relationship through the `IUserPrivacyPort`:
+
+```typescript
+async getPost(postId: string, requestingUserId: string): Promise<Post> {
+  const post = await this.postRepository.findOneByIdOrThrow(postId);
+
+  // If the author is private, verify the requester has an ACCEPTED follow
+  const isPrivate = await this.userPrivacyPort.isProfilePrivate(post.authorId);
+  if (isPrivate && post.authorId !== requestingUserId) {
+    const follow = await this.followRepository.findAcceptedRelationship(
+      requestingUserId, post.authorId
+    );
+    if (!follow) {
+      throw new UnauthorizedError('You do not have permission to view this post');
+    }
+  }
+
+  return post;
+}
+```
+
+### 8.4 Data Denormalization for Privacy-Preserving Search Pagination
+
+#### 8.4.1 Problem Statement
+
+The search module supports **full-text search** across posts with standard SQL pagination (`LIMIT`/`OFFSET`). The privacy requirement dictates that posts from private profiles must be excluded from search results unless the searching user has an accepted follow relationship with the author.
+
+Naive approach: fetch search results from the database, then filter out unauthorized posts in application memory. **This breaks pagination** — if 10 of 20 fetched posts are filtered out, the page may return fewer results than the client requested, and `OFFSET` becomes meaningless because the filter happens after the database slice.
+
+#### 8.4.2 Solution: Denormalized `authorIsPrivate` on `Post`
+
+To push the privacy filter into the SQL `WHERE` clause, the `Post` entity was extended with a **denormalized replica** of the author's privacy flag:
+
+```typescript
+// modules/posts/domain/entities/post.entity.ts
+@Entity('posts')
+export class Post extends TypeormEntityBase {
+  // ... existing columns ...
+
+  @Column({ type: 'boolean', default: false })
+  authorIsPrivate!: boolean;    // Denormalized from UserProfile.isPrivate
+}
+```
+
+**Maintenance strategy:**
+
+| Trigger | Action |
+|---------|--------|
+| Post creation | Copy `author.isPrivate` → `post.authorIsPrivate` |
+| Profile privacy toggled (public → private) | Batch UPDATE all posts by that author: `SET authorIsPrivate = true` |
+| Profile privacy toggled (private → public) | Batch UPDATE all posts by that author: `SET authorIsPrivate = false` |
+
+#### 8.4.3 Search Query with Hard Privacy Filter
+
+The denormalized field enables a **hard condition at the database level**:
+
+```typescript
+// SearchRepository
+async search(query: string, requestingUserId: string, limit: number, offset: number): Promise<Post[]> {
+  return this.postRepository
+    .createQueryBuilder('post')
+    .where('to_tsvector(post.content) @@ plainto_tsquery(:query)', { query })
+    .andWhere(
+      '(post.authorIsPrivate = false OR post.authorId IN ' +
+      '(SELECT follow.followingId FROM follows follow ' +
+      'WHERE follow.followerId = :userId AND follow.status = :accepted))',
+      { userId: requestingUserId, accepted: FollowStatus.ACCEPTED }
+    )
+    .orderBy('ts_rank(to_tsvector(post.content), plainto_tsquery(:query))', 'DESC')
+    .take(limit)
+    .skip(offset)
+    .getMany();
+}
+```
+
+**Why this works:**
+
+| Concern | Resolution |
+|---------|-----------|
+| Privacy | Private posts are excluded in the SQL `WHERE` — never reach application memory |
+| Pagination | `LIMIT`/`OFFSET` operate on the already-filtered result set — page sizes are deterministic |
+| Performance | The filter is a boolean column + subquery with indexes; PostgreSQL optimizes this efficiently |
+| Consistency | The denormalized flag is maintained synchronously on write; eventual consistency is acceptable for privacy toggle edge cases |
+
+The trade-off is classical denormalization: **write amplification** (privacy toggle triggers N updates) in exchange for **read efficiency** (search queries remain a single SQL statement with correct pagination). Given that privacy toggles are rare compared to search reads, this is a favorable trade-off.
+
+---
+
 ## Appendix: Project-Wide Pattern Reference
 
 ### A.1 All Module Folders in `core_microservice`
@@ -2626,10 +3041,10 @@ Write the SQL for the `bookmarks` table with columns `id`, `userId`, `postId`, t
 | `profiles` | `UserProfile`, `ProfileToProfileConfiguration` | Yes (`UserProfileRepository`) | Canonical reference module; `POST` removed — profiles created via `InternalEventsModule` |
 | `internal-events` | (none — routing layer) | No | Receives events from `auth_microservice`, delegates to domain modules |
 | `common` | (none — infrastructure) | No | `JwtAuthGuard`, `@CurrentUser` decorator |
-| `posts` | `Post`, `PostLike`, `PostAsset` | Yes (`PostRepository`) | Demonstrates `publish()` state machine pattern |
+| `posts` | `Post`, `PostLike`, `PostAsset` | Yes (`PostRepository`, `PostLikeRepository`) | `publish()` state machine; 1:N PostAsset carousel with `displayOrder`; toggle-like with Data Loader pattern |
 | `comments` | `Comment`, `CommentLike` | Yes (`CommentRepository`) | Demonstrates self-referencing `parentId` for nested comments |
 | `chats` | `Chat`, `ChatParticipant`, `Message`, `MessageAsset` | No (uses raw TypeORM) | To be refactored to the repository pattern |
-| `follows` | `Follow` | No (uses raw TypeORM) | To be refactored to the repository pattern |
+| `follows` | `Follow` | Yes (`FollowRepository`) | Junction table with one-way relationships; `FollowStatus` enum (PENDING/ACCEPTED); `IUserPrivacyPort` for dependency inversion |
 | `assets` | `Asset` | No (uses raw TypeORM) | To be refactored to the repository pattern |
 
 ### A.2 All Modules in `auth_microservice`

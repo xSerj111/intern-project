@@ -3,6 +3,7 @@ import { DomainError, TypeormEntityBase } from '@repo/shared';
 // Type-only, string-target relations: no runtime coupling to other modules.
 import type { Post } from '../../../posts/domain/entities/post.entity';
 import type { UserProfile } from '../../../profiles/domain/entities/user-profile.entity';
+import { CommentProps } from '../interfaces/comment.props';
 
 export class EmptyCommentError extends DomainError {
   constructor() {
@@ -11,7 +12,7 @@ export class EmptyCommentError extends DomainError {
 }
 
 @Entity('comments')
-export class Comment extends TypeormEntityBase {
+export class Comment extends TypeormEntityBase implements CommentProps {
   @Column({ type: 'uuid' })
   postId!: string;
 

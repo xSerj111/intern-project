@@ -6,6 +6,12 @@ import { Post } from './domain/entities/post.entity';
 import { PostRepository } from './infrastructure/repository/post.repository';
 import { PostAsset } from './domain/entities/post-asset.entity';
 import type { IFollowRepository } from '../follows/domain/interfaces/follow-repository.port';
+import { InjectRepository } from '@nestjs/typeorm';
+import { PostLike } from './domain/entities/post-like.entity';
+import { In, Repository } from 'typeorm';
+import { UserPrivacyPortKey } from '../follows/domain/interfaces/user-privacy.port';
+import type { IUserPrivacyPort } from '../follows/domain/interfaces/user-privacy.port';
+import { FollowStatus } from '../follows/domain/enums/follow-status.enum';
 
 @Injectable()
 export class PostsService {
@@ -14,8 +20,36 @@ export class PostsService {
     private readonly postRepository: PostRepository,
     @Inject(Symbol.for('IFollowRepository'))
     private readonly followRepository: IFollowRepository,
+    @InjectRepository(PostLike)
+    private readonly postLikeRepository: Repository<PostLike>,
+    @Inject(UserPrivacyPortKey)
+    private readonly userPrivacyPort: IUserPrivacyPort,
   ) {}
 
+  async toggleLike(userId: string, postId: string): Promise<void> {
+    await this.getPost(userId, postId);
+
+    const existingLike = await this.postLikeRepository.findOne({
+      where: { userId, postId },
+      withDeleted: true,
+    });
+
+    if (existingLike) {
+      if (existingLike.deletedAt) {
+        await this.postLikeRepository.restore(existingLike.id);
+        this.logger.debug('Post like restored', { props: { postId, userId } });
+      } else {
+        await this.postLikeRepository.softRemove(existingLike);
+        this.logger.debug('Post like soft-removed', {
+          props: { postId, userId },
+        });
+      }
+    } else {
+      const newLike = this.postLikeRepository.create({ userId, postId });
+      await this.postLikeRepository.save(newLike);
+      this.logger.debug('Post liked', { props: { postId, userId } });
+    }
+  }
   async getFeed(
     userId: string,
     page: number,
@@ -62,9 +96,31 @@ export class PostsService {
     return savedPost;
   }
 
-  async getPost(id: string): Promise<Post> {
+  async getPost(userId: string, id: string): Promise<Post> {
     // author is joined via the repository's default relations.
     const retrievedPost = await this.postRepository.findOneByIdOrThrow(id);
+
+    if (retrievedPost.authorId !== userId) {
+      const isPrivate = await this.userPrivacyPort.isUserPrivate(
+        retrievedPost.authorId,
+      );
+
+      if (isPrivate) {
+        const follow = await this.followRepository.findByFollowerAndFollowing(
+          userId,
+          retrievedPost.authorId,
+        );
+
+        if (!follow || follow.status !== FollowStatus.ACCEPTED) {
+          this.logger.warn('Unauthorized access attempt to private post', {
+            props: { userId, postId: id },
+          });
+          throw new ForbiddenException(
+            'This profile is private. You must follow them to see their posts.',
+          );
+        }
+      }
+    }
     this.logger.debug('Post retrieved', {
       props: { postId: retrievedPost.id },
     });
@@ -77,7 +133,7 @@ export class PostsService {
     id: string,
     updatePostDto: UpdatePostDto,
   ): Promise<Post> {
-    const post = await this.getPost(id);
+    const post = await this.getPost(userId, id);
 
     if (post.authorId !== userId) {
       throw new ForbiddenException('You are not allowed to update this post');
@@ -91,7 +147,7 @@ export class PostsService {
   }
 
   async softDeletePost(userId: string, id: string): Promise<void> {
-    const post = await this.getPost(id);
+    const post = await this.getPost(userId, id);
 
     if (post.authorId !== userId) {
       throw new ForbiddenException('You are not allowed to delete this post');
@@ -102,7 +158,7 @@ export class PostsService {
   }
 
   async publishPost(userId: string, id: string): Promise<Post> {
-    const post = await this.getPost(id);
+    const post = await this.getPost(userId, id);
 
     if (post.authorId !== userId) {
       throw new ForbiddenException('You are not allowed to publish this post');
@@ -117,7 +173,7 @@ export class PostsService {
   }
 
   async archivePost(userId: string, id: string): Promise<Post> {
-    const post = await this.getPost(id);
+    const post = await this.getPost(userId, id);
 
     if (post.authorId !== userId) {
       throw new ForbiddenException('You are not allowed to archive this post');
@@ -147,5 +203,36 @@ export class PostsService {
     });
 
     return { items, total };
+  }
+
+  async enrichPostsWithLikes(
+    userId: string,
+    posts: Post[],
+  ): Promise<Array<{ post: Post; likesCount: number; isLiked: boolean }>> {
+    if (!posts.length) return [];
+
+    const postIds = posts.map((p) => p.id);
+
+    const counts = await this.postLikeRepository
+      .createQueryBuilder('like')
+      .select('like.postId', 'postId')
+      .addSelect('COUNT(like.id)', 'count')
+      .where('like.postId IN (:...postIds)', { postIds })
+      .groupBy('like.postId')
+      .getRawMany();
+
+    const countMap = new Map(counts.map((c) => [c.postId, Number(c.count)]));
+
+    const userLikes = await this.postLikeRepository.find({
+      where: { userId, postId: In(postIds) },
+    });
+
+    const userLikeMap = new Set(userLikes.map((l) => l.postId));
+
+    return posts.map((post) => ({
+      post,
+      likesCount: countMap.get(post.id) || 0,
+      isLiked: userLikeMap.has(post.id),
+    }));
   }
 }
