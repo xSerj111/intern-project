@@ -12,7 +12,9 @@ export class AppConfigService {
 
   /** HTTP port the Core service listens on. */
   get port(): number {
-    return parseInt(this.config.get<string>('PORT', '3002'), 10);
+    // Own variable, not the shared PORT: every service reads the same root
+    // config file, so a single PORT makes two services fight over one socket.
+    return parseInt(this.config.get<string>('CORE_PORT', '3001'), 10);
   }
 
   /** Postgres connection settings for the Core database. */

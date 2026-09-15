@@ -13,6 +13,7 @@ async function bootstrap() {
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   app.useGlobalFilters(new DomainExceptionFilter());
 
-  await app.listen(process.env.PORT ?? 3000);
+  // Own variable, not the shared PORT - see the other services' config.
+  await app.listen(process.env.NOTIFICATIONS_PORT ?? 3003);
 }
 bootstrap();

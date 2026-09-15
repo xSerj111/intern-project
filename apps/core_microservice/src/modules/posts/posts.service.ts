@@ -5,6 +5,7 @@ import { UpdatePostDto } from './dto/update-post.dto';
 import { Post } from './domain/entities/post.entity';
 import { PostRepository } from './infrastructure/repository/post.repository';
 import { PostAsset } from './domain/entities/post-asset.entity';
+import { FollowRepositoryKey } from '../follows/domain/interfaces/follow-repository.port';
 import type { IFollowRepository } from '../follows/domain/interfaces/follow-repository.port';
 
 @Injectable()
@@ -12,7 +13,7 @@ export class PostsService {
   constructor(
     @Inject(LoggerKey) private readonly logger: Logger,
     private readonly postRepository: PostRepository,
-    @Inject(Symbol.for('IFollowRepository'))
+    @Inject(FollowRepositoryKey)
     private readonly followRepository: IFollowRepository,
   ) {}
 

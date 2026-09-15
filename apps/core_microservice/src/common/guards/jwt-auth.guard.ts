@@ -24,9 +24,13 @@ export class JwtAuthGuard implements CanActivate {
 
     try {
       // Pobieramy ten sam klucz, którego używa auth_microservice
+      // auth_microservice signs with JWT_SECRET; accept both names so a token
+      // issued there verifies here whichever one is configured.
       const secret =
         this.configService.get<string>('JWT_ACCESS_SECRET') ||
-        process.env.JWT_ACCESS_SECRET;
+        this.configService.get<string>('JWT_SECRET') ||
+        process.env.JWT_ACCESS_SECRET ||
+        process.env.JWT_SECRET;
 
       if (!secret) {
         throw new InternalServerErrorException(

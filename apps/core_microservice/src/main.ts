@@ -5,7 +5,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { DomainExceptionFilter, WinstonLogger } from '@repo/shared';
 import { AppConfigService } from './config/app-config.service';
 import 'reflect-metadata';
-import * as cookieParser from 'cookie-parser';
+import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 
 async function bootstrap() {
@@ -17,7 +17,7 @@ async function bootstrap() {
   app.use(helmet());
 
   // 2. COOKIE PARSER - Umożliwia odczytywanie refresh_token z ciasteczek
-  app.use(cookieParser);
+  app.use(cookieParser());
 
   // 3. CORS - Konfiguracja pozwalająca frontendowi na dostęp
   app.enableCors({

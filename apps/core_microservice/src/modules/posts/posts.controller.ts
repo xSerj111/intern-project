@@ -12,7 +12,8 @@ import {
   Query,
 } from '@nestjs/common';
 import { PostsService } from './posts.service';
-import { CreatePostDto, UpdatePostDto } from '@repo/shared';
+import { CreatePostDto } from './dto/create-post.dto';
+import { UpdatePostDto } from './dto/update-post.dto';
 import { PostResponseDto } from './dto/post-response.dto';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { FeedQueryDto } from './dto/feed-query.dto';

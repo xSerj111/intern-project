@@ -6,7 +6,6 @@ import { ProfilesService } from './profiles.service';
 import { ProfilesController } from './profiles.controller';
 import { UserProfileRepository } from './infrastructure/repository/user-profile.repository';
 import { LoggerModule } from '@repo/shared';
-import { InternalEventsController } from '../internal-events/internal-events.controller';
 
 @Module({
   imports: [
@@ -15,5 +14,6 @@ import { InternalEventsController } from '../internal-events/internal-events.con
   ],
   controllers: [ProfilesController],
   providers: [ProfilesService, UserProfileRepository],
+  exports: [ProfilesService],
 })
 export class ProfilesModule {}

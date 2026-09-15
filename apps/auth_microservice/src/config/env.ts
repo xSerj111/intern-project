@@ -15,7 +15,9 @@ const requireEnv = (key: string, defaultValue?: string): string => {
 export const env = {
   app: {
     // Auth service domyślnie działa na 3002 (zgodnie z AUTH_SERVICE_URL z .env)
-    port: parseInt(process.env.PORT || '3002', 10),
+    // Own variable, not the shared PORT: every service reads the same root
+    // config file, so a single PORT makes two services fight over one socket.
+    port: parseInt(process.env.AUTH_PORT || '3002', 10),
     coreMicroserviceUrl: requireEnv('CORE_SERVICE_URL'),
     allowedOrigins: requireEnv('AUTH_ALLOWED_ORIGINS'),
   },
@@ -24,7 +26,9 @@ export const env = {
     port: parseInt(requireEnv('POSTGRES_PORT', '5432'), 10),
     username: requireEnv('POSTGRES_USER', 'innogram_user'),
     password: requireEnv('POSTGRES_PASSWORD', 'innogram_password'),
-    database: requireEnv('POSTGRES_DB', 'innogram'),
+    // Must match data-source.ts, which the migration CLI uses, or the app talks
+    // to a different database than the one the migrations built.
+    database: requireEnv('DB_NAME_AUTH', 'innogram_auth'),
   },
   redis: {
     host: requireEnv('REDIS_HOST', 'localhost'),

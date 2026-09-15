@@ -4,6 +4,7 @@ import { Follow } from './domain/entities/follow.entity';
 import { FollowsController } from './follows.controller';
 import { FollowsService } from './follows.service';
 import { FollowRepository } from './infrastructure/repository/follow.repository';
+import { FollowRepositoryKey } from './domain/interfaces/follow-repository.port';
 import { LoggerModule } from '@repo/shared';
 
 @Module({
@@ -12,7 +13,11 @@ import { LoggerModule } from '@repo/shared';
     LoggerModule.forFeature('FollowsService'),
   ],
   controllers: [FollowsController],
-  providers: [FollowsService, FollowRepository],
-  exports: [FollowsService],
+  providers: [
+    FollowsService,
+    FollowRepository,
+    { provide: FollowRepositoryKey, useExisting: FollowRepository },
+  ],
+  exports: [FollowsService, FollowRepositoryKey],
 })
 export class FollowsModule {}
