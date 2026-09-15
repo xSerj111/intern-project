@@ -46,4 +46,30 @@ export class FollowRepository
       where: { followingId: userId, status: FollowStatus.PENDING },
     });
   }
+
+  async getFollowers(
+    userId: string,
+    limit: number,
+    offset: number,
+  ): Promise<[Follow[], number]> {
+    return this.repository.findAndCount({
+      where: { followingId: userId, status: FollowStatus.ACCEPTED },
+      take: limit,
+      skip: offset,
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  async getFollowing(
+    userId: string,
+    limit: number,
+    offset: number,
+  ): Promise<[Follow[], number]> {
+    return this.repository.findAndCount({
+      where: { followerId: userId, status: FollowStatus.ACCEPTED },
+      take: limit,
+      skip: offset,
+      order: { createdAt: 'DESC' },
+    });
+  }
 }
