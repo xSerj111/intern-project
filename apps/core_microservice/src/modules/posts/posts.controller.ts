@@ -10,6 +10,7 @@ import {
   HttpCode,
   HttpStatus,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import { PostsService } from './posts.service';
 import { CreatePostDto } from './dto/create-post.dto';
@@ -18,16 +19,20 @@ import { PostResponseDto } from './dto/post-response.dto';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { FeedQueryDto } from './dto/feed-query.dto';
 import { SearchQueryDto } from './dto/search-query.dto';
+import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
 
 @Controller('posts')
 export class PostsController {
   constructor(private readonly postsService: PostsService) {}
 
   @HttpPost()
+  @UseGuards(JwtAuthGuard)
   async createPost(
     @CurrentUser('sub') userId: string,
     @Body() createPostDto: CreatePostDto,
   ): Promise<PostResponseDto> {
+    console.log('User Id from token:', userId);
+
     return new PostResponseDto(
       await this.postsService.createPost(userId, createPostDto),
     );
