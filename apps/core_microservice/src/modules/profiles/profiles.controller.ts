@@ -21,6 +21,18 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 export class ProfilesController {
   constructor(private readonly profilesService: ProfilesService) {}
 
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Fetch the authenticated user profile' })
+  @Get('me')
+  async getMyProfile(
+    @CurrentUser('sub') authUserId: string,
+  ): Promise<ProfileResponseDto> {
+    return new ProfileResponseDto(
+      await this.profilesService.getProfileByAuthUserId(authUserId),
+    );
+  }
+
   @ApiOperation({ summary: 'Fetch a profile by ID' })
   @Get(':id')
   async getProfile(

@@ -39,6 +39,7 @@ export class PostsController {
   }
 
   @Get('feed')
+  @UseGuards(JwtAuthGuard)
   async getFeed(
     @CurrentUser('sub') userId: string,
     @Query() query: FeedQueryDto,

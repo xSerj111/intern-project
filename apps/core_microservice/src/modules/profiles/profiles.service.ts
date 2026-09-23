@@ -1,5 +1,10 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { LoggerKey, type Logger, UpdateProfileDto } from '@repo/shared';
+import {
+  EntityNotFoundError,
+  LoggerKey,
+  type Logger,
+  UpdateProfileDto,
+} from '@repo/shared';
 import { UserProfile } from './domain/entities/user-profile.entity';
 import { UserProfileRepository } from './infrastructure/repository/user-profile.repository';
 
@@ -26,6 +31,23 @@ export class ProfilesService {
     // Throws EntityByIdNotFoundError -> mapped to HTTP 404 by DomainExceptionFilter.
     const profile = await this.userProfileRepository.findOneByIdOrThrow(id);
     this.logger.debug('Profile retrieved', { props: { profileId: profile.id } });
+    return profile;
+  }
+
+  /**
+   * Resolve the profile belonging to the authenticated auth user
+   * (`authUserId === JWT sub`). Used by `GET /profiles/me`.
+   */
+  async getProfileByAuthUserId(authUserId: string): Promise<UserProfile> {
+    const profile =
+      await this.userProfileRepository.findByAuthUserId(authUserId);
+    if (!profile) {
+      // -> HTTP 404 via DomainExceptionFilter (lazy-init may not have run yet).
+      throw new EntityNotFoundError('UserProfile', { authUserId });
+    }
+    this.logger.debug('Profile retrieved by auth user id', {
+      props: { authUserId, profileId: profile.id },
+    });
     return profile;
   }
 
