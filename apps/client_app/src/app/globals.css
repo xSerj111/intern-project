@@ -1,0 +1,159 @@
+:root {
+  /* Innogram brand palette */
+  --innogram-primary: #6d28d9;
+  --innogram-primary-strong: #5b21b6;
+  --innogram-accent: #ec4899;
+
+  /* Surfaces & text */
+  --innogram-bg: #f6f6fb;
+  --innogram-surface: #ffffff;
+  --innogram-border: #e4e4ef;
+  --innogram-text: #1c1b22;
+  --innogram-muted: #6b6b7b;
+  --innogram-danger: #dc2626;
+  --innogram-danger-bg: #fef2f2;
+
+  /* Shape & depth */
+  --innogram-radius: 12px;
+  --innogram-shadow:
+    0 1px 3px rgba(17, 12, 46, 0.08), 0 8px 24px rgba(17, 12, 46, 0.06);
+  --innogram-max-width: 720px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family:
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    Roboto,
+    Helvetica,
+    Arial,
+    sans-serif;
+  background: var(--innogram-bg);
+  color: var(--innogram-text);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0 0 0.5rem;
+  line-height: 1.2;
+}
+
+p {
+  margin: 0 0 0.75rem;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+img {
+  max-width: 100%;
+  display: block;
+}
+
+/* Layout helpers */
+.container {
+  width: 100%;
+  max-width: var(--innogram-max-width);
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+@media (min-width: 768px) {
+  .container {
+    padding: 0 1.5rem;
+  }
+}
+
+/* Shared surfaces */
+.card {
+  background: var(--innogram-surface);
+  border: 1px solid var(--innogram-border);
+  border-radius: var(--innogram-radius);
+  box-shadow: var(--innogram-shadow);
+  padding: 1.25rem;
+}
+
+/* Buttons */
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1.1rem;
+  font: inherit;
+  font-weight: 600;
+  color: #fff;
+  background: var(--innogram-primary);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    opacity 0.15s ease;
+}
+
+.button:hover {
+  background: var(--innogram-primary-strong);
+}
+
+.button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.button--ghost {
+  color: var(--innogram-primary);
+  background: transparent;
+  border-color: var(--innogram-border);
+}
+
+.button--ghost:hover {
+  background: rgba(109, 40, 217, 0.08);
+}
+
+/* Form controls */
+.input {
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  font: inherit;
+  color: inherit;
+  background: var(--innogram-surface);
+  border: 1px solid var(--innogram-border);
+  border-radius: 8px;
+}
+
+.input:focus {
+  outline: 2px solid rgba(109, 40, 217, 0.35);
+  outline-offset: 1px;
+  border-color: var(--innogram-primary);
+}
+
+/* Utilities */
+.muted {
+  color: var(--innogram-muted);
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
