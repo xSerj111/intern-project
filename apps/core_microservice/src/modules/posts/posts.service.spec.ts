@@ -295,9 +295,10 @@ describe('PostsService', () => {
 
   describe('createPost', () => {
     it('saves a draft by default', async () => {
-      postRepository.save.mockImplementation((post: Post) =>
-        Promise.resolve(post),
-      );
+      postRepository.save.mockImplementation((post: Post) => {
+        postRepository.findOneByIdOrThrow.mockResolvedValue(post);
+        return Promise.resolve(post);
+      });
 
       const post = await service.createPost('author-1', { content: 'hello' });
 
@@ -306,9 +307,10 @@ describe('PostsService', () => {
     });
 
     it('publishes immediately when publish=true and content is present', async () => {
-      postRepository.save.mockImplementation((post: Post) =>
-        Promise.resolve(post),
-      );
+      postRepository.save.mockImplementation((post: Post) => {
+        postRepository.findOneByIdOrThrow.mockResolvedValue(post);
+        return Promise.resolve(post);
+      });
 
       const post = await service.createPost('author-1', {
         content: 'hello',
@@ -327,9 +329,10 @@ describe('PostsService', () => {
     });
 
     it('maps assetIds to ordered PostAsset rows', async () => {
-      postRepository.save.mockImplementation((post: Post) =>
-        Promise.resolve(post),
-      );
+      postRepository.save.mockImplementation((post: Post) => {
+        postRepository.findOneByIdOrThrow.mockResolvedValue(post);
+        return Promise.resolve(post);
+      });
 
       const post = await service.createPost('author-1', {
         content: 'with media',

@@ -148,7 +148,9 @@ export class PostsService {
     const savedPost = await this.postRepository.save(post);
     this.logger.debug('Post created', { props: { postId: savedPost.id } });
 
-    return savedPost;
+    // Re-read so the response includes the joined author/media relations — the
+    // freshly-saved entity has none (mirrors updatePost()).
+    return this.getPost(savedPost.id);
   }
 
   async getPost(id: string): Promise<Post> {
