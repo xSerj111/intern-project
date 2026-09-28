@@ -36,3 +36,13 @@ export interface IGoogleLoginRequest {
   /** Google-issued ID token JWT. */
   idToken: string;
 }
+
+/**
+ * Request body for `POST /auth/refresh`.
+ *
+ * Mirrors `RefreshTokenDto`: the opaque refresh token issued at login.
+ */
+export interface IRefreshRequest {
+  /** Opaque refresh token from the login/refresh response. */
+  refreshToken: string;
+}
