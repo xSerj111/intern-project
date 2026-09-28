@@ -34,10 +34,16 @@ export interface PostCardProps {
   post: IPostResponse;
   /** Optional: open the media gallery at the clicked index (US5). */
   onMediaSelect?: (index: number) => void;
+  /** Hide the like/comment/repost summary footer (e.g. when `PostActions` renders it). */
+  showEngagement?: boolean;
 }
 
 /** Renders a single post: author, text, media and engagement summary. */
-export function PostCard({ post, onMediaSelect }: PostCardProps) {
+export function PostCard({
+  post,
+  onMediaSelect,
+  showEngagement = true,
+}: PostCardProps) {
   const { author, assets } = post;
   const [galleryIndex, setGalleryIndex] = useState<number | null>(null);
 
@@ -97,13 +103,15 @@ export function PostCard({ post, onMediaSelect }: PostCardProps) {
         />
       )}
 
-      <footer className={styles.engagement}>
-        <span className={post.likedByMe ? styles.liked : undefined}>
-          ♥ {post.likeCount}
-        </span>
-        <span>💬 {post.commentCount}</span>
-        <span>🔁 {post.repostCount}</span>
-      </footer>
+      {showEngagement && (
+        <footer className={styles.engagement}>
+          <span className={post.likedByMe ? styles.liked : undefined}>
+            ♥ {post.likeCount}
+          </span>
+          <span>💬 {post.commentCount}</span>
+          <span>🔁 {post.repostCount}</span>
+        </footer>
+      )}
     </article>
   );
 }

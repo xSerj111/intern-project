@@ -93,7 +93,7 @@ export function PostDetail({ postId }: { postId: string }) {
         </section>
       ) : (
         <section aria-label="Post">
-          <PostCard post={post} />
+          <PostCard post={post} showEngagement={false} />
           <div className={styles.actions}>
             <PostActions post={post} />
             {isOwner && (
