@@ -6,3 +6,4 @@ export * from './follows';
 export * from './chats';
 export * from './auth';
 export * from './posts';
+export * from './comments';
