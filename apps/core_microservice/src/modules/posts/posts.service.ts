@@ -178,10 +178,20 @@ export class PostsService {
     if (post.authorId !== userId) {
       throw new UnauthorizedError('You are not allowed to update this post');
     }
-    if (updatePostDto.content) {
+
+    if (updatePostDto.content !== undefined) {
       post.content = updatePostDto.content;
     }
-    const updatedPost = await this.postRepository.save(post);
+
+    await this.postRepository.save(post);
+
+    if (updatePostDto.assetIds !== undefined) {
+      // Replace-all semantics: the client submits the full ordered list.
+      await this.postRepository.replaceAssets(id, updatePostDto.assetIds);
+    }
+
+    // Re-read so the response includes the updated author/media relations.
+    const updatedPost = await this.getPost(id);
     this.logger.debug('Post updated', { props: { postId: updatedPost.id } });
     return updatedPost;
   }

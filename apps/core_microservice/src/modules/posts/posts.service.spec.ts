@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { LoggerKey } from '@repo/shared';
+import { LoggerKey, UnauthorizedError } from '@repo/shared';
 
 import { PostsService } from './posts.service';
 import { PostRepository } from './infrastructure/repository/post.repository';
@@ -27,6 +27,7 @@ describe('PostsService', () => {
     findOneByIdOrThrow: jest.fn(),
     save: jest.fn(),
     softDelete: jest.fn(),
+    replaceAssets: jest.fn(),
   };
 
   const postLikeRepository = {
@@ -294,8 +295,61 @@ describe('PostsService', () => {
     });
   });
 
-  describe('feed reposts', () => {
-    it('includes repost entries with the original post and attribution', async () => {
+  describe('updatePost', () => {
+    it('updates text for the author', async () => {
+      const post = fakePost({ authorId: 'author-1', content: 'old' });
+      postRepository.findOneByIdOrThrow.mockResolvedValue(post);
+      postRepository.save.mockImplementation(async (entity) => entity);
+
+      const updated = await service.updatePost('author-1', 'post-1', {
+        content: 'new',
+      });
+
+      expect(updated.content).toBe('new');
+    });
+
+    it('denies a non-author with UnauthorizedError', async () => {
+      postRepository.findOneByIdOrThrow.mockResolvedValue(
+        fakePost({ authorId: 'author-1' }),
+      );
+
+      await expect(
+        service.updatePost('intruder', 'post-1', { content: 'hack' }),
+      ).rejects.toThrow(UnauthorizedError);
+
+      expect(postRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('replaces media wholesale when assetIds is provided', async () => {
+      const post = fakePost({ authorId: 'author-1' });
+      postRepository.findOneByIdOrThrow.mockResolvedValue(post);
+      postRepository.save.mockImplementation(async (entity) => entity);
+      postRepository.replaceAssets.mockResolvedValue(undefined);
+
+      await service.updatePost('author-1', 'post-1', {
+        assetIds: ['a', 'b', 'c'],
+      });
+
+      expect(postRepository.replaceAssets).toHaveBeenCalledWith('post-1', [
+        'a',
+        'b',
+        'c',
+      ]);
+    });
+
+    it('leaves media untouched when assetIds is omitted', async () => {
+      postRepository.findOneByIdOrThrow.mockResolvedValue(
+        fakePost({ authorId: 'author-1' }),
+      );
+      postRepository.save.mockImplementation(async (entity) => entity);
+
+      await service.updatePost('author-1', 'post-1', { content: 'only text' });
+
+      expect(postRepository.replaceAssets).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('feed reposts', () => {    it('includes repost entries with the original post and attribution', async () => {
       const original = fakePost({ id: 'orig-1', status: PostStatus.Published });
       postRepository.getFeed.mockResolvedValue([[], 0]);
       repostRepository.findFeed.mockResolvedValue([

@@ -126,12 +126,12 @@
 
 ### Implementation for User Story 4
 
-- [ ] T046 [P] [US4] Extend `apps/core_microservice/src/modules/posts/dto/update-post.dto.ts` with `assetIds?: string[]` (`@ArrayMaxSize(10)`, `@IsUUID('4', { each: true })`) — replace-all media semantics
-- [ ] T047 [US4] Extend `apps/core_microservice/src/modules/posts/posts.service.ts` `updatePost` to rebuild `PostAsset` rows (`assetId` + `displayOrder` = index) when `assetIds` is provided; keep the `UnauthorizedError` ownership check (from T013)
-- [ ] T048 [P] [US4] Extend `apps/core_microservice/src/modules/posts/posts.service.spec.ts` with edit-media replace-all and non-author denial coverage
-- [ ] T049 [P] [US4] Create `apps/client_app/src/lib/api/posts.ts` helpers `updatePost`, `deletePost`, `archivePost`, `publishPost` against the existing endpoints
-- [ ] T050 [US4] Update `apps/client_app/src/components/posts/post-form.tsx` to support edit mode (prefill text/media, submit `PATCH /posts/:id` with full `assetIds` list)
-- [ ] T051 [US4] Update `apps/client_app/src/app/posts/[id]/page.tsx` with owner-only Edit / Archive / Delete actions; Delete shows a confirmation prompt; hidden entirely for non-authors
+- [X] T046 [P] [US4] Extend `apps/core_microservice/src/modules/posts/dto/update-post.dto.ts` with `assetIds?: string[]` (`@ArrayMaxSize(10)`, `@IsUUID('4', { each: true })`) — replace-all media semantics
+- [X] T047 [US4] Extend `apps/core_microservice/src/modules/posts/posts.service.ts` `updatePost` to rebuild `PostAsset` rows (`assetId` + `displayOrder` = index) when `assetIds` is provided; keep the `UnauthorizedError` ownership check (from T013)
+- [X] T048 [P] [US4] Extend `apps/core_microservice/src/modules/posts/posts.service.spec.ts` with edit-media replace-all and non-author denial coverage
+- [X] T049 [P] [US4] Create `apps/client_app/src/lib/api/posts.ts` helpers `updatePost`, `deletePost`, `archivePost`, `publishPost` against the existing endpoints
+- [X] T050 [US4] Update `apps/client_app/src/components/posts/post-form.tsx` to support edit mode (prefill text/media, submit `PATCH /posts/:id` with full `assetIds` list)
+- [X] T051 [US4] Update `apps/client_app/src/app/posts/[id]/page.tsx` with owner-only Edit / Archive / Delete actions; Delete shows a confirmation prompt; hidden entirely for non-authors
 
 **Checkpoint**: Ownership controls complete (edit/archive/delete own only).
 

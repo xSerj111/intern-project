@@ -11,3 +11,35 @@
 .actions {
   margin-top: 0.5rem;
 }
+
+.ownerActions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.ownerButton {
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 0.3rem 0.7rem;
+  border-radius: 8px;
+  border: 1px solid var(--innogram-border);
+  background: transparent;
+  color: var(--innogram-muted);
+  cursor: pointer;
+}
+
+.ownerButton:hover {
+  background: rgba(109, 40, 217, 0.08);
+}
+
+.ownerButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.danger {
+  color: var(--innogram-danger);
+  border-color: var(--innogram-danger);
+}

@@ -5,6 +5,7 @@ import { In, Repository, ILike, type SelectQueryBuilder } from 'typeorm';
 import { TypeormRepositoryBase } from '@repo/shared';
 import type { MediaTypeFilter, PostSort } from '@repo/contracts';
 import { Post, PostStatus } from '../../domain/entities/post.entity';
+import { PostAsset } from '../../domain/entities/post-asset.entity';
 import type { PostProps } from '../../domain/interfaces/post.props';
 
 export interface FeedQuery {
@@ -55,12 +56,31 @@ export class PostRepository extends TypeormRepositoryBase<Post, PostProps> {
     return qb.skip(skip).take(limit).getManyAndCount();
   }
 
+  /**
+   * Replace a post's media wholesale: delete existing `post_assets` rows and
+   * insert the new ordered set. Used by the edit flow (FR-008).
+   */
+  async replaceAssets(postId: string, assetIds: string[]): Promise<void> {
+    await this.repository.manager.delete(PostAsset, { postId });
+
+    if (assetIds.length === 0) return;
+
+    const rows = assetIds.map((assetId, index) => {
+      const attachment = new PostAsset();
+      attachment.postId = postId;
+      attachment.assetId = assetId;
+      attachment.displayOrder = index;
+      return attachment;
+    });
+
+    await this.repository.manager.save(PostAsset, rows);
+  }
+
   async searchPublishedPosts(
     keyword: string,
     page: number,
     limit: number,
-  ): Promise<[Post[], number]> {
-    const skip = (page - 1) * limit;
+  ): Promise<[Post[], number]> {    const skip = (page - 1) * limit;
 
     return this.repository.findAndCount({
       where: {
