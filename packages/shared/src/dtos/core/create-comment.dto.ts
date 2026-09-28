@@ -9,13 +9,6 @@ import {
 
 export class CreateCommentDto {
   @ApiProperty({
-    example: "123e4567-e89b-12d3-a456-426614174000",
-    description: "The UUID of the author creating the post",
-  })
-  @IsUUID()
-  authorId!: string;
-
-  @ApiProperty({
     description: "The UUID of the post",
   })
   @IsUUID()
