@@ -178,9 +178,9 @@
 
 ### Implementation for User Story 7
 
-- [ ] T059 [P] [US7] Confirm/extend `apps/core_microservice/src/modules/posts/dto/search-query.dto.ts` enforces `keyword` `@MinLength(3)` (FR-022) and `apps/core_microservice/src/modules/posts/infrastructure/repository/post.repository.ts` `searchPublishedPosts` returns the extended `IPostResponse` projection (author + engagement) — already extended in US1
-- [ ] T060 [P] [US7] Create `apps/client_app/src/lib/api/search.ts` (`searchPosts(keyword, page, limit)`) against `GET /posts/search` returning `ISearchResponse`
-- [ ] T061 [US7] Create `apps/client_app/src/app/search/page.tsx`: keyword input (≥3 chars prompt), paginated results reusing `PostCard`, and a friendly "no results" state (FR-020/021/022)
+- [X] T059 [P] [US7] Confirm/extend `apps/core_microservice/src/modules/posts/dto/search-query.dto.ts` enforces `keyword` `@MinLength(3)` (FR-022) and `apps/core_microservice/src/modules/posts/infrastructure/repository/post.repository.ts` `searchPublishedPosts` returns the extended `IPostResponse` projection (author + engagement) — already extended in US1
+- [X] T060 [P] [US7] Create `apps/client_app/src/lib/api/search.ts` (`searchPosts(keyword, page, limit)`) against `GET /posts/search` returning `ISearchResponse`
+- [X] T061 [US7] Create `apps/client_app/src/app/search/page.tsx`: keyword input (≥3 chars prompt), paginated results reusing `PostCard`, and a friendly "no results" state (FR-020/021/022)
 
 **Checkpoint**: Search works end-to-end.
 
