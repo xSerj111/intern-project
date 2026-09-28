@@ -37,9 +37,14 @@ export function Header() {
               </button>
             </>
           ) : (
-            <Link href="/login" className="button">
-              Sign in
-            </Link>
+            <>
+              <Link href="/login" className="button button--ghost">
+                Sign in
+              </Link>
+              <Link href="/signup" className="button">
+                Sign up
+              </Link>
+            </>
           )}
         </div>
       </div>

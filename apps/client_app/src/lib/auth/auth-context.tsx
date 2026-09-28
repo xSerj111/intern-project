@@ -10,8 +10,9 @@ import {
   type ReactNode,
 } from 'react';
 
-import type { IAuthUserResponse } from '@repo/contracts';
+import type { IAuthUserResponse, ILoginResponse } from '@repo/contracts';
 
+import { googleLogin } from './google';
 import { login as loginRequest } from './login';
 
 const STORAGE_KEY = 'innogram.session';
@@ -36,6 +37,8 @@ interface AuthContextValue {
   isHydrated: boolean;
   /** Authenticate against the auth service and persist the session. */
   login: (email: string, password: string) => Promise<void>;
+  /** Authenticate with Google and persist the session (auto-registers users). */
+  loginWithGoogle: (idToken: string) => Promise<void>;
   /** Clear the session. */
   logout: () => void;
 }
@@ -60,8 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsHydrated(true);
   }, []);
 
-  const login = useCallback(async (email: string, password: string) => {
-    const result = await loginRequest(email, password);
+  const establishSession = useCallback((result: ILoginResponse) => {
     const nextSession: AuthSession = {
       accessToken: result.accessToken,
       refreshToken: result.refreshToken,
@@ -70,6 +72,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextSession));
     setSession(nextSession);
   }, []);
+
+  const login = useCallback(
+    async (email: string, password: string) => {
+      establishSession(await loginRequest(email, password));
+    },
+    [establishSession],
+  );
+
+  const loginWithGoogle = useCallback(
+    async (idToken: string) => {
+      establishSession(await googleLogin(idToken));
+    },
+    [establishSession],
+  );
 
   const logout = useCallback(() => {
     window.localStorage.removeItem(STORAGE_KEY);
@@ -84,9 +100,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isSignedIn: session !== null,
       isHydrated,
       login,
+      loginWithGoogle,
       logout,
     }),
-    [session, isHydrated, login, logout],
+    [session, isHydrated, login, loginWithGoogle, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

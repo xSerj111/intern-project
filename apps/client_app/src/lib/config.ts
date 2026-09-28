@@ -12,6 +12,8 @@ export interface ClientConfig {
   coreServiceUrl: string;
   /** The client's own port (`CLIENT_PORT`, default 3000). */
   clientPort: number;
+  /** Google OAuth *client* id (`GOOGLE_CLIENT_ID`). Empty when unconfigured. */
+  googleClientId: string;
 }
 
 export const config: ClientConfig = {
@@ -20,4 +22,5 @@ export const config: ClientConfig = {
   coreServiceUrl:
     process.env.NEXT_PUBLIC_CORE_SERVICE_URL ?? 'http://localhost:3001',
   clientPort: Number(process.env.NEXT_PUBLIC_CLIENT_PORT ?? '3000'),
+  googleClientId: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? '',
 };

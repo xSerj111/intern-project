@@ -23,3 +23,9 @@ export interface ILoginResponse {
   refreshToken: string;
   user: IAuthUserResponse;
 }
+
+/**
+ * Result of a successful `POST /users/register`. Registration creates the user
+ * but does not issue a session — the caller signs in separately.
+ */
+export type IRegisterResponse = IAuthUserResponse;
