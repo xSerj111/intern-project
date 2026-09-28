@@ -24,7 +24,9 @@ describe('Repost', () => {
 
   describe('soft-delete', () => {
     it('allows un-repost via a soft-delete marker', () => {
-      const repost = fakeRepost({ deletedAt: new Date('2026-02-01T00:00:00Z') });
+      const repost = fakeRepost({
+        deletedAt: new Date('2026-02-01T00:00:00Z'),
+      });
 
       expect(repost.deletedAt).toBeInstanceOf(Date);
     });

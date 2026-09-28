@@ -12,31 +12,43 @@ export class FollowsService {
   ) {}
 
   async follow(followerId: string, followingId: string): Promise<Follow> {
-    const existing = await this.followRepository.findByFollowerAndFollowing(followerId, followingId);
+    const existing = await this.followRepository.findByFollowerAndFollowing(
+      followerId,
+      followingId,
+    );
     if (existing) {
-      return existing; // 
+      return existing; //
     }
 
     const follow = Follow.create({ followerId, followingId });
     const savedFollow = await this.followRepository.save(follow);
-    this.logger.debug('Follow created', { props: { followId: savedFollow.id } });
+    this.logger.debug('Follow created', {
+      props: { followId: savedFollow.id },
+    });
     return savedFollow;
   }
 
   async getFollowers(userId: string): Promise<Follow[]> {
     const followers = await this.followRepository.findFollowers(userId);
-    this.logger.debug('Followers retrieved', { props: { userId, count: followers.length } });
+    this.logger.debug('Followers retrieved', {
+      props: { userId, count: followers.length },
+    });
     return followers;
   }
 
   async getFollowing(userId: string): Promise<Follow[]> {
     const following = await this.followRepository.findFollowing(userId);
-    this.logger.debug('Following retrieved', { props: { userId, count: following.length } });
+    this.logger.debug('Following retrieved', {
+      props: { userId, count: following.length },
+    });
     return following;
   }
 
   async unfollow(followerId: string, followingId: string): Promise<void> {
-    const follow = await this.followRepository.findByFollowerAndFollowing(followerId, followingId);
+    const follow = await this.followRepository.findByFollowerAndFollowing(
+      followerId,
+      followingId,
+    );
     if (follow) {
       await this.followRepository.delete(follow);
       this.logger.debug('Follow removed', { props: { followId: follow.id } });

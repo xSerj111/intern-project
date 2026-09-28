@@ -1,10 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { type Logger, LoggerKey, UnauthorizedError } from '@repo/shared';
-import type {
-  FeedType,
-  MediaTypeFilter,
-  PostSort,
-} from '@repo/contracts';
+import type { FeedType, MediaTypeFilter, PostSort } from '@repo/contracts';
 import { CreatePostDto } from './dto/create-post.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 import { Post } from './domain/entities/post.entity';
@@ -68,7 +64,9 @@ export class PostsService {
     limit: number,
   ): Promise<{ items: FeedEntry[]; total: number }> {
     const authorIds =
-      feed === 'discover' ? undefined : await this.resolveFollowingAuthorIds(userId);
+      feed === 'discover'
+        ? undefined
+        : await this.resolveFollowingAuthorIds(userId);
 
     const [[posts, postTotal], [reposts, repostTotal]] = await Promise.all([
       this.postRepository.getFeed({ authorIds, sort, mediaType, page, limit }),
@@ -112,7 +110,12 @@ export class PostsService {
     );
 
     this.logger.debug('Feed retrieved', {
-      props: { userId, feed, count: items.length, total: postTotal + repostTotal },
+      props: {
+        userId,
+        feed,
+        count: items.length,
+        total: postTotal + repostTotal,
+      },
     });
 
     return { items, total: postTotal + repostTotal };

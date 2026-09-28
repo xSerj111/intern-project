@@ -176,9 +176,7 @@ describe('PostsService', () => {
       expect(result.total).toBe(1);
       const entry = result.items[0];
       expect(entry.kind).toBe('post');
-      expect(
-        entry.kind === 'post' ? entry.engagement : undefined,
-      ).toEqual({
+      expect(entry.kind === 'post' ? entry.engagement : undefined).toEqual({
         likeCount: 7,
         commentCount: 3,
         repostCount: 2,
@@ -222,9 +220,9 @@ describe('PostsService', () => {
         20,
       );
 
-      expect(result.items.map((item) => item.kind === 'post' && item.post.id)).toEqual(
-        ['older', 'newer'],
-      );
+      expect(
+        result.items.map((item) => item.kind === 'post' && item.post.id),
+      ).toEqual(['older', 'newer']);
     });
 
     it('orders merged feed entries by like count when sort=most_liked', async () => {
@@ -247,9 +245,9 @@ describe('PostsService', () => {
         20,
       );
 
-      expect(result.items.map((item) => item.kind === 'post' && item.post.id)).toEqual(
-        ['popular', 'quiet'],
-      );
+      expect(
+        result.items.map((item) => item.kind === 'post' && item.post.id),
+      ).toEqual(['popular', 'quiet']);
     });
 
     it('excludes re-posts whose original post does not match the media filter', async () => {
@@ -297,7 +295,9 @@ describe('PostsService', () => {
 
   describe('createPost', () => {
     it('saves a draft by default', async () => {
-      postRepository.save.mockImplementation(async (post) => post);
+      postRepository.save.mockImplementation((post: Post) =>
+        Promise.resolve(post),
+      );
 
       const post = await service.createPost('author-1', { content: 'hello' });
 
@@ -306,7 +306,9 @@ describe('PostsService', () => {
     });
 
     it('publishes immediately when publish=true and content is present', async () => {
-      postRepository.save.mockImplementation(async (post) => post);
+      postRepository.save.mockImplementation((post: Post) =>
+        Promise.resolve(post),
+      );
 
       const post = await service.createPost('author-1', {
         content: 'hello',
@@ -325,7 +327,9 @@ describe('PostsService', () => {
     });
 
     it('maps assetIds to ordered PostAsset rows', async () => {
-      postRepository.save.mockImplementation(async (post) => post);
+      postRepository.save.mockImplementation((post: Post) =>
+        Promise.resolve(post),
+      );
 
       const post = await service.createPost('author-1', {
         content: 'with media',
@@ -351,7 +355,9 @@ describe('PostsService', () => {
     });
 
     it('propagates a not-found error and does not like', async () => {
-      postRepository.findOneByIdOrThrow.mockRejectedValue(new Error('not found'));
+      postRepository.findOneByIdOrThrow.mockRejectedValue(
+        new Error('not found'),
+      );
 
       await expect(service.likePost('user-1', 'missing')).rejects.toThrow(
         'not found',
@@ -365,7 +371,10 @@ describe('PostsService', () => {
 
       await service.unlikePost('user-1', 'post-1');
 
-      expect(postLikeRepository.unlike).toHaveBeenCalledWith('post-1', 'user-1');
+      expect(postLikeRepository.unlike).toHaveBeenCalledWith(
+        'post-1',
+        'user-1',
+      );
     });
   });
 
@@ -398,7 +407,10 @@ describe('PostsService', () => {
 
       await service.unrepost('user-1', 'post-1');
 
-      expect(repostRepository.unrepost).toHaveBeenCalledWith('post-1', 'user-1');
+      expect(repostRepository.unrepost).toHaveBeenCalledWith(
+        'post-1',
+        'user-1',
+      );
     });
   });
 
@@ -406,7 +418,9 @@ describe('PostsService', () => {
     it('updates text for the author', async () => {
       const post = fakePost({ authorId: 'author-1', content: 'old' });
       postRepository.findOneByIdOrThrow.mockResolvedValue(post);
-      postRepository.save.mockImplementation(async (entity) => entity);
+      postRepository.save.mockImplementation((entity: Post) =>
+        Promise.resolve(entity),
+      );
 
       const updated = await service.updatePost('author-1', 'post-1', {
         content: 'new',
@@ -430,7 +444,9 @@ describe('PostsService', () => {
     it('replaces media wholesale when assetIds is provided', async () => {
       const post = fakePost({ authorId: 'author-1' });
       postRepository.findOneByIdOrThrow.mockResolvedValue(post);
-      postRepository.save.mockImplementation(async (entity) => entity);
+      postRepository.save.mockImplementation((entity: Post) =>
+        Promise.resolve(entity),
+      );
       postRepository.replaceAssets.mockResolvedValue(undefined);
 
       await service.updatePost('author-1', 'post-1', {
@@ -448,7 +464,9 @@ describe('PostsService', () => {
       postRepository.findOneByIdOrThrow.mockResolvedValue(
         fakePost({ authorId: 'author-1' }),
       );
-      postRepository.save.mockImplementation(async (entity) => entity);
+      postRepository.save.mockImplementation((entity: Post) =>
+        Promise.resolve(entity),
+      );
 
       await service.updatePost('author-1', 'post-1', { content: 'only text' });
 
@@ -456,7 +474,8 @@ describe('PostsService', () => {
     });
   });
 
-  describe('feed reposts', () => {    it('includes repost entries with the original post and attribution', async () => {
+  describe('feed reposts', () => {
+    it('includes repost entries with the original post and attribution', async () => {
       const original = fakePost({ id: 'orig-1', status: PostStatus.Published });
       postRepository.getFeed.mockResolvedValue([[], 0]);
       repostRepository.findFeed.mockResolvedValue([

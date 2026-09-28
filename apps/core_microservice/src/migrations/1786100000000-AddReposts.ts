@@ -22,7 +22,9 @@ export class AddReposts1786100000000 implements MigrationInterface {
     await queryRunner.query(
       `ALTER TABLE "reposts" DROP CONSTRAINT "FK_reposts_originalPostId"`,
     );
-    await queryRunner.query(`DROP INDEX "public"."IDX_reposts_originalPostId_authorId"`);
+    await queryRunner.query(
+      `DROP INDEX "public"."IDX_reposts_originalPostId_authorId"`,
+    );
     await queryRunner.query(`DROP INDEX "public"."IDX_reposts_authorId"`);
     await queryRunner.query(`DROP TABLE "reposts"`);
   }

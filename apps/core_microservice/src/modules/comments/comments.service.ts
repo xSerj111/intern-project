@@ -44,9 +44,7 @@ export class CommentsService {
     const comment = await this.commentRepository.findOneByIdOrThrow(id);
 
     if (comment.authorId !== userId) {
-      throw new UnauthorizedError(
-        'You are not allowed to update this comment',
-      );
+      throw new UnauthorizedError('You are not allowed to update this comment');
     }
 
     if (updateCommentDto.content !== undefined) {
@@ -74,9 +72,7 @@ export class CommentsService {
     const comment = await this.commentRepository.findOneByIdOrThrow(id);
 
     if (comment.authorId !== userId) {
-      throw new UnauthorizedError(
-        'You are not allowed to delete this comment',
-      );
+      throw new UnauthorizedError('You are not allowed to delete this comment');
     }
 
     await this.commentRepository.softDelete(comment);

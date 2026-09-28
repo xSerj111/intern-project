@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository, ILike, type SelectQueryBuilder } from 'typeorm';
+import { Repository, ILike, type SelectQueryBuilder } from 'typeorm';
 
 import { TypeormRepositoryBase } from '@repo/shared';
 import type { MediaTypeFilter, PostSort } from '@repo/contracts';
@@ -80,7 +80,8 @@ export class PostRepository extends TypeormRepositoryBase<Post, PostProps> {
     keyword: string,
     page: number,
     limit: number,
-  ): Promise<[Post[], number]> {    const skip = (page - 1) * limit;
+  ): Promise<[Post[], number]> {
+    const skip = (page - 1) * limit;
 
     return this.repository.findAndCount({
       where: {
@@ -96,10 +97,7 @@ export class PostRepository extends TypeormRepositoryBase<Post, PostProps> {
     });
   }
 
-  private applySort(
-    qb: SelectQueryBuilder<Post>,
-    sort: PostSort,
-  ): void {
+  private applySort(qb: SelectQueryBuilder<Post>, sort: PostSort): void {
     if (sort === 'oldest') {
       qb.orderBy('post.createdAt', 'ASC');
       return;

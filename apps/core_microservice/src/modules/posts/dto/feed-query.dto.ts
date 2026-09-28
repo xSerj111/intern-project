@@ -1,11 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsIn, IsInt, IsOptional, Min } from 'class-validator';
-import type {
-  FeedType,
-  MediaTypeFilter,
-  PostSort,
-} from '@repo/contracts';
+import type { FeedType, MediaTypeFilter, PostSort } from '@repo/contracts';
 
 export class FeedQueryDto {
   @ApiPropertyOptional({

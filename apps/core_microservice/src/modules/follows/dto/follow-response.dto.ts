@@ -1,5 +1,5 @@
-import { ApiProperty } from '@nestjs/swagger'
-import { IFollowResponse } from '@repo/contracts'
+import { ApiProperty } from '@nestjs/swagger';
+import { IFollowResponse } from '@repo/contracts';
 import { Follow } from '../domain/entities/follow.entity';
 export class FollowResponseDto implements IFollowResponse {
   @ApiProperty() id: string;

@@ -1,6 +1,6 @@
-import { ApiProperty } from "@nestjs/swagger";
-import { IMessageResponse } from "@repo/contracts";
-import { Message } from "../domain/entities/message.entity";
+import { ApiProperty } from '@nestjs/swagger';
+import { IMessageResponse } from '@repo/contracts';
+import { Message } from '../domain/entities/message.entity';
 
 export class MessageResponseDto implements IMessageResponse {
   @ApiProperty() id: string;
@@ -15,7 +15,5 @@ export class MessageResponseDto implements IMessageResponse {
     this.authorId = message.authorId;
     this.content = message.content ?? '';
     this.createdAt = message.createdAt.toISOString();
-
   }
-
 }

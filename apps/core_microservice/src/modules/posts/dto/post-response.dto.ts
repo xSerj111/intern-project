@@ -66,7 +66,7 @@ export class PostResponseDto implements IPostResponse {
       avatarUrl: post.author?.avatarUrl ?? null,
     };
     this.content = post.content;
-    this.status = post.status as unknown as ContractPostStatus;
+    this.status = post.status;
     this.assets = (post.assets ?? [])
       .slice()
       .sort((a, b) => a.displayOrder - b.displayOrder)

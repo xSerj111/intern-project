@@ -13,7 +13,11 @@ export class ChatsService {
     private readonly messageRepository: Repository<Message>,
   ) {}
 
-  async sendMessage(authorId: string, chatId: string, content: string): Promise<Message> {
+  async sendMessage(
+    authorId: string,
+    chatId: string,
+    content: string,
+  ): Promise<Message> {
     const newMessage = this.messageRepository.create({
       authorId,
       chatId,
@@ -21,7 +25,9 @@ export class ChatsService {
     });
 
     const savedMessage = await this.messageRepository.save(newMessage);
-    this.logger.debug('Message sent', { props: { messageId: savedMessage.id } });
+    this.logger.debug('Message sent', {
+      props: { messageId: savedMessage.id },
+    });
     return savedMessage;
   }
 }

@@ -13,9 +13,9 @@ describe('Post', () => {
 
   describe('canPublish', () => {
     it('is true for a draft with content', () => {
-      expect(fakePost({ status: PostStatus.Draft, content: 'x' }).canPublish).toBe(
-        true,
-      );
+      expect(
+        fakePost({ status: PostStatus.Draft, content: 'x' }).canPublish,
+      ).toBe(true);
     });
 
     it('is false for blank content', () => {
@@ -39,9 +39,9 @@ describe('Post', () => {
     });
 
     it('throws InvalidPostStateError when not publishable', () => {
-      expect(() => fakePost({ status: PostStatus.Published }).publish()).toThrow(
-        InvalidPostStateError,
-      );
+      expect(() =>
+        fakePost({ status: PostStatus.Published }).publish(),
+      ).toThrow(InvalidPostStateError);
     });
   });
 });

@@ -57,20 +57,24 @@ describe('PostsController', () => {
     });
 
     it('guards every mutating handler', () => {
-      const guarded = [
-        controller.createPost,
-        controller.updatePost,
-        controller.publishPost,
-        controller.archivePost,
-        controller.deletePost,
-        controller.likePost,
-        controller.unlikePost,
-        controller.repostPost,
-        controller.unrepostPost,
-      ];
+      const guardedNames = [
+        'createPost',
+        'updatePost',
+        'publishPost',
+        'archivePost',
+        'deletePost',
+        'likePost',
+        'unlikePost',
+        'repostPost',
+        'unrepostPost',
+      ] as const;
 
-      for (const handler of guarded) {
-        const guards = Reflect.getMetadata('__guards__', handler) ?? [];
+      for (const name of guardedNames) {
+        // The reference is only read to look up guard metadata, never invoked.
+        // eslint-disable-next-line @typescript-eslint/unbound-method
+        const handler = controller[name];
+        const guards = (Reflect.getMetadata('__guards__', handler) ??
+          []) as unknown[];
         expect(guards.length).toBeGreaterThan(0);
       }
     });

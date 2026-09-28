@@ -1,13 +1,15 @@
-import { Injectable } from "@nestjs/common";
-import { TypeormRepositoryBase } from "@repo/shared";
-import { Follow } from "../../domain/entities/follow.entity";
-import { FollowProps } from "../../domain/interfaces/follow.props";
-import { IFollowRepository } from "../../domain/interfaces/follow-repository.port";
-import { InjectRepository } from "@nestjs/typeorm";
-import { Repository } from "typeorm";
+import { Injectable } from '@nestjs/common';
+import { TypeormRepositoryBase } from '@repo/shared';
+import { Follow } from '../../domain/entities/follow.entity';
+import { FollowProps } from '../../domain/interfaces/follow.props';
+import { IFollowRepository } from '../../domain/interfaces/follow-repository.port';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 
 @Injectable()
-export class FollowRepository extends TypeormRepositoryBase<Follow, FollowProps> implements IFollowRepository
+export class FollowRepository
+  extends TypeormRepositoryBase<Follow, FollowProps>
+  implements IFollowRepository
 {
   // obligated by base class
   public static readonly entity = Follow;
@@ -19,7 +21,10 @@ export class FollowRepository extends TypeormRepositoryBase<Follow, FollowProps>
   }
 
   // implement methods from Port
-  async findByFollowerAndFollowing(followerId: string, followingId: string): Promise<Follow | null> {
+  async findByFollowerAndFollowing(
+    followerId: string,
+    followingId: string,
+  ): Promise<Follow | null> {
     return this.repository.findOne({ where: { followerId, followingId } });
   }
 
