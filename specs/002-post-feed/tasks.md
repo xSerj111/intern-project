@@ -102,17 +102,17 @@
 
 ### Implementation for User Story 3
 
-- [ ] T035 [P] [US3] Create `apps/core_microservice/src/modules/posts/infrastructure/repository/post-like.repository.ts` `like`/`unlike` idempotency wiring (unique `(postId, userId)` index makes double-like/unlike a no-op) — finalize if only stubbed in T009
-- [ ] T036 [US3] Add `POST /posts/:id/like` and `DELETE /posts/:id/like` (JWT-guarded) in `apps/core_microservice/src/modules/posts/posts.controller.ts`, delegating to `posts.service.ts` `likePost(userId, id)` / `unlikePost(userId, id)`
-- [ ] T037 [US3] Add `POST /posts/:id/repost` and `DELETE /posts/:id/repost` (JWT-guarded) in `apps/core_microservice/src/modules/posts/posts.controller.ts`, delegating to `posts.service.ts` `repost(userId, id)` / `unrepost(userId, id)`; repost of a non-`published` post throws `RepostNotAllowedError` (HTTP 400)
-- [ ] T038 [US3] Implement `likePost`/`unlikePost`/`repost`/`unrepost` in `apps/core_microservice/src/modules/posts/posts.service.ts` using `PostLikeRepository`/`RepostRepository` (idempotent, ownership not required for like/repost, but 404 when post missing)
-- [ ] T039 [US3] Extend `apps/core_microservice/src/modules/posts/posts.service.ts` feed to include re-post items as `IRepostResponse` (original post embedded + `repostAuthor`; original soft-deleted → `post: null`), so re-posts surface in the Following/Discover feeds (FR-014, FR-027)
-- [ ] T040 [P] [US3] Extend `apps/core_microservice/src/modules/comments/dto/comment-response.dto.ts` to replace `authorId` with `author: IAuthorSummary` (from the already-joined `Comment.author`)
-- [ ] T041 [US3] Extend `apps/core_microservice/src/modules/posts/posts.service.spec.ts` and `posts.controller.spec.ts` with like/unlike + repost/unrepost coverage (idempotency, non-published repost rejection, guards present)
-- [ ] T042 [P] [US3] Create `apps/client_app/src/lib/api/likes.ts` (`likePost`, `unlikePost`), `apps/client_app/src/lib/api/reposts.ts` (`repostPost`, `unrepostPost`), and `apps/client_app/src/lib/api/comments.ts` (`createComment`, `getCommentsByPost`, `updateComment`, `deleteComment`)
-- [ ] T043 [US3] Create `apps/client_app/src/components/posts/post-actions.tsx` with like (toggle + count, TanStack Query mutation + invalidate), comment count, share (copy link via `navigator.clipboard` + native `navigator.share` fallback), and re-post actions
-- [ ] T044 [US3] Create `apps/client_app/src/components/posts/comments.tsx` (list + add + edit + delete comment, author shown) wired to the comments API
-- [ ] T045 [US3] Create `apps/client_app/src/app/posts/[id]/page.tsx` post-detail route rendering the post, `PostActions`, and `Comments`
+- [X] T035 [P] [US3] Create `apps/core_microservice/src/modules/posts/infrastructure/repository/post-like.repository.ts` `like`/`unlike` idempotency wiring (unique `(postId, userId)` index makes double-like/unlike a no-op) — finalize if only stubbed in T009
+- [X] T036 [US3] Add `POST /posts/:id/like` and `DELETE /posts/:id/like` (JWT-guarded) in `apps/core_microservice/src/modules/posts/posts.controller.ts`, delegating to `posts.service.ts` `likePost(userId, id)` / `unlikePost(userId, id)`
+- [X] T037 [US3] Add `POST /posts/:id/repost` and `DELETE /posts/:id/repost` (JWT-guarded) in `apps/core_microservice/src/modules/posts/posts.controller.ts`, delegating to `posts.service.ts` `repost(userId, id)` / `unrepost(userId, id)`; repost of a non-`published` post throws `RepostNotAllowedError` (HTTP 400)
+- [X] T038 [US3] Implement `likePost`/`unlikePost`/`repost`/`unrepost` in `apps/core_microservice/src/modules/posts/posts.service.ts` using `PostLikeRepository`/`RepostRepository` (idempotent, ownership not required for like/repost, but 404 when post missing)
+- [X] T039 [US3] Extend `apps/core_microservice/src/modules/posts/posts.service.ts` feed to include re-post items as `IRepostResponse` (original post embedded + `repostAuthor`; original soft-deleted → `post: null`), so re-posts surface in the Following/Discover feeds (FR-014, FR-027)
+- [X] T040 [P] [US3] Extend `apps/core_microservice/src/modules/comments/dto/comment-response.dto.ts` to replace `authorId` with `author: IAuthorSummary` (from the already-joined `Comment.author`)
+- [X] T041 [US3] Extend `apps/core_microservice/src/modules/posts/posts.service.spec.ts` and `posts.controller.spec.ts` with like/unlike + repost/unrepost coverage (idempotency, non-published repost rejection, guards present)
+- [X] T042 [P] [US3] Create `apps/client_app/src/lib/api/likes.ts` (`likePost`, `unlikePost`), `apps/client_app/src/lib/api/reposts.ts` (`repostPost`, `unrepostPost`), and `apps/client_app/src/lib/api/comments.ts` (`createComment`, `getCommentsByPost`, `updateComment`, `deleteComment`)
+- [X] T043 [US3] Create `apps/client_app/src/components/posts/post-actions.tsx` with like (toggle + count, TanStack Query mutation + invalidate), comment count, share (copy link via `navigator.clipboard` + native `navigator.share` fallback), and re-post actions
+- [X] T044 [US3] Create `apps/client_app/src/components/posts/comments.tsx` (list + add + edit + delete comment, author shown) wired to the comments API
+- [X] T045 [US3] Create `apps/client_app/src/app/posts/[id]/page.tsx` post-detail route rendering the post, `PostActions`, and `Comments`
 
 **Checkpoint**: Interaction loop works; like/comment/repost state consistent.
 

@@ -1,6 +1,7 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
 import { TypeormEntityBase } from '@repo/shared';
 import type { Post } from './post.entity';
+import type { UserProfile } from '../../../profiles/domain/entities/user-profile.entity';
 
 /**
  * A user's re-post of an existing published post to their own feed, retaining
@@ -21,6 +22,10 @@ export class Repost extends TypeormEntityBase {
   @Index()
   @Column({ type: 'uuid' })
   authorId!: string;
+
+  @ManyToOne('UserProfile')
+  @JoinColumn({ name: 'authorId', referencedColumnName: 'authUserId' })
+  author!: UserProfile;
 
   /** Factory: build a repost of a post by a user. */
   static create(originalPostId: string, authorId: string): Repost {

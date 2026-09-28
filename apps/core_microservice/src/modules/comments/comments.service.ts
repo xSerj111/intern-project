@@ -30,7 +30,10 @@ export class CommentsService {
     this.logger.debug('Comment created', {
       props: { commentId: savedComment.id },
     });
-    return savedComment;
+    // Re-read with the author joined so the response includes the author summary.
+    return this.commentRepository.findOneByIdOrThrow(savedComment.id, [
+      'author',
+    ]);
   }
 
   async updateComment(
@@ -53,7 +56,9 @@ export class CommentsService {
     this.logger.debug('Comment updated', {
       props: { commentId: updatedComment.id },
     });
-    return updatedComment;
+    return this.commentRepository.findOneByIdOrThrow(updatedComment.id, [
+      'author',
+    ]);
   }
 
   // We return an array of comments here (newest first, with author joined)

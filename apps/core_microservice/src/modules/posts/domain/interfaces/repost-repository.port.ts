@@ -19,6 +19,19 @@ export interface IRepostRepository extends RepositoryPort<Repost, RepostProps> {
 
   /** Batch repost counts keyed by original post id (non-deleted only). */
   countByOriginalPostIds(postIds: string[]): Promise<Map<string, number>>;
+
+  /** Idempotently re-post a post (restores a soft-deleted repost). */
+  repost(originalPostId: string, authorId: string): Promise<Repost>;
+
+  /** Idempotently remove a repost. */
+  unrepost(originalPostId: string, authorId: string): Promise<void>;
+
+  /** Feed page of reposts (original post, author and reposter joined). */
+  findFeed(params: {
+    authorIds?: string[];
+    page: number;
+    limit: number;
+  }): Promise<[Repost[], number]>;
 }
 
 export const RepostRepositoryKey = Symbol.for('IRepostRepository');

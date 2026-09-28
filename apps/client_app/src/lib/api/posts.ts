@@ -14,6 +14,15 @@ export function createPost(
   return coreApi<IPostResponse>('/posts', { method: 'POST', token, body });
 }
 
+/** Read a single post via `GET /posts/:id` (public). */
+export function getPost(
+  id: string,
+  token?: string | null,
+  signal?: AbortSignal,
+): Promise<IPostResponse> {
+  return coreApi<IPostResponse>(`/posts/${id}`, { token, signal });
+}
+
 /** Edit an own post's text and/or media via `PATCH /posts/:id`. */
 export function updatePost(
   token: string | null,

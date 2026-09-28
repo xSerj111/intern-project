@@ -1,8 +1,9 @@
 import { ApiProperty } from '@nestjs/swagger';
+import type { IAuthorSummary, ICommentResponse } from '@repo/contracts';
 import { Comment } from '../domain/entities/comment.entity';
 
-/** Response DTO for a comment, built from the entity in its constructor. */
-export class CommentResponseDto {
+/** Response DTO for a comment, built from the entity (author joined). */
+export class CommentResponseDto implements ICommentResponse {
   @ApiProperty()
   id: string;
 
@@ -13,7 +14,7 @@ export class CommentResponseDto {
   parentId: string | null;
 
   @ApiProperty()
-  authorId: string;
+  author: IAuthorSummary;
 
   @ApiProperty()
   content: string;
@@ -28,7 +29,12 @@ export class CommentResponseDto {
     this.id = comment.id;
     this.postId = comment.postId;
     this.parentId = comment.parentId ?? null;
-    this.authorId = comment.authorId;
+    this.author = {
+      id: comment.author?.authUserId ?? comment.authorId,
+      username: comment.author?.username ?? '',
+      displayName: comment.author?.displayName ?? '',
+      avatarUrl: comment.author?.avatarUrl ?? null,
+    };
     this.content = comment.content;
     this.createdAt = comment.createdAt.toISOString();
     this.updatedAt = comment.updatedAt.toISOString();

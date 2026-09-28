@@ -9,6 +9,7 @@ import { CommentRepository } from '../comments/infrastructure/repository/comment
 import { FollowRepositoryKey } from '../follows/domain/interfaces/follow-repository.port';
 import { fakePost } from './__tests__/fakers/post.faker';
 import { InvalidPostStateError, PostStatus } from './domain/entities/post.entity';
+import { RepostNotAllowedError } from './domain/errors/post.errors';
 
 describe('PostsService', () => {
   let service: PostsService;
@@ -40,6 +41,7 @@ describe('PostsService', () => {
     repost: jest.fn(),
     unrepost: jest.fn(),
     findByOriginalAndAuthor: jest.fn(),
+    findFeed: jest.fn(),
   };
 
   const commentRepository = {
@@ -56,6 +58,7 @@ describe('PostsService', () => {
     postLikeRepository.countByPostIds.mockResolvedValue(new Map());
     postLikeRepository.findLikedPostIds.mockResolvedValue(new Set());
     repostRepository.countByOriginalPostIds.mockResolvedValue(new Map());
+    repostRepository.findFeed.mockResolvedValue([[], 0]);
     commentRepository.countByPostIds.mockResolvedValue(new Map());
     followRepository.findFollowing.mockResolvedValue([]);
 
@@ -143,7 +146,11 @@ describe('PostsService', () => {
       );
 
       expect(result.total).toBe(1);
-      expect(result.items[0].engagement).toEqual({
+      const entry = result.items[0];
+      expect(entry.kind).toBe('post');
+      expect(
+        entry.kind === 'post' ? entry.engagement : undefined,
+      ).toEqual({
         likeCount: 7,
         commentCount: 3,
         repostCount: 2,
@@ -222,6 +229,100 @@ describe('PostsService', () => {
         'asset-b',
       ]);
       expect(post.assets.map((asset) => asset.displayOrder)).toEqual([0, 1]);
+    });
+  });
+
+  describe('likes', () => {
+    it('likes a post idempotently after verifying it exists', async () => {
+      postRepository.findOneByIdOrThrow.mockResolvedValue(fakePost());
+      postLikeRepository.like.mockResolvedValue(undefined);
+
+      await service.likePost('user-1', 'post-1');
+
+      expect(postLikeRepository.like).toHaveBeenCalledWith('post-1', 'user-1');
+    });
+
+    it('propagates a not-found error and does not like', async () => {
+      postRepository.findOneByIdOrThrow.mockRejectedValue(new Error('not found'));
+
+      await expect(service.likePost('user-1', 'missing')).rejects.toThrow(
+        'not found',
+      );
+      expect(postLikeRepository.like).not.toHaveBeenCalled();
+    });
+
+    it('unlikes a post', async () => {
+      postRepository.findOneByIdOrThrow.mockResolvedValue(fakePost());
+      postLikeRepository.unlike.mockResolvedValue(undefined);
+
+      await service.unlikePost('user-1', 'post-1');
+
+      expect(postLikeRepository.unlike).toHaveBeenCalledWith('post-1', 'user-1');
+    });
+  });
+
+  describe('reposts', () => {
+    it('reposts a published post', async () => {
+      postRepository.findOneByIdOrThrow.mockResolvedValue(
+        fakePost({ status: PostStatus.Published }),
+      );
+      repostRepository.repost.mockResolvedValue(undefined);
+
+      await service.repost('user-1', 'post-1');
+
+      expect(repostRepository.repost).toHaveBeenCalledWith('post-1', 'user-1');
+    });
+
+    it('rejects reposting a non-published post', async () => {
+      postRepository.findOneByIdOrThrow.mockResolvedValue(
+        fakePost({ status: PostStatus.Draft }),
+      );
+
+      await expect(service.repost('user-1', 'post-1')).rejects.toThrow(
+        RepostNotAllowedError,
+      );
+      expect(repostRepository.repost).not.toHaveBeenCalled();
+    });
+
+    it('unreposts idempotently', async () => {
+      postRepository.findOneByIdOrThrow.mockResolvedValue(fakePost());
+      repostRepository.unrepost.mockResolvedValue(undefined);
+
+      await service.unrepost('user-1', 'post-1');
+
+      expect(repostRepository.unrepost).toHaveBeenCalledWith('post-1', 'user-1');
+    });
+  });
+
+  describe('feed reposts', () => {
+    it('includes repost entries with the original post and attribution', async () => {
+      const original = fakePost({ id: 'orig-1', status: PostStatus.Published });
+      postRepository.getFeed.mockResolvedValue([[], 0]);
+      repostRepository.findFeed.mockResolvedValue([
+        [
+          {
+            id: 'repost-1',
+            originalPostId: 'orig-1',
+            authorId: 'reposter-1',
+            originalPost: original,
+            author: { authUserId: 'reposter-1', username: 'reposter' },
+            createdAt: new Date('2026-02-01T00:00:00.000Z'),
+          },
+        ],
+        1,
+      ]);
+
+      const result = await service.getFeed(
+        'viewer-1',
+        'discover',
+        'newest',
+        undefined,
+        1,
+        20,
+      );
+
+      expect(result.total).toBe(1);
+      expect(result.items[0].kind).toBe('repost');
     });
   });
 });

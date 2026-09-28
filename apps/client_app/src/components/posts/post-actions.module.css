@@ -1,0 +1,37 @@
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.action,
+.active {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  border: 1px solid var(--innogram-border);
+  background: transparent;
+  color: var(--innogram-muted);
+  cursor: pointer;
+}
+
+.action:hover {
+  background: rgba(109, 40, 217, 0.08);
+}
+
+.active {
+  color: var(--innogram-accent);
+  border-color: var(--innogram-accent);
+}
+
+.action:disabled,
+.active:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

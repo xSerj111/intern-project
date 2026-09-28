@@ -102,6 +102,7 @@ export class RepostRepository
     return this.repository.findAndCount({
       where: params.authorIds ? { authorId: In(params.authorIds) } : {},
       relations: {
+        author: true,
         originalPost: {
           author: true,
           assets: { asset: true },

@@ -16,6 +16,7 @@ import { PostsService } from './posts.service';
 import { CreatePostDto } from './dto/create-post.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 import { PostResponseDto } from './dto/post-response.dto';
+import { RepostResponseDto } from './dto/repost-response.dto';
 import type { IFeedResponse, ISearchResponse } from '@repo/contracts';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { FeedQueryDto } from './dto/feed-query.dto';
@@ -52,8 +53,14 @@ export class PostsController {
       query.limit,
     );
     return {
-      items: items.map(
-        ({ post, engagement }) => new PostResponseDto(post, engagement),
+      items: items.map((entry) =>
+        entry.kind === 'repost'
+          ? new RepostResponseDto(
+              entry.repost,
+              entry.post,
+              entry.engagement ?? undefined,
+            )
+          : new PostResponseDto(entry.post, entry.engagement),
       ),
       total,
       page: query.page,
@@ -129,5 +136,45 @@ export class PostsController {
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<void> {
     await this.postsService.softDeletePost(userId, id);
+  }
+
+  @HttpPost(':id/like')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async likePost(
+    @CurrentUser('sub') userId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<void> {
+    await this.postsService.likePost(userId, id);
+  }
+
+  @Delete(':id/like')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async unlikePost(
+    @CurrentUser('sub') userId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<void> {
+    await this.postsService.unlikePost(userId, id);
+  }
+
+  @HttpPost(':id/repost')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async repostPost(
+    @CurrentUser('sub') userId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<void> {
+    await this.postsService.repost(userId, id);
+  }
+
+  @Delete(':id/repost')
+  @UseGuards(JwtAuthGuard)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async unrepostPost(
+    @CurrentUser('sub') userId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+  ): Promise<void> {
+    await this.postsService.unrepost(userId, id);
   }
 }

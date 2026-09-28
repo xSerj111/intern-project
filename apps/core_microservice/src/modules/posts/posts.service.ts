@@ -8,6 +8,9 @@ import type {
 import { CreatePostDto } from './dto/create-post.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 import { Post } from './domain/entities/post.entity';
+import { PostStatus } from './domain/entities/post.entity';
+import { Repost } from './domain/entities/repost.entity';
+import { RepostNotAllowedError } from './domain/errors/post.errors';
 import { PostRepository } from './infrastructure/repository/post.repository';
 import { PostLikeRepository } from './infrastructure/repository/post-like.repository';
 import {
@@ -25,6 +28,23 @@ export interface PostWithEngagement {
   post: Post;
   engagement: PostEngagement;
 }
+
+/** A plain post entry in the merged feed. */
+export interface FeedPostEntry {
+  kind: 'post';
+  post: Post;
+  engagement: PostEngagement;
+}
+
+/** A re-post entry; `post` is null when the original is unavailable. */
+export interface FeedRepostEntry {
+  kind: 'repost';
+  repost: Repost;
+  post: Post | null;
+  engagement: PostEngagement | null;
+}
+
+export type FeedEntry = FeedPostEntry | FeedRepostEntry;
 
 @Injectable()
 export class PostsService {
@@ -46,31 +66,56 @@ export class PostsService {
     mediaType: MediaTypeFilter | undefined,
     page: number,
     limit: number,
-  ): Promise<{ items: PostWithEngagement[]; total: number }> {
+  ): Promise<{ items: FeedEntry[]; total: number }> {
     const authorIds =
       feed === 'discover' ? undefined : await this.resolveFollowingAuthorIds(userId);
 
-    const [posts, total] = await this.postRepository.getFeed({
-      authorIds,
-      sort,
-      mediaType,
-      page,
-      limit,
+    const [[posts, postTotal], [reposts, repostTotal]] = await Promise.all([
+      this.postRepository.getFeed({ authorIds, sort, mediaType, page, limit }),
+      this.repostRepository.findFeed({ authorIds, page, limit }),
+    ]);
+
+    const repostedPosts = reposts
+      .map((repost) => repost.originalPost)
+      .filter((post): post is Post => Boolean(post));
+
+    const engagement = await this.attachEngagement(
+      [...posts, ...repostedPosts],
+      userId,
+    );
+
+    const postEntries: FeedPostEntry[] = posts.map((post) => ({
+      kind: 'post',
+      post,
+      engagement: engagement.get(post.id)!,
+    }));
+
+    let repostEntries: FeedRepostEntry[] = reposts.map((repost) => {
+      const original = repost.originalPost ?? null;
+      return {
+        kind: 'repost',
+        repost,
+        post: original,
+        engagement: original ? engagement.get(original.id)! : null,
+      };
     });
 
-    const engagement = await this.attachEngagement(posts, userId);
+    if (mediaType) {
+      repostEntries = repostEntries.filter(
+        (entry) => entry.post && this.matchesMediaType(entry.post, mediaType),
+      );
+    }
+
+    const items = this.sortFeedEntries(
+      [...postEntries, ...repostEntries],
+      sort,
+    );
 
     this.logger.debug('Feed retrieved', {
-      props: { userId, feed, count: posts.length, total },
+      props: { userId, feed, count: items.length, total: postTotal + repostTotal },
     });
 
-    return {
-      items: posts.map((post) => ({
-        post,
-        engagement: engagement.get(post.id)!,
-      })),
-      total,
-    };
+    return { items, total: postTotal + repostTotal };
   }
 
   async createPost(
@@ -182,6 +227,40 @@ export class PostsService {
     return archivedPost;
   }
 
+  /** Idempotently like a post. 404s when the post does not exist. */
+  async likePost(userId: string, id: string): Promise<void> {
+    await this.getPost(id);
+    await this.postLikeRepository.like(id, userId);
+    this.logger.debug('Post liked', { props: { postId: id, userId } });
+  }
+
+  /** Idempotently remove the viewer's like. 404s when the post does not exist. */
+  async unlikePost(userId: string, id: string): Promise<void> {
+    await this.getPost(id);
+    await this.postLikeRepository.unlike(id, userId);
+    this.logger.debug('Post unliked', { props: { postId: id, userId } });
+  }
+
+  /**
+   * Re-post a published post. Domain rule: only published posts can be
+   * re-posted; otherwise `RepostNotAllowedError` (-> HTTP 400).
+   */
+  async repost(userId: string, id: string): Promise<void> {
+    const post = await this.getPost(id);
+    if (post.status !== PostStatus.Published) {
+      throw new RepostNotAllowedError(post.status);
+    }
+    await this.repostRepository.repost(id, userId);
+    this.logger.debug('Post reposted', { props: { postId: id, userId } });
+  }
+
+  /** Idempotently remove the viewer's re-post. */
+  async unrepost(userId: string, id: string): Promise<void> {
+    await this.getPost(id);
+    await this.repostRepository.unrepost(id, userId);
+    this.logger.debug('Post unreposted', { props: { postId: id, userId } });
+  }
+
   async searchPosts(
     keyword: string,
     page: number,
@@ -205,6 +284,38 @@ export class PostsService {
       })),
       total,
     };
+  }
+
+  /** Whether a post matches a media-type filter (FR-018). */
+  private matchesMediaType(post: Post, mediaType: MediaTypeFilter): boolean {
+    const assets = post.assets ?? [];
+    if (mediaType === 'text') {
+      return assets.length === 0;
+    }
+    const prefix = mediaType === 'photos' ? 'image/' : 'video/';
+    return assets.some((asset) =>
+      (asset.asset?.mimeType ?? '').startsWith(prefix),
+    );
+  }
+
+  /** Merge and order post + re-post feed entries by the selected sort. */
+  private sortFeedEntries(entries: FeedEntry[], sort: PostSort): FeedEntry[] {
+    const createdAt = (entry: FeedEntry): number =>
+      entry.kind === 'post'
+        ? entry.post.createdAt.getTime()
+        : entry.repost.createdAt.getTime();
+    const likeCount = (entry: FeedEntry): number =>
+      entry.engagement?.likeCount ?? 0;
+
+    return [...entries].sort((a, b) => {
+      if (sort === 'oldest') {
+        return createdAt(a) - createdAt(b);
+      }
+      if (sort === 'most_liked') {
+        return likeCount(b) - likeCount(a) || createdAt(b) - createdAt(a);
+      }
+      return createdAt(b) - createdAt(a);
+    });
   }
 
   /** The following feed author set: the viewer plus every account they follow. */
