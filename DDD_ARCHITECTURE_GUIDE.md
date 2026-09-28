@@ -1,7 +1,7 @@
 # DDD & Hexagonal Architecture Guide — Innogram Monorepo
 
 **Audience:** Backend and full-stack developers working in the Innogram codebase.  
-**Last updated:** 2026-08-03  
+**Last updated:** 2026-09-28  
 **Monorepo root:** `intern-project/`
 
 ---
@@ -95,10 +95,33 @@ packages/contracts/src/
 ├── common/
 │   ├── index.ts
 │   └── responses.ts            # IPaginatedResponse<T>, IPaginationMeta, PAGINATION_DEFAULTS
-└── profiles/
+├── auth/
+│   ├── index.ts
+│   ├── requests.ts             # ILoginRequest, IRegisterRequest, IGoogleLoginRequest, IRefreshRequest
+│   └── responses.ts            # IAuthUserResponse, ILoginResponse, IRegisterResponse
+├── profiles/
+│   ├── index.ts
+│   ├── requests.ts             # ICreateProfileRequest, IUpdateProfileRequest
+│   └── responses.ts            # IProfileResponse
+├── posts/
+│   ├── index.ts
+│   ├── requests.ts             # ICreatePostRequest, IUpdatePostRequest, IPostFeedQuery, ISearchPostsQuery
+│   └── responses.ts            # PostStatus, IAuthorSummary, IPostResponse, IRepostResponse, IFeedResponse, ISearchResponse, ...
+├── comments/
+│   ├── index.ts
+│   ├── requests.ts             # ICreateCommentRequest, IUpdateCommentRequest
+│   └── responses.ts            # ICommentResponse
+├── follows/
+│   ├── index.ts
+│   ├── requests.ts             # ICreateFollowRequest
+│   └── responses.ts            # IFollowResponse
+├── chats/
+│   ├── index.ts
+│   ├── requests.ts             # ICreateMessageRequest
+│   └── responses.ts            # IMessageResponse
+└── assets/
     ├── index.ts
-    ├── requests.ts             # ICreateProfileRequest, IUpdateProfileRequest
-    └── responses.ts            # IProfileResponse
+    └── responses.ts            # IAssetResponse
 ```
 
 Each interface is a **pure TypeScript type** — no decorators, no runtime libraries, no NestJS, no TypeORM:
@@ -151,10 +174,10 @@ packages/shared/src/
 ├── dtos/
 │   ├── auth/
 │   │   ├── create-user.dto.ts            # CreateUserDto (auth microservice)
-│   │   └── login.dto.ts                  # LoginDto (auth microservice — class-validator decorated)
+│   │   ├── login.dto.ts                  # LoginDto (auth microservice — class-validator decorated)
+│   │   ├── google-login.dto.ts           # GoogleLoginDto (auth microservice)
+│   │   └── refresh-token.dto.ts          # RefreshTokenDto (auth microservice)
 │   └── core/
-│       ├── create-post.dto.ts            # CreatePostDto
-│       ├── update-post.dto.ts            # UpdatePostDto
 │       ├── create-comment.dto.ts         # CreateCommentDto
 │       ├── update-comment.dto.ts         # UpdateCommentDto
 │       └── update-profile.dto.ts         # UpdateProfileDto
@@ -174,12 +197,13 @@ packages/shared/src/
 │   └── domain-exception.filter.ts        # DomainExceptionFilter (domain errors → HTTP — NestJS only)
 │
 ├── logger/
-│   ├── logger.port.ts                    # Logger interface + LoggerKey DI token
+│   ├── logger.port.ts                    # Logger interface + LoggerKey DI token + LogLevel/LogData
+│   ├── logger.module.ts                  # LoggerModule.forFeature(contextName) (NestJS dynamic module)
 │   ├── winston.logger.ts                 # WinstonLogger (default implementation)
 │   └── index.ts
 │
 └── events/
-    └── user-created.event.ts             # UserCreatedEvent (shared event payload)
+    └── user-created.event.ts             # UserCreatedEvent (authUserId, email, handle, timestamp — class-validator decorated)
 ```
 
 **Key additions for the Express migration:**
@@ -290,6 +314,11 @@ export class UserProfile extends TypeormEntityBase implements UserProfileProps {
     this.bio = bio ?? undefined;
   }
 
+  // Domain method: set or clear (with null) the avatar image URL
+  setAvatar(avatarUrl: string | null): void {
+    this.avatarUrl = avatarUrl ?? undefined;
+  }
+
   // Domain computed properties
   get hasAvatar(): boolean { return Boolean(this.avatarUrl); }
   get isComplete(): boolean {
@@ -309,15 +338,46 @@ The same pattern is used across all domains. For example, `Post` (in `modules/po
 ```typescript
 // modules/posts/domain/entities/post.entity.ts
 
+export enum PostStatus {
+  Draft = 'draft',
+  Published = 'published',
+  Archived = 'archived',
+}
+
+export class InvalidPostStateError extends DomainError {
+  constructor(from: PostStatus) { super(`Cannot publish a post in state "${from}".`); }
+}
+
+export class PostArchiveError extends DomainError {
+  constructor(from: PostStatus) { super(`Cannot archive a post in state "${from}".`); }
+}
+
 @Entity('posts')
 export class Post extends TypeormEntityBase {
-  // ... columns ...
+  @Index()
+  @Column({ type: 'uuid' })
+  authorId!: string;
 
-  static create(props: { authorId: string; content: string }): Post {
+  @ManyToOne('UserProfile')
+  @JoinColumn({ name: 'authorId', referencedColumnName: 'authUserId' })
+  author!: UserProfile;
+
+  @Column({ type: 'text' })
+  content!: string;
+
+  @Column({ type: 'enum', enum: PostStatus, default: PostStatus.Draft })
+  status!: PostStatus;
+
+  @OneToMany('PostAsset', 'post', { cascade: true })
+  assets!: PostAsset[];
+
+  // Factory: a new post always starts as a draft (content and assets optional).
+  static create(props: { authorId: string; content?: string; assets?: PostAsset[] }): Post {
     const post = new Post();
     post.authorId = props.authorId;
-    post.content = props.content;
+    post.content = props.content ?? '';
     post.status = PostStatus.Draft;      // Invariant: new posts are always drafts
+    if (props.assets) post.assets = props.assets;
     return post;
   }
 
@@ -330,6 +390,17 @@ export class Post extends TypeormEntityBase {
 
   get canPublish(): boolean {
     return this.status === PostStatus.Draft && this.content.trim().length > 0;
+  }
+
+  archive(): void {
+    if (!this.canArchive) {
+      throw new PostArchiveError(this.status);  // Only published posts can be archived
+    }
+    this.status = PostStatus.Archived;
+  }
+
+  get canArchive(): boolean {
+    return this.status === PostStatus.Published;
   }
 }
 ```
@@ -363,6 +434,8 @@ export class Comment extends TypeormEntityBase {
   }
 }
 ```
+
+Posts also has `Repost` (a user re-posts an existing published post to their own feed — a distinct aggregate referencing `Post`, not a lifecycle state), plus the `PostLike`/`PostAsset` and `CommentLike` join tables. Note: `PostLike`, `CommentLike`, and `PostAsset` deliberately do **not** extend `TypeormEntityBase` — they are lightweight join/relation rows with a `@PrimaryGeneratedColumn('uuid')` id and `@CreateDateColumn()`/`@DeleteDateColumn()` timestamps, rather than a full aggregate with `updatedAt`.
 
 #### Layer 2: Domain Interfaces (`domain/interfaces/`)
 
@@ -478,7 +551,7 @@ export class CreateProfileDto implements ICreateProfileRequest {
 }
 ```
 
-**Note:** Some DTOs that are shared across microservices live in `@repo/shared/dtos/` (e.g. `CreatePostDto`, `UpdateProfileDto`, `LoginDto`, `CreateUserDto`). Module-specific DTOs that are tightly coupled to one module live inside the module's `dto/` folder (e.g. `CreateProfileDto`).
+**Note:** Some DTOs that are shared across microservices live in `@repo/shared/dtos/` (e.g. `UpdateProfileDto`, `CreateCommentDto`, `LoginDto`, `CreateUserDto`). Module-specific DTOs that are tightly coupled to one module live inside the module's `dto/` folder (e.g. `CreateProfileDto`, and the posts module's `CreatePostDto`/`UpdatePostDto`).
 
 **Outbound DTOs** (response DTOs) are constructed from entities. They are the translation layer between the domain and the wire:
 
@@ -507,23 +580,31 @@ export class ProfileResponseDto implements IProfileResponse {
 }
 ```
 
-The post response DTO follows the exact same pattern:
+The post response DTO follows the same pattern but is richer — it embeds an author summary (`IAuthorSummary`, replacing the raw `authorId`), the ordered media assets, and engagement counters (populated by the service via batched aggregate queries):
 
 ```typescript
 // modules/posts/dto/post-response.dto.ts
-export class PostResponseDto {
+export class PostResponseDto implements IPostResponse {
   @ApiProperty() id: string;
-  @ApiProperty() authorId: string;
+  @ApiProperty() author: IAuthorSummary;            // { id, username, displayName, avatarUrl }
   @ApiProperty() content: string;
-  @ApiProperty({ enum: PostStatus }) status: PostStatus;
+  @ApiProperty({ enum: ['draft', 'published', 'archived'] }) status: PostStatus;
+  @ApiProperty({ type: [Object] }) assets: IPostMediaResponse[];
+  @ApiProperty() likeCount: number;
+  @ApiProperty() commentCount: number;
+  @ApiProperty() repostCount: number;
+  @ApiProperty() likedByMe: boolean;                // false for anonymous viewers
   @ApiProperty() createdAt: string;
   @ApiProperty() updatedAt: string;
 
-  constructor(post: Post) {
+  constructor(post: Post, engagement?: Partial<PostEngagement>) {
     this.id = post.id;
-    this.authorId = post.authorId;
+    this.author = { /* derived from post.author (authUserId, username, displayName, avatarUrl) */ };
     this.content = post.content;
     this.status = post.status;
+    this.assets = (post.assets ?? []) /* sorted by displayOrder, mapped to IPostMediaResponse */;
+    this.likeCount = engagement?.likeCount ?? 0;
+    // ... commentCount, repostCount, likedByMe ...
     this.createdAt = post.createdAt.toISOString();
     this.updatedAt = post.updatedAt.toISOString();
   }
@@ -608,12 +689,23 @@ The service orchestrates the domain — it does not contain business rules. It f
 // modules/profiles/profiles.service.ts
 @Injectable()
 export class ProfilesService {
-  constructor(private readonly userProfileRepository: UserProfileRepository) {}
+  constructor(
+    @Inject(LoggerKey) private readonly logger: Logger,
+    private readonly userProfileRepository: UserProfileRepository,
+  ) {}
 
   async createProfile(authUserId: string, handle: string): Promise<UserProfile> {
-    // Entity factory knows how to build a valid profile
+    // Idempotency: a replayed/retried `user-created` event returns the existing profile.
+    const existing = await this.userProfileRepository.findByAuthUserId(authUserId);
+    if (existing) return existing;
+
     const profile = UserProfile.create({ authUserId, username: handle });
-    return this.userProfileRepository.save(profile);
+    try {
+      return await this.userProfileRepository.save(profile);
+    } catch (error) {
+      // Username collision (email local-part clash) → retry with a random suffix.
+      // ... deduplicate handle and retry up to MAX_USERNAME_ATTEMPTS times ...
+    }
   }
 
   async getProfile(id: string): Promise<UserProfile> {
@@ -621,16 +713,21 @@ export class ProfilesService {
     // ↑ throws EntityByIdNotFoundError (→ 404 via DomainExceptionFilter)
   }
 
-  async updateOwnProfile(
-    profileId: string,
-    authUserId: string,
-    updateDto: UpdateProfileDto,
-  ): Promise<UserProfile> {
-    const profile = await this.getProfile(profileId);
-    // IDOR protection: verify the JWT subject owns this profile
-    if (profile.authUserId !== authUserId) {
-      throw new UnauthorizedError('You can only update your own profile');
-    }
+  async getProfileByAuthUserId(authUserId: string): Promise<UserProfile> {
+    const profile = await this.userProfileRepository.findByAuthUserId(authUserId);
+    if (!profile) throw new EntityNotFoundError('UserProfile', { authUserId });
+    return profile;
+  }
+
+  // Lazy-init safety net: create the profile on first read if the
+  // `UserCreatedEvent` was lost (see Section 6.2.1).
+  async getOrCreateProfileByAuthUserId(authUserId: string, email?: string): Promise<UserProfile> {
+    const existing = await this.userProfileRepository.findByAuthUserId(authUserId);
+    return existing ?? this.createProfile(authUserId, this.deriveHandle(email));
+  }
+
+  async updateProfile(id: string, updateDto: UpdateProfileDto): Promise<UserProfile> {
+    const profile = await this.getProfile(id);
     // Mutations go through entity domain methods — not raw property assignment
     if (updateDto.bio !== undefined) {
       profile.editBio(updateDto.bio ?? null);  // throws InvalidProfileBioError if too long
@@ -640,7 +737,7 @@ export class ProfilesService {
 }
 ```
 
-**Key change:** The `updateProfile` method was replaced with `updateOwnProfile`, which accepts the authenticated `authUserId` (extracted from the JWT by `@CurrentUser()`) and asserts ownership before applying mutations. This prevents **Insecure Direct Object Reference (IDOR)** attacks — a user cannot modify another user's profile by guessing a UUID.
+**Key changes:** Profiles are resolved by `authUserId` (the JWT `sub`) rather than by database id for the authenticated user (`getProfileByAuthUserId`, `getOrCreateProfileByAuthUserId`). The IDOR ownership check is performed **in the controller** (throwing `ForbiddenException` → HTTP 403), keeping `ProfilesService.updateProfile` free of authorization concerns — see Layer 7 below.
 
 #### Layer 7: Controller (`profiles.controller.ts`)
 
@@ -653,6 +750,14 @@ The controller is a thin translation layer: validate input → call service → 
 export class ProfilesController {
   constructor(private readonly profilesService: ProfilesService) {}
 
+  @Get('me')
+  @UseGuards(JwtAuthGuard)
+  async getMyProfile(@CurrentUser() user: { sub: string; email: string }): Promise<ProfileResponseDto> {
+    return new ProfileResponseDto(
+      await this.profilesService.getOrCreateProfileByAuthUserId(user.sub, user.email),
+    );
+  }
+
   @Get(':id')
   async getProfile(@Param('id', ParseUUIDPipe) id: string): Promise<ProfileResponseDto> {
     return new ProfileResponseDto(await this.profilesService.getProfile(id));
@@ -663,18 +768,23 @@ export class ProfilesController {
   async updateProfile(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() updateProfileDto: UpdateProfileDto,
-    @CurrentUser() user: JwtPayload,
+    @CurrentUser('sub') authUserId: string,
   ): Promise<ProfileResponseDto> {
-    const profile = await this.profilesService.updateOwnProfile(id, user.sub, updateProfileDto);
-    return new ProfileResponseDto(profile);
+    const profile = await this.profilesService.getProfile(id);
+    // IDOR protection: only the owning auth user may mutate this profile.
+    if (profile.authUserId !== authUserId) {
+      throw new ForbiddenException('You can only update your profile');
+    }
+    return new ProfileResponseDto(await this.profilesService.updateProfile(id, updateProfileDto));
   }
 }
 ```
 
 **Key security changes from the original design:**
-- `POST /profiles` was **removed**. Profiles are no longer created via a public HTTP endpoint. They are created internally by `InternalEventsModule` when a `UserCreatedEvent` is received from `auth_microservice` (see [Section 7](#7-inter-service-communication-auth--core)).
-- `PATCH /profiles/:id` is protected by `JwtAuthGuard` — the Core service independently validates the JWT using the shared `JWT_ACCESS_SECRET` without needing a database call.
-- The `@CurrentUser()` decorator extracts the authenticated `JwtPayload` from the request context. The service then compares `user.sub` against the profile's `authUserId` to enforce **IDOR protection** (users can only update their own profile).
+- `POST /profiles` was **removed**. Profiles are no longer created via a public HTTP endpoint. They are created internally by `InternalEventsModule` when a `UserCreatedEvent` is received from `auth_microservice` (see [Section 6](#6-inter-service-communication-auth--core)).
+- `PATCH /profiles/:id` is protected by `JwtAuthGuard` — the Core service independently validates the JWT using the shared secret without needing a database call.
+- The **IDOR check now lives in the controller**: it compares `@CurrentUser('sub')` (the authenticated `authUserId`) against the profile's `authUserId` and throws `ForbiddenException` (→ HTTP 403) on mismatch. Users can only update their own profile.
+- `GET /profiles/me` resolves the authenticated user's profile via `getOrCreateProfileByAuthUserId`, which lazily creates the profile on first read if the `UserCreatedEvent` was lost (see [Section 6.2.1](#621-delivery-trade-off--lazy-initialization-fallback)).
 
 #### Layer 8: Module (`profiles.module.ts`)
 
@@ -708,16 +818,16 @@ export class InternalEventsModule {}
 
 ```typescript
 // modules/internal-events/internal-events.controller.ts
+@ApiExcludeController()   // hidden from public Swagger docs
 @Controller('internal/events')
 export class InternalEventsController {
   constructor(private readonly profilesService: ProfilesService) {}
 
   @Post('user-created')
+  @HttpCode(HttpStatus.OK)
   async handleUserCreated(@Body() event: UserCreatedEvent): Promise<void> {
-    await this.profilesService.createProfile(
-      event.userId,
-      event.email.split('@')[0],   // derive initial handle from email
-    );
+    // The event carries the derived handle; Core no longer derives it from the email.
+    await this.profilesService.createProfile(event.authUserId, event.handle);
   }
 }
 ```
@@ -735,64 +845,93 @@ export class InternalEventsController {
 
 #### `JwtAuthGuard`
 
-A NestJS guard that extracts the Bearer token from the `Authorization` header, verifies it using the shared `JWT_ACCESS_SECRET` (from `.env`), and attaches the decoded payload to the request context:
+A NestJS guard that extracts the Bearer token from the `Authorization` header, verifies it against the shared access secret (via `ConfigService`), and attaches the decoded payload to the request context:
 
 ```typescript
 // common/guards/jwt-auth.guard.ts
 @Injectable()
 export class JwtAuthGuard implements CanActivate {
-  canActivate(context: ExecutionContext): boolean {
-    const request = context.switchToHttp().getRequest();
-    const token = this.extractToken(request);
-    if (!token) throw new UnauthorizedError('Missing access token');
+  constructor(private readonly configService: ConfigService) {}
 
+  canActivate(context: ExecutionContext): boolean {
+    const request = context.switchToHttp().getRequest<Request>();
+    const token = this.extractTokenFromHeader(request);
+    if (!token) throw new UnauthorizedException('Authentication token is missing');
+    request['user'] = this.verifyToken(token);   // attach to request for @CurrentUser()
+    return true;
+  }
+
+  protected verifyToken(token: string): string | jwt.JwtPayload {
+    // Same secret auth_microservice signs with; accept both names.
+    const secret =
+      this.configService.get<string>('JWT_ACCESS_SECRET') ||
+      this.configService.get<string>('JWT_SECRET') ||
+      process.env.JWT_ACCESS_SECRET ||
+      process.env.JWT_SECRET;
+    if (!secret) throw new InternalServerErrorException('JWT access secret is not configured');
     try {
-      const payload = jwt.verify(token, env.jwt.accessSecret) as JwtPayload;
-      request.user = payload;   // attach to request for @CurrentUser()
-      return true;
+      return jwt.verify(token, secret);
     } catch {
-      throw new UnauthorizedError('Invalid or expired access token');
+      throw new UnauthorizedException('Invalid or expired authentication token');
     }
   }
 
-  private extractToken(request: Request): string | null {
-    const header = request.headers.authorization;
-    if (!header?.startsWith('Bearer ')) return null;
-    return header.slice(7);
+  protected extractTokenFromHeader(request: Request): string | undefined {
+    const [type, token] = request.headers.authorization?.split(' ') ?? [];
+    return type === 'Bearer' ? token : undefined;
   }
 }
 ```
 
 **Key design decisions:**
 - No database call on every request — the JWT is self-contained and cryptographically verifiable.
-- The guard throws `UnauthorizedError` (mapped to HTTP 401 by `DomainExceptionFilter`) on missing or invalid tokens.
-- The decoded `JwtPayload` is attached to `request.user` for downstream consumers.
+- The guard throws NestJS `UnauthorizedException` (→ HTTP 401) on missing or invalid tokens, rather than a domain error — this is an infrastructure concern, not a domain rule.
+- The decoded payload is attached to `request.user` for downstream consumers.
+
+#### `OptionalJwtAuthGuard`
+
+A subclass of `JwtAuthGuard` that permits anonymous requests: when the `Authorization` header is absent the request proceeds **without** a `user`, but a present token must still be valid (invalid/expired tokens still yield a 401). It is used by public read endpoints such as `GET /posts/:id` so authenticated viewers get per-user fields (`likedByMe`) while anonymous clients can still read the resource:
+
+```typescript
+// common/guards/optional-jwt-auth.guard.ts
+@Injectable()
+export class OptionalJwtAuthGuard extends JwtAuthGuard {
+  canActivate(context: ExecutionContext): boolean {
+    const request = context.switchToHttp().getRequest<Request>();
+    const token = this.extractTokenFromHeader(request);
+    if (!token) return true;
+    request['user'] = this.verifyToken(token);
+    return true;
+  }
+}
+```
 
 #### `@CurrentUser` Decorator
 
-A custom parameter decorator that extracts the authenticated user from the request, enabling type-safe access in controller methods:
+A custom parameter decorator that extracts the authenticated user (or a single claim) from the request, enabling type-safe access in controller methods:
 
 ```typescript
 // common/decorators/current-user.decorator.ts
 export const CurrentUser = createParamDecorator(
-  (data: unknown, ctx: ExecutionContext): JwtPayload => {
-    const request = ctx.switchToHttp().getRequest();
-    return request.user as JwtPayload;
+  (data: string | undefined, ctx: ExecutionContext) => {
+    const request = ctx.switchToHttp().getRequest<{ user?: Record<string, unknown> }>();
+    const user = request.user;
+    return data ? user?.[data] : user;
   },
 );
 ```
 
-Usage: `@CurrentUser() user: JwtPayload` — the controller receives a typed `{ sub: string; email: string }` without manual request inspection.
+Usage: `@CurrentUser() user: { sub: string; email: string }` returns the whole payload; `@CurrentUser('sub') userId: string` extracts a single claim (the common pattern for ownership checks).
 
 #### IDOR Protection in Profiles
 
 The `PATCH /profiles/:id` endpoint combines `JwtAuthGuard` + `@CurrentUser` to enforce ownership validation:
 
-1. `JwtAuthGuard` validates the token and attaches `{ sub, email }` to the request.
-2. `@CurrentUser()` decorator extracts `user.sub` (the authenticated user's ID).
-3. `ProfilesService.updateOwnProfile()` compares `user.sub` to the profile's `authUserId`. If they don't match, it throws `UnauthorizedError`.
+1. `JwtAuthGuard` validates the token and attaches the payload to the request.
+2. `@CurrentUser('sub')` extracts the authenticated `authUserId`.
+3. The controller compares it to the profile's `authUserId`; on mismatch it throws `ForbiddenException` (→ HTTP 403).
 
-This prevents **Insecure Direct Object Reference (IDOR)** attacks: even with a valid JWT, User A cannot modify User B's profile by guessing their profile UUID.
+This prevents **Insecure Direct Object Reference (IDOR)** attacks: even with a valid JWT, User A cannot modify User B's profile by guessing their profile UUID. (The same controller-level ownership pattern is used across `posts` and `comments`; `posts` throws `UnauthorizedError` → 401 for non-owners.)
 
 ### 3.5 App-Level Security Middleware
 
@@ -801,29 +940,84 @@ The NestJS application (`core_microservice`) applies HTTP security headers and C
 ```typescript
 // apps/core_microservice/src/main.ts (excerpt)
 import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, {
+    logger: new WinstonLogger('CoreSystem'),
+  });
 
   // HTTP security headers (XSS protection, MIME-sniffing prevention, etc.)
   app.use(helmet());
 
-  // CORS: restrict to trusted origins from .env
+  // Allows reading the refresh_token from cookies
+  app.use(cookieParser());
+
+  // CORS: restrict to trusted origins from .env (CLIENT_URL)
   app.enableCors({
-    origin: env.cors.origin,   // e.g. "http://localhost:3000" or comma-separated list
+    origin: process.env.CLIENT_URL || 'http://localhost:3000',
     credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
   });
 
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   app.useGlobalFilters(new DomainExceptionFilter());
-  await app.listen(env.app.port);
+
+  // Swagger/OpenAPI UI hosted at /api
+  const document = SwaggerModule.createDocument(app, config);
+  SwaggerModule.setup('api', app, document);
+
+  await app.listen(app.get(AppConfigService).port);
 }
 ```
 
 | Middleware | Purpose |
 |---|---|
 | `helmet()` | Sets 11+ HTTP security headers (X-DNS-Prefetch-Control, X-Frame-Options, X-Content-Type-Options, Strict-Transport-Security, etc.) to mitigate XSS, clickjacking, and MIME-sniffing attacks. |
-| `app.enableCors()` | Restricts cross-origin requests to trusted origins defined in `env.cors.origin`. Prevents unauthorized domains from accessing the API. |
+| `cookieParser()` | Parses the `Cookie` header so controllers can read the refresh token cookie. |
+| `app.enableCors()` | Restricts cross-origin requests to trusted origins defined in `CLIENT_URL` (falls back to `http://localhost:3000`). Prevents unauthorized domains from accessing the API. |
+
+### 3.6 Posts & Feed (`modules/posts`, feature `002-post-feed`)
+
+The posts module implements the full content lifecycle plus a merged feed. It is a good reference for a **read-model with aggregated engagement counters** and for **side-effect aggregates** (likes, re-posts).
+
+#### Entities & lifecycle
+
+- `Post` — the aggregate root with a three-state machine: `Draft → Published → Archived` (`publish()`, `archive()`, `canPublish`, `canArchive`). A post is created as a draft; publishing requires non-empty content (FR-007).
+- `PostAsset` — join row mapping an uploaded `Asset` to a `Post`, with a `displayOrder` column that preserves carousel order.
+- `PostLike` / `CommentLike` — idempotent like rows with a `@Index(['postId'|'commentId', 'userId'], { unique: true })` constraint (they deliberately do **not** extend `TypeormEntityBase`).
+- `Repost` — a distinct aggregate referencing an existing `Post` (via `originalPostId`) plus the re-poster (`authorId`). A re-post is **not** a lifecycle state of `Post`; it is surfaced on the re-poster's feed with attribution. `RepostNotAllowedError` (in `domain/errors/post.errors.ts`) enforces that only *published* posts can be re-posted.
+
+#### Endpoints
+
+| Endpoint | Guard | Notes |
+|---|---|---|
+| `POST /posts` | `JwtAuthGuard` | Create a draft or publish immediately (`publish: true`) |
+| `GET /posts/feed` | `JwtAuthGuard` | Merged feed (see below) |
+| `GET /posts/search` | none | Full-text-ish keyword search of published posts |
+| `GET /posts/:id` | `OptionalJwtAuthGuard` | Anonymous allowed; `likedByMe` set only when authenticated |
+| `PATCH /posts/:id` | `JwtAuthGuard` | Owner only (`UnauthorizedError` → 401) |
+| `POST /posts/:id/publish` · `POST /posts/:id/archive` | `JwtAuthGuard` | State transitions via entity methods |
+| `DELETE /posts/:id` | `JwtAuthGuard` | Soft delete, owner only |
+| `POST/DELETE /posts/:id/like` | `JwtAuthGuard` | Idempotent like/unlike (204) |
+| `POST/DELETE /posts/:id/repost` | `JwtAuthGuard` | Idempotent re-post/unrepost (204) |
+| `POST /assets/upload` | `JwtAuthGuard` | Multipart upload (image/video, ≤ 10 MB) → `Asset` via `S3StorageAdapter` |
+
+#### Feed (`GET /posts/feed`)
+
+The feed merges original posts and re-posts into one timeline (`IFeedItem = IPostResponse | IRepostResponse`, discriminated by `repostAuthor`). Query params (`FeedQueryDto` → `IPostFeedQuery`):
+
+- `feed`: `following` (posts from the viewer + accounts they follow, resolved via `FollowRepository.findFollowing`) or `discover` (all published posts).
+- `sort`: `newest` | `oldest` | `most_liked`.
+- `mediaType`: `photos` | `videos` | `text` (derived from each asset's `mimeType`).
+- `page` / `limit`.
+
+Engagement counters (`likeCount`, `commentCount`, `repostCount`) and the viewer's `likedByMe` flag are computed with **batched aggregate queries** (one query per source table across the whole page — never one query per post) in `PostsService.attachEngagement()`. The feed response uses the `items` field rather than the generic `IPaginatedResponse<T>.data` shape (`IFeedResponse`).
+
+#### Response shape
+
+`PostResponseDto` implements `IPostResponse`: it replaces the raw `authorId` with an `IAuthorSummary` (`{ id, username, displayName, avatarUrl }`), returns ordered `assets` (`IPostMediaResponse` with derived `mediaType`), and includes the engagement counters. `RepostResponseDto` wraps a `PostResponseDto` plus `repostAuthor` (or `null` when the original is unavailable).
 
 ---
 
@@ -863,7 +1057,7 @@ apps/auth_microservice/src/
 │   ├── cache/
 │   │   └── redis.service.ts             # Implements ICacheService (wraps ioredis)
 │   ├── events/
-│   │   └── http-event-publisher.adapter.ts  # Implements IEventPublisher (fire-and-forget HTTP → simulates message broker)
+│   │   └── http-event-publisher.ts          # Implements IEventPublisher (fire-and-forget HTTP → simulates message broker)
 │   ├── jwt/
 │   │   └── jwt.service.ts              # Implements IJwtService (wraps jsonwebtoken)
 │   ├── crypto/
@@ -921,9 +1115,10 @@ The architecture has five distinct layers of responsibility:
 │    new AuthUserRepository(dataSource)                 │
 │    new JwtService()                                   │
 │    new GoogleOAuthService()                           │
+│    new HttpEventPublisher(logger)                     │
 │  • Constructs services with port interfaces injected:│
 │    new UsersService(authUserRepository, logger,       │
-│                     cryptoService)                    │
+│                     cryptoService, eventPublisher)     │
 │    new AuthService(usersService, redisService,        │
 │                    logger, cryptoService,              │
 │                    jwtService, oauthService)           │
@@ -966,6 +1161,7 @@ The architecture has five distinct layers of responsibility:
 │  • BcryptService: ICryptoService adapter (bcrypt)    │
 │  • GoogleOAuthService: IOAuthService adapter          │
 │    (google-auth-library)                              │
+│  • HttpEventPublisher: IEventPublisher adapter (fetch)│
 │  • All implement domain port interfaces              │
 └──────────────────────────────────────────────────────┘
 ```
@@ -1068,7 +1264,7 @@ import { BcryptService } from './infrastructure/crypto/crypto.service';
 import { AuthUserRepository } from './infrastructure/repositories/auth-user.repository';
 import { JwtService } from './infrastructure/jwt/jwt.service';
 import { GoogleOAuthService } from './infrastructure/oauth/google-oauth.service';
-import { HttpEventPublisher } from './infrastructure/events/http-event-publisher.adapter';
+import { HttpEventPublisher } from './infrastructure/events/http-event-publisher';
 
 import { createUsersRouter } from './routes/users.routes';
 import { createAuthRouter } from './routes/auth.routes';
@@ -1089,7 +1285,7 @@ export function createApp(
   // Global security middleware
   app.use(helmet());                           // HTTP security headers
   app.use(cors({
-    origin: env.cors.origin,                   // trusted origins from .env
+    origin: env.app.allowedOrigins,           // trusted origins from .env
     credentials: true,
   }));
   app.use(express.json());
@@ -1101,7 +1297,7 @@ export function createApp(
   const authUserRepository = new AuthUserRepository(dataSource);
   const jwtService = new JwtService();
   const oauthService = new GoogleOAuthService();
-  const eventPublisher = new HttpEventPublisher(env.coreService.url, logger);
+  const eventPublisher = new HttpEventPublisher(logger);
 
   // Application services (depend on port interfaces, not concrete adapters)
   const usersService = new UsersService(
@@ -1142,9 +1338,9 @@ export function createApp(
   - `AuthService` depends on `IJwtService` — receives `JwtService`
   - `AuthService` depends on `IOAuthService` — receives `GoogleOAuthService`
 - **Routers are factory functions** (`createUsersRouter(usersService)`), not classes. They receive their dependency (the service) via closure and return an Express `Router`.
-- **`env` import** — The centralized `env.ts` provides typed configuration (e.g., `env.crypto.saltRounds`, `env.cors.origin`, `env.coreService.url`) instead of scattered `process.env` reads.
+- **`env` import** — The centralized `env.ts` provides typed configuration (e.g., `env.crypto.saltRounds`, `env.app.allowedOrigins`, `env.app.coreMicroserviceUrl`) instead of scattered `process.env` reads.
 - **`helmet()` is registered globally** to set security HTTP headers (XSS protection, MIME-sniffing prevention, clickjacking protection, etc.) for every response.
-- **CORS is configured from environment** (`env.cors.origin`) to restrict cross-origin requests to trusted origins — preventing unauthorized domains from accessing the API.
+- **CORS is configured from environment** (`env.app.allowedOrigins`) to restrict cross-origin requests to trusted origins — preventing unauthorized domains from accessing the API.
 
 ### 4.5 Routing & Validation
 
@@ -1518,10 +1714,7 @@ export class UsersService {
     this.logger.debug('User registered', { props: { userId: savedUser.id } });
 
     // Fire-and-forget: notify core_microservice to create a profile
-    this.eventPublisher.publish('user.created', {
-      userId: savedUser.id,
-      email: savedUser.email,
-    } as UserCreatedEvent);
+    this.publishUserCreated(savedUser);
 
     const { passwordHash: _, ...safeUser } = savedUser;
     return safeUser;
@@ -1557,12 +1750,15 @@ export class UsersService {
     });
 
     // Also emit event for Google-created users (first time only)
-    this.eventPublisher.publish('user.created', {
-      userId: savedUser.id,
-      email: savedUser.email,
-    } as UserCreatedEvent);
+    this.publishUserCreated(savedUser);
 
     return savedUser;
+  }
+
+  private publishUserCreated(user: AuthUser): void {
+    const defaultHandle = user.email.split('@')[0];
+    const event = new UserCreatedEvent(user.id, user.email, defaultHandle, new Date());
+    this.eventPublisher.publishUserCreatedEvent(event);
   }
 }
 ```
@@ -1851,8 +2047,10 @@ Implemented by `AuthUserRepository` in `infrastructure/repositories/`, which ext
 
 ```typescript
 // apps/auth_microservice/src/domain/interfaces/event-publisher.interface.ts
+import { UserCreatedEvent } from '@repo/shared';
+
 export interface IEventPublisher {
-  publish(eventType: string, payload: Record<string, unknown>): void;
+  publishUserCreatedEvent(payload: UserCreatedEvent): void;
 }
 ```
 
@@ -1868,7 +2066,7 @@ Each port interface has a corresponding adapter implementation:
 | `IJwtService` | `jwt/jwt.service.ts` (JwtService) | jsonwebtoken |
 | `ICryptoService` | `crypto/crypto.service.ts` (BcryptService) | bcrypt |
 | `IOAuthService` | `oauth/google-oauth.service.ts` (GoogleOAuthService) | google-auth-library |
-| `IEventPublisher` | `events/http-event-publisher.adapter.ts` (HttpEventPublisher) | HTTP (Node.js `fetch`) |
+| `IEventPublisher` | `events/http-event-publisher.ts` (HttpEventPublisher) | HTTP (Node.js `fetch`) |
 | `IAuthUserRepository` | `repositories/auth-user.repository.ts` | TypeORM + TypeormRepositoryBase |
 
 #### `AuthUserRepository`
@@ -1929,44 +2127,40 @@ Note: `ICryptoService` is now defined in its own domain port file (`domain/inter
 The HTTP-based event publisher adapter implements `IEventPublisher` using a **fire-and-forget** HTTP pattern. This is the final, production-ready architectural choice for Auth → Core communication:
 
 ```typescript
-// apps/auth_microservice/src/infrastructure/events/http-event-publisher.adapter.ts
+// apps/auth_microservice/src/infrastructure/events/http-event-publisher.ts
+import { UserCreatedEvent, WinstonLogger } from '@repo/shared';
+import { env } from '../../config/env';
 import { IEventPublisher } from '../../domain/interfaces/event-publisher.interface';
-import type { WinstonLogger } from '@repo/shared';
 
 export class HttpEventPublisher implements IEventPublisher {
-  constructor(
-    private readonly coreServiceUrl: string,   // e.g. "http://core_microservice:3001"
-    private readonly logger: WinstonLogger,
-  ) {}
+  constructor(private readonly logger: WinstonLogger) {}
 
-  publish(eventType: string, payload: Record<string, unknown>): void {
-    const url = `${this.coreServiceUrl}/internal/events/${eventType}`;
+  publishUserCreatedEvent(payload: UserCreatedEvent): void {
+    const coreUrl = env.app.coreMicroserviceUrl || 'http://localhost:3001';
+    const url = `${coreUrl}/internal/events/user-created`;
 
-    // Fire-and-forget: do NOT await — do not block or fail if Core is down
+    // Fire-and-forget: deliberately no await — do not block or fail if Core is down.
     fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
-      .then(() => {
-        this.logger.debug(`Event "${eventType}" published to Core`, {
-          props: { url, payload },
-        });
+      .then((res) => {
+        if (!res.ok) {
+          this.logger.warn(`Failed to publish event to Core. Status: ${res.status}`);
+        }
       })
-      .catch((error) => {
-        this.logger.warn(`Failed to publish event "${eventType}" to Core (non-blocking)`, {
-          error,
-          props: { url },
-        });
+      .catch((err) => {
+        this.logger.error('Network error while publishing event to Core', { error: err });
       });
   }
 }
 ```
 
 **Architectural rationale:**
-- The `publish()` method returns `void` (not `Promise<void>`) — it intentionally does not expose a return value or error to the caller. The HTTP request is fired and immediately forgotten.
+- The `publishUserCreatedEvent()` method returns `void` (not `Promise<void>`) — it intentionally does not expose a return value or error to the caller. The HTTP request is fired and immediately forgotten.
 - If `core_microservice` is temporarily down, the `.catch()` handler logs a warning and the Auth service continues normally. User registration succeeds regardless.
-- The `coreServiceUrl` (e.g., `http://core_microservice:3001`) is resolved via Docker DNS within the internal network. It is configured in `env.coreService.url`.
+- The Core URL (`env.app.coreMicroserviceUrl`, e.g. `http://core_microservice:3001`) is resolved via Docker DNS within the internal network.
 - **Future message broker usage:** A message broker (RabbitMQ) will be introduced in the future exclusively for the `notifications_consumer_microservice` — it will not replace the HTTP fire-and-forget pattern for Auth → Core profile creation. The `IEventPublisher` port abstraction ensures that if the communication mechanism ever changes, `UsersService` requires zero modifications.
 
 ### 4.9 Entities
@@ -2046,9 +2240,9 @@ Body: { "bio": "Software developer from Berlin." }
 Before the controller method executes, NestJS invokes the `JwtAuthGuard` (registered via `@UseGuards(JwtAuthGuard)`):
 
 1. Extracts the Bearer token from the `Authorization` header.
-2. Verifies the JWT using `jwt.verify(token, JWT_ACCESS_SECRET)` — **no database call required**.
+2. Verifies the JWT using `jwt.verify(token, secret)` where `secret` is `JWT_ACCESS_SECRET`/`JWT_SECRET` (from `ConfigService`) — **no database call required**.
 3. On success: attaches `{ sub: "user-abc-123", email: "john@example.com" }` to `request.user`.
-4. On failure: throws `UnauthorizedError` → HTTP 401.
+4. On failure: throws `UnauthorizedException` → HTTP 401.
 
 ### Step 3: Global Validation Pipe
 
@@ -2073,25 +2267,25 @@ The pipe intercepts the `@Body()` parameter. It:
 async updateProfile(
   @Param('id', ParseUUIDPipe) id: string,        // "550e8400-..."
   @Body() updateProfileDto: UpdateProfileDto,    // { bio: "Software developer..." }
-  @CurrentUser() user: JwtPayload,               // { sub: "user-abc-123", email: "..." }
+  @CurrentUser('sub') authUserId: string,        // "user-abc-123"
 ): Promise<ProfileResponseDto>
 ```
 
-The `@CurrentUser()` decorator extracts `request.user` from the request context, providing type-safe access to the authenticated user's JWT payload.
+The `@CurrentUser('sub')` decorator extracts the `sub` claim from `request.user`, providing the authenticated `authUserId`.
 
-### Step 5: Service Enforces IDOR Protection
+### Step 5: Controller Enforces IDOR Protection
 
 ```typescript
-// ProfilesService.updateOwnProfile()
-const profile = await this.getProfile(profileId);
+// ProfilesController.updateProfile()
+const profile = await this.profilesService.getProfile(id);
 
 // IDOR protection: ensure the JWT subject owns this profile
 if (profile.authUserId !== authUserId) {
-  throw new UnauthorizedError('You can only update your own profile');
+  throw new ForbiddenException('You can only update your profile');
 }
 ```
 
-If User A tries to PATCH User B's profile, `profile.authUserId !== "user-abc-456"` evaluates to `true`, and an `UnauthorizedError` (→ HTTP 401) is thrown. This prevents Insecure Direct Object Reference (IDOR) attacks.
+If User A tries to PATCH User B's profile, `profile.authUserId !== "user-abc-456"` evaluates to `true`, and a `ForbiddenException` (→ HTTP 403) is thrown. This prevents Insecure Direct Object Reference (IDOR) attacks.
 
 ### Step 6: Entity Domain Method Applies Business Rules
 
@@ -2121,8 +2315,8 @@ Converts Dates → ISO strings, normalizes `undefined` → `null`, omits interna
 
 | Error class | HTTP status | Trigger |
 |---|---|---|
-| `UnauthorizedError` (missing/invalid JWT) | 401 | No token, expired token, wrong secret |
-| `UnauthorizedError` (IDOR) | 401 | User A tries to modify User B's profile |
+| `UnauthorizedException` (missing/invalid JWT) | 401 | No token, expired token, wrong secret |
+| `ForbiddenException` (IDOR) | 403 | User A tries to modify User B's profile |
 | `EntityByIdNotFoundError` | 404 | Profile UUID doesn't exist |
 | `InvalidProfileBioError` | 400 | Bio exceeds 160 characters |
 | `UniqueConstraintViolationError` | 409 | (not applicable to PATCH, but caught for other endpoints) |
@@ -2136,7 +2330,7 @@ HTTP Request (PATCH /profiles/:id + Bearer token)
 ┌─────────────────────────────────────────────────────────┐
 │  JwtAuthGuard (@UseGuards)                              │
 │  Extract Bearer token → jwt.verify() → attach to req    │
-│  On failure: HTTP 401 (UnauthorizedError)               │
+│  On failure: HTTP 401 (UnauthorizedException)           │
 └─────────────────────────────────────────────────────────┘
     │ (valid JWT, req.user populated)
     ▼
@@ -2148,23 +2342,16 @@ HTTP Request (PATCH /profiles/:id + Bearer token)
     │ (valid)
     ▼
 ┌─────────────────────────────────────────────────────────┐
-│  @CurrentUser() decorator                               │
-│  Extracts JwtPayload from request context               │
+│  @CurrentUser('sub') decorator                          │
+│  Extracts the sub claim (authUserId) from request.user  │
 └─────────────────────────────────────────────────────────┘
     │
     ▼
 ┌─────────────────────────────────────────────────────────┐
 │  ProfilesController.updateProfile()                     │
-│  Thin: extract params, call service, map to ResponseDto │
-└─────────────────────────────────────────────────────────┘
-    │
-    ▼
-┌─────────────────────────────────────────────────────────┐
-│  ProfilesService.updateOwnProfile()                     │
 │  1. getProfile(id) → fetch entity or 404                │
-│  2. IDOR check: authUserId === user.sub?                │
-│  3. profile.editBio(bio) ← domain rules                 │
-│  4. repository.save(profile) ← persistence              │
+│  2. IDOR check: authUserId === @CurrentUser('sub')?     │
+│  3. ProfilesService.updateProfile() → editBio + save    │
 └─────────────────────────────────────────────────────────┘
     │
     ▼
@@ -2201,7 +2388,7 @@ The project uses an **event-driven HTTP pattern** (internal webhooks) for Auth �
 ```
 ┌──────────────────────────┐         HTTP POST (non-blocking)       ┌──────────────────────────┐
 │   auth_microservice      │ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ▶  │   core_microservice      │
-│                          │    /internal/events/user.created       │                          │
+│                          │    /internal/events/user-created       │                          │
 │  UsersService            │                                        │  InternalEventsController│
 │    ↓                     │                                        │    ↓                     │
 │  IEventPublisher (port)  │                                        │  ProfilesService         │
@@ -2218,21 +2405,20 @@ The `UsersService` depends on the `IEventPublisher` port (see [Section 4.7](#47-
 ```typescript
 // domain/interfaces/event-publisher.interface.ts
 export interface IEventPublisher {
-  publish(eventType: string, payload: Record<string, unknown>): void;
+  publishUserCreatedEvent(payload: UserCreatedEvent): void;
 }
 ```
 
-The `HttpEventPublisher` adapter (see [Section 4.8](#48-infrastructure-adapters-infrastructure)) implements this port using Node.js `fetch()` in fire-and-forget mode. The `publish()` method is synchronous from the caller's perspective — it `return`s `void` immediately, and the HTTP request completes in the background:
+The `HttpEventPublisher` adapter (see [Section 4.8](#48-infrastructure-adapters-infrastructure)) implements this port using Node.js `fetch()` in fire-and-forget mode. The `publishUserCreatedEvent()` method is synchronous from the caller's perspective — it `return`s `void` immediately, and the HTTP request completes in the background:
 
 ```typescript
-// UsersService.registerUser() — excerpt
-const savedUser = await this.userRepository.save(user);
-
-// Fire-and-forget: does NOT block registration, does NOT throw
-this.eventPublisher.publish('user.created', {
-  userId: savedUser.id,
-  email: savedUser.email,
-} as UserCreatedEvent);
+// UsersService.publishUserCreated() — excerpt
+private publishUserCreated(user: AuthUser): void {
+  const defaultHandle = user.email.split('@')[0];
+  const event = new UserCreatedEvent(user.id, user.email, defaultHandle, new Date());
+  // Fire-and-forget: does NOT block registration, does NOT throw
+  this.eventPublisher.publishUserCreatedEvent(event);
+}
 ```
 
 **Guarantees and tradeoffs:**
@@ -2250,9 +2436,9 @@ The HTTP fire-and-forget pattern provides **at-most-once** delivery: if `core_mi
 
 To mitigate this, `core_microservice` implements a **Lazy Initialization** fallback strategy in `ProfilesService`:
 
-- When `core_microservice` receives an authenticated request (valid JWT via `JwtAuthGuard`) for a profile that does not exist in its database, `ProfilesService` **creates the profile on-the-fly** before returning the response.
-- This means the first time a user interacts with `core_microservice` (e.g., viewing their profile page, posting content), their profile is created lazily if it doesn't already exist.
-- Profile data (handle, display name) is derived from the JWT payload (e.g., `email.split('@')[0]` as the initial handle).
+- When `core_microservice` receives an authenticated request (valid JWT via `JwtAuthGuard`) for a profile that does not exist in its database, `ProfilesService.getOrCreateProfileByAuthUserId(authUserId, email)` **creates the profile on-the-fly** before returning the response.
+- This is wired through `GET /profiles/me`, so the first time a user interacts with `core_microservice` (e.g., viewing their profile page, posting content), their profile is created lazily if it doesn't already exist.
+- Profile data is derived from the JWT payload: the handle defaults to `email.split('@')[0]` (with a random suffix on username collision — see `ProfilesService.createProfile`).
 
 This ensures that profile existence is **eventually consistent** — even if the initial `UserCreatedEvent` was lost, the user will still be able to use the application without experiencing a "profile not found" error. The `HttpEventPublisher` fast path optimizes for the common case (profile created before the user's first request); lazy initialization guarantees correctness for the edge case (event delivery failure).
 
@@ -2261,13 +2447,13 @@ This ensures that profile existence is **eventually consistent** — even if the
 In `core_microservice`, a dedicated `InternalEventsModule` (see [Section 3.3](#33-internaleventsmodule--event-driven-profile-creation)) exposes an internal-only HTTP endpoint to receive events:
 
 ```
-POST /internal/events/user.created
-Body: { "userId": "uuid-123", "email": "user@example.com" }
+POST /internal/events/user-created
+Body: { "authUserId": "uuid-123", "email": "user@example.com", "handle": "user", "timestamp": "2026-09-28T…" }
 ```
 
 This endpoint is:
-- **Not publicly exposed** — it is reachable only within the Docker internal network via the container name `core_microservice`.
-- **Routed by event type** — each event type maps to a dedicated handler. `user.created` → `ProfilesService.createProfile()`.
+- **Not publicly exposed** — it is reachable only within the Docker internal network via the container name `core_microservice` (and is hidden from Swagger via `@ApiExcludeController()`).
+- **Routed by event type** — each event type maps to a dedicated handler. `user-created` → `ProfilesService.createProfile(authUserId, handle)`.
 - **Decoupled from domain modules** — `ProfilesService` has no knowledge of HTTP events, event types, or that profile creation is triggered by an external service. It simply exposes `createProfile(authUserId, handle)`.
 
 ### 6.4 End-to-End Flow: User Registration
@@ -2279,12 +2465,12 @@ This endpoint is:
    → Persists AuthUser to auth_db
    → Returns 201 with user data (no profile yet)
         ↓ (fire-and-forget)
-3. auth_microservice: HttpEventPublisher.publish('user.created', { userId, email })
-   → HTTP POST to http://core_microservice:3001/internal/events/user.created
+3. auth_microservice: HttpEventPublisher.publishUserCreatedEvent({ authUserId, email, handle, timestamp })
+   → HTTP POST to http://core_microservice:3001/internal/events/user-created
    → If Core is down: warn log, registration already succeeded
         ↓
 4. core_microservice: InternalEventsController.handleUserCreated()
-   → Delegates to ProfilesService.createProfile(authUserId, handle)
+   → Delegates to ProfilesService.createProfile(event.authUserId, event.handle)
    → Persists UserProfile to core_db
         ↓
 5. Profile exists in core_db, ready for client to query via GET /profiles/:id
@@ -2483,13 +2669,17 @@ export class BookmarkRepository
 
 ```typescript
 // bookmarks/bookmarks.service.ts
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
+import { LoggerKey, type Logger } from '@repo/shared';
 import { Bookmark } from './domain/entities/bookmark.entity';
 import { BookmarkRepository } from './infrastructure/repository/bookmark.repository';
 
 @Injectable()
 export class BookmarksService {
-  constructor(private readonly bookmarkRepository: BookmarkRepository) {}
+  constructor(
+    @Inject(LoggerKey) private readonly logger: Logger,
+    private readonly bookmarkRepository: BookmarkRepository,
+  ) {}
 
   async createBookmark(userId: string, postId: string): Promise<Bookmark> {
     const existing = await this.bookmarkRepository.findByUserAndPost(userId, postId);
@@ -2515,21 +2705,24 @@ export class BookmarksService {
 
 ```typescript
 // bookmarks/bookmarks.controller.ts
-import { Controller, Get, Post, Delete, Param, ParseUUIDPipe, Body } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Param, ParseUUIDPipe, Body, UseGuards } from '@nestjs/common';
 import { BookmarksService } from './bookmarks.service';
 import { CreateBookmarkDto } from './dto/create-bookmark.dto';
 import { BookmarkResponseDto } from './dto/bookmark-response.dto';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @Controller('bookmarks')
 export class BookmarksController {
   constructor(private readonly bookmarksService: BookmarksService) {}
 
   @Post()
+  @UseGuards(JwtAuthGuard)
   async create(
+    @CurrentUser('sub') userId: string,
     @Body() dto: CreateBookmarkDto,
-    // TODO: extract userId from JWT when auth is wired up
   ): Promise<BookmarkResponseDto> {
-    const bookmark = await this.bookmarksService.createBookmark('temp-user-id', dto.postId);
+    const bookmark = await this.bookmarksService.createBookmark(userId, dto.postId);
     return new BookmarkResponseDto(bookmark);
   }
 
@@ -2542,11 +2735,14 @@ export class BookmarksController {
   }
 
   @Delete(':id')
+  @UseGuards(JwtAuthGuard)
   async remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     return this.bookmarksService.removeBookmark(id);
   }
 }
 ```
+
+> **Auth pattern:** mutating endpoints are protected by `JwtAuthGuard` and receive the authenticated user via `@CurrentUser('sub')`. Ownership checks (e.g. "is this bookmark mine?") belong in the controller/service — see the IDOR discussion in [Section 3.4](#34-security--authentication).
 
 #### Step 10: Create the Module
 
@@ -2554,13 +2750,17 @@ export class BookmarksController {
 // bookmarks/bookmarks.module.ts
 import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { LoggerModule } from '@repo/shared';
 import { Bookmark } from './domain/entities/bookmark.entity';
 import { BookmarksService } from './bookmarks.service';
 import { BookmarksController } from './bookmarks.controller';
 import { BookmarkRepository } from './infrastructure/repository/bookmark.repository';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Bookmark])],
+  imports: [
+    TypeOrmModule.forFeature([Bookmark]),
+    LoggerModule.forFeature('BookmarksService'),
+  ],
   controllers: [BookmarksController],
   providers: [BookmarksService, BookmarkRepository],
 })
@@ -2623,14 +2823,14 @@ Write the SQL for the `bookmarks` table with columns `id`, `userId`, `postId`, t
 
 | Module | Domain Entities | Has Repository? | Notes |
 |--------|----------------|-----------------|-------|
-| `profiles` | `UserProfile`, `ProfileToProfileConfiguration` | Yes (`UserProfileRepository`) | Canonical reference module; `POST` removed — profiles created via `InternalEventsModule` |
+| `profiles` | `UserProfile`, `ProfileToProfileConfiguration` | Yes (`UserProfileRepository`) | Canonical reference module; `POST` removed — profiles created via `InternalEventsModule`; `GET /profiles/me` lazy-inits |
 | `internal-events` | (none — routing layer) | No | Receives events from `auth_microservice`, delegates to domain modules |
-| `common` | (none — infrastructure) | No | `JwtAuthGuard`, `@CurrentUser` decorator |
-| `posts` | `Post`, `PostLike`, `PostAsset` | Yes (`PostRepository`) | Demonstrates `publish()` state machine pattern |
-| `comments` | `Comment`, `CommentLike` | Yes (`CommentRepository`) | Demonstrates self-referencing `parentId` for nested comments |
+| `common` | (none — infrastructure) | No | `JwtAuthGuard`, `OptionalJwtAuthGuard`, `@CurrentUser` decorator |
+| `posts` | `Post`, `PostLike`, `PostAsset`, `Repost` | Yes (`PostRepository`, `PostLikeRepository`, `RepostRepository`) | `publish()`/`archive()` state machine; feed, search, like, repost endpoints |
+| `comments` | `Comment`, `CommentLike` | Yes (`CommentRepository`) | Self-referencing `parentId` for nested comments |
 | `chats` | `Chat`, `ChatParticipant`, `Message`, `MessageAsset` | No (uses raw TypeORM) | To be refactored to the repository pattern |
-| `follows` | `Follow` | No (uses raw TypeORM) | To be refactored to the repository pattern |
-| `assets` | `Asset` | No (uses raw TypeORM) | To be refactored to the repository pattern |
+| `follows` | `Follow` | Yes (`FollowRepository`) | Repository port `IFollowRepository` + `FollowRepositoryKey` DI token |
+| `assets` | `Asset` | Yes (`AssetRepository`) | Also `IFileStoragePort` + `S3StorageAdapter` (MinIO/S3 object storage) |
 
 ### A.2 All Modules in `auth_microservice`
 
@@ -2638,7 +2838,7 @@ Write the SQL for the `bookmarks` table with columns `id`, `userId`, `postId`, t
 |------|-------------|-------------|
 | Domain entities | `domain/entities/auth-user.entity.ts` | Single TypeORM entity (AuthUser with nullable passwordHash + googleId; AuthSession removed) |
 | Domain ports | `domain/interfaces/auth-user-repository.interface.ts`, `domain/interfaces/cache.service.ts`, `domain/interfaces/crypto.service.interface.ts`, `domain/interfaces/event-publisher.interface.ts`, `domain/interfaces/jwt.service.interface.ts`, `domain/interfaces/oauth.service.interface.ts` | Port interfaces: IAuthUserRepository, ICacheService, ICryptoService, IEventPublisher, IJwtService, IOAuthService |
-| Infrastructure adapters | `infrastructure/repositories/auth-user.repository.ts`, `infrastructure/cache/redis.service.ts`, `infrastructure/events/http-event-publisher.adapter.ts`, `infrastructure/jwt/jwt.service.ts`, `infrastructure/crypto/crypto.service.ts`, `infrastructure/oauth/google-oauth.service.ts` | Adapters: AuthUserRepository, RedisService, HttpEventPublisher, JwtService, BcryptService, GoogleOAuthService |
+| Infrastructure adapters | `infrastructure/repositories/auth-user.repository.ts`, `infrastructure/cache/redis.service.ts`, `infrastructure/events/http-event-publisher.ts`, `infrastructure/jwt/jwt.service.ts`, `infrastructure/crypto/crypto.service.ts`, `infrastructure/oauth/google-oauth.service.ts` | Adapters: AuthUserRepository, RedisService, HttpEventPublisher, JwtService, BcryptService, GoogleOAuthService |
 | Services | `services/auth.service.ts`, `services/users.service.ts` | Application services depending on port interfaces |
 | Routes | `routes/auth.routes.ts` (login, Google OAuth, refresh, logout, me), `routes/users.routes.ts` | Router factory functions |
 | Middleware | `middleware/auth.middleware.ts`, `middleware/validate.middleware.ts`, `middleware/error-handler.middleware.ts` | requireAuth (JWT), validateBody (class-validator), errorHandler |
@@ -2653,8 +2853,11 @@ Write the SQL for the `bookmarks` table with columns `id`, `userId`, `postId`, t
 // HTTP security headers (helmet)
 app.use(helmet());
 
-// CORS: restrict to trusted origins from .env
-app.enableCors({ origin: env.cors.origin, credentials: true });
+// Parse cookies (refresh_token)
+app.use(cookieParser());
+
+// CORS: restrict to trusted origins from .env (CLIENT_URL)
+app.enableCors({ origin: process.env.CLIENT_URL || 'http://localhost:3000', credentials: true });
 
 // Global validation pipe — runs before every controller method
 app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
@@ -2669,7 +2872,7 @@ app.useGlobalFilters(new DomainExceptionFilter());
 app.use(helmet());
 
 // CORS: restrict to trusted origins from .env
-app.use(cors({ origin: env.cors.origin, credentials: true }));
+app.use(cors({ origin: env.app.allowedOrigins, credentials: true }));
 
 // Validation is per-route: router.post('/path', validateBody(Dto), handler)
 // Error mapping is a global middleware: app.use(errorHandler)
@@ -2703,11 +2906,11 @@ These globals are the backbone of the hexagonal architecture's outer layer — t
 | `LoginDto` | `auth_microservice` |
 | `GoogleLoginDto` | `auth_microservice` |
 | `RefreshTokenDto` | `auth_microservice` |
-| `CreatePostDto` | `core_microservice` |
-| `UpdatePostDto` | `core_microservice` |
 | `CreateCommentDto` | `core_microservice` |
 | `UpdateCommentDto` | `core_microservice` |
 | `UpdateProfileDto` | `core_microservice` |
+
+Note: `CreatePostDto` and `UpdatePostDto` live in the posts module's own `dto/` folder (single-module DTOs), not in `@repo/shared/dtos/`.
 
 If a new DTO is only needed by one module, it belongs in the module's `dto/` folder. If two or more services need it, promote it to `@repo/shared/dtos/`.
 
@@ -2724,17 +2927,19 @@ If a new DTO is only needed by one module, it belongs in the module's `dto/` fol
 
 ### A.7 Contracts Currently Defined in `@repo/contracts`
 
-| Contract | Kind |
-|----------|------|
-| `ICreateProfileRequest` | Request |
-| `IUpdateProfileRequest` | Request |
-| `IProfileResponse` | Response |
-| `IPaginatedResponse<T>` | Common response envelope |
-| `IPaginationMeta` | Common pagination metadata |
-| `PAGINATION_DEFAULTS` | Common constants |
+| Domain | Contracts |
+|--------|-----------|
+| `common` | `IPaginatedResponse<T>`, `IPaginationMeta`, `PAGINATION_DEFAULTS` |
+| `auth` | `ILoginRequest`, `IRegisterRequest`, `IGoogleLoginRequest`, `IRefreshRequest`, `IAuthUserResponse`, `ILoginResponse`, `IRegisterResponse` |
+| `profiles` | `ICreateProfileRequest`, `IUpdateProfileRequest`, `IProfileResponse` |
+| `posts` | `ICreatePostRequest`, `IUpdatePostRequest`, `IPostFeedQuery`, `ISearchPostsQuery`, `PostStatus` (enum), `IAuthorSummary`, `IPostMediaResponse`, `IPostResponse`, `IRepostResponse`, `IFeedItem`, `IFeedResponse`, `ISearchResponse`, `FeedType`/`PostSort`/`MediaTypeFilter` (type aliases) |
+| `comments` | `ICreateCommentRequest`, `IUpdateCommentRequest`, `ICommentResponse` |
+| `follows` | `ICreateFollowRequest`, `IFollowResponse` |
+| `chats` | `ICreateMessageRequest`, `IMessageResponse` |
+| `assets` | `IAssetResponse` |
 
 When adding a new feature, consider whether the frontend needs a contract. If yes, add the interface to `@repo/contracts` and have the backend DTO `implements` it.
 
 ---
 
-*This guide reflects the architecture as of August 2026. If you find discrepancies between the guide and the code, the code is authoritative — please update the guide accordingly.*
+*This guide reflects the architecture as of September 2026. If you find discrepancies between the guide and the code, the code is authoritative — please update the guide accordingly.*
