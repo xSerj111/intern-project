@@ -145,8 +145,8 @@
 
 ### Implementation for User Story 5
 
-- [ ] T052 [P] [US5] Create `apps/client_app/src/components/posts/media-gallery.tsx` (lightbox): full-screen overlay, prev/next navigation, and `<video controls>` playback for `mediaType === 'video'`
-- [ ] T053 [US5] Wire `MediaGallery` into `apps/client_app/src/components/feed/post-card.tsx` (open on media click) and `apps/client_app/src/app/posts/[id]/page.tsx`; ensure text-only posts render without media placeholders (FR-016)
+- [X] T052 [P] [US5] Create `apps/client_app/src/components/posts/media-gallery.tsx` (lightbox): full-screen overlay, prev/next navigation, and `<video controls>` playback for `mediaType === 'video'`
+- [X] T053 [US5] Wire `MediaGallery` into `apps/client_app/src/components/feed/post-card.tsx` (open on media click) and `apps/client_app/src/app/posts/[id]/page.tsx`; ensure text-only posts render without media placeholders (FR-016)
 
 **Checkpoint**: Gallery/lightbox works in feed and detail views.
 

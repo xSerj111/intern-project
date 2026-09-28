@@ -1,9 +1,11 @@
 'use client';
 
 import Link from 'next/link';
+import { useState } from 'react';
 
 import type { IPostMediaResponse, IPostResponse } from '@repo/contracts';
 
+import { MediaGallery } from '../posts/media-gallery';
 import styles from './post-card.module.css';
 
 function formatDate(iso: string): string {
@@ -37,6 +39,15 @@ export interface PostCardProps {
 /** Renders a single post: author, text, media and engagement summary. */
 export function PostCard({ post, onMediaSelect }: PostCardProps) {
   const { author, assets } = post;
+  const [galleryIndex, setGalleryIndex] = useState<number | null>(null);
+
+  const openMedia = (index: number) => {
+    if (onMediaSelect) {
+      onMediaSelect(index);
+      return;
+    }
+    setGalleryIndex(index);
+  };
 
   return (
     <article className={styles.card}>
@@ -68,7 +79,7 @@ export function PostCard({ post, onMediaSelect }: PostCardProps) {
               <button
                 type="button"
                 className={styles.mediaButton}
-                onClick={() => onMediaSelect?.(index)}
+                onClick={() => openMedia(index)}
                 aria-label={`Open media ${index + 1} of ${assets.length}`}
               >
                 <MediaPreview asset={asset} />
@@ -76,6 +87,14 @@ export function PostCard({ post, onMediaSelect }: PostCardProps) {
             </li>
           ))}
         </ul>
+      )}
+
+      {galleryIndex !== null && (
+        <MediaGallery
+          assets={assets}
+          startIndex={galleryIndex}
+          onClose={() => setGalleryIndex(null)}
+        />
       )}
 
       <footer className={styles.engagement}>
