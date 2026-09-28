@@ -1,7 +1,6 @@
 import {
   Controller,
   Get,
-  Post,
   Body,
   Patch,
   Param,
@@ -26,10 +25,13 @@ export class ProfilesController {
   @ApiOperation({ summary: 'Fetch the authenticated user profile' })
   @Get('me')
   async getMyProfile(
-    @CurrentUser('sub') authUserId: string,
+    @CurrentUser() user: { sub: string; email: string },
   ): Promise<ProfileResponseDto> {
     return new ProfileResponseDto(
-      await this.profilesService.getProfileByAuthUserId(authUserId),
+      await this.profilesService.getOrCreateProfileByAuthUserId(
+        user.sub,
+        user.email,
+      ),
     );
   }
 

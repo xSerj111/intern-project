@@ -1,12 +1,17 @@
+import { randomBytes } from 'crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import {
   EntityNotFoundError,
   LoggerKey,
   type Logger,
+  UniqueConstraintViolationError,
   UpdateProfileDto,
 } from '@repo/shared';
 import { UserProfile } from './domain/entities/user-profile.entity';
 import { UserProfileRepository } from './infrastructure/repository/user-profile.repository';
+
+/** Max attempts to allocate a non-colliding username before giving up. */
+const MAX_USERNAME_ATTEMPTS = 3;
 
 @Injectable()
 export class ProfilesService {
@@ -20,17 +25,68 @@ export class ProfilesService {
     authUserId: string,
     handle: string,
   ): Promise<UserProfile> {
+    // Idempotency: if a profile already exists for this auth user (a replayed
+    // or retried `user.created` event), return it instead of failing on the
+    // unique `authUserId` constraint.
+    const existing =
+      await this.userProfileRepository.findByAuthUserId(authUserId);
+    if (existing) {
+      return existing;
+    }
+
     // Construction rules live in the entity factory (displayName defaulting, etc.)
     const profile = UserProfile.create({ authUserId, username: handle });
-    const savedProfile = await this.userProfileRepository.save(profile);
-    this.logger.debug('Profile created', { props: { profileId: savedProfile.id } });
-    return savedProfile;
+
+    try {
+      const savedProfile = await this.userProfileRepository.save(profile);
+      this.logger.debug('Profile created', {
+        props: { profileId: savedProfile.id },
+      });
+      return savedProfile;
+    } catch (error) {
+      if (!this.isUsernameCollision(error)) {
+        throw error;
+      }
+
+      // The username is taken (email local-part collisions are common). Fall
+      // back to a de-duplicated handle with a short random suffix.
+      for (let attempt = 1; attempt <= MAX_USERNAME_ATTEMPTS; attempt += 1) {
+        const deduplicatedHandle = `${handle}-${randomBytes(3).toString('hex')}`;
+        const retryProfile = UserProfile.create({
+          authUserId,
+          username: deduplicatedHandle,
+        });
+
+        try {
+          const savedProfile =
+            await this.userProfileRepository.save(retryProfile);
+          this.logger.debug('Profile created with de-duplicated handle', {
+            props: {
+              profileId: savedProfile.id,
+              username: savedProfile.username,
+            },
+          });
+          return savedProfile;
+        } catch (retryError) {
+          if (!this.isUsernameCollision(retryError)) {
+            throw retryError;
+          }
+        }
+      }
+
+      throw new UniqueConstraintViolationError(
+        'user_profiles',
+        'could not allocate a unique username',
+      );
+    }
   }
 
   async getProfile(id: string): Promise<UserProfile> {
     // Throws EntityByIdNotFoundError -> mapped to HTTP 404 by DomainExceptionFilter.
     const profile = await this.userProfileRepository.findOneByIdOrThrow(id);
-    this.logger.debug('Profile retrieved', { props: { profileId: profile.id } });
+    this.logger.debug('Profile retrieved', {
+      props: { profileId: profile.id },
+    });
     return profile;
   }
 
@@ -51,6 +107,28 @@ export class ProfilesService {
     return profile;
   }
 
+  /**
+   * Resolve the profile for the authenticated user, lazily creating it on
+   * first read when the `user.created` event was lost (fire-and-forget
+   * publish) or failed (e.g. a username collision). This is the safety net for
+   * the Auth -> Core event flow.
+   */
+  async getOrCreateProfileByAuthUserId(
+    authUserId: string,
+    email?: string,
+  ): Promise<UserProfile> {
+    const existing =
+      await this.userProfileRepository.findByAuthUserId(authUserId);
+    if (existing) {
+      return existing;
+    }
+
+    this.logger.debug('Profile missing, lazily creating', {
+      props: { authUserId },
+    });
+    return this.createProfile(authUserId, this.deriveHandle(email));
+  }
+
   async updateProfile(
     id: string,
     updateDto: UpdateProfileDto,
@@ -61,7 +139,21 @@ export class ProfilesService {
       profile.editBio(updateDto.bio ?? null);
     }
     const updatedProfile = await this.userProfileRepository.save(profile);
-    this.logger.debug('Profile updated', { props: { profileId: updatedProfile.id } });
+    this.logger.debug('Profile updated', {
+      props: { profileId: updatedProfile.id },
+    });
     return updatedProfile;
   }
-}3
+
+  private isUsernameCollision(error: unknown): boolean {
+    return (
+      error instanceof UniqueConstraintViolationError &&
+      error.message.includes('username')
+    );
+  }
+
+  private deriveHandle(email?: string): string {
+    const localPart = email?.split('@')[0]?.trim();
+    return localPart || 'user';
+  }
+}
