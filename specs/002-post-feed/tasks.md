@@ -160,11 +160,11 @@
 
 ### Implementation for User Story 6
 
-- [ ] T054 [P] [US6] Extend `apps/core_microservice/src/modules/posts/dto/feed-query.dto.ts` with `sort?: 'newest' | 'oldest' | 'most_liked'` (default `newest`) and `mediaType?: 'photos' | 'videos' | 'text'`
-- [ ] T055 [US6] Extend `apps/core_microservice/src/modules/posts/infrastructure/repository/post.repository.ts` to order by `createdAt DESC` / `ASC` / like-count `DESC` and filter by media type (`photos` → ≥1 image asset, `videos` → ≥1 video asset, `text` → no assets, derived from asset `mimeType`)
-- [ ] T056 [US6] Extend `apps/core_microservice/src/modules/posts/posts.service.ts` `getFeed` to pass `sort`/`mediaType` through; add spec coverage in `posts.service.spec.ts` for sort order and media-type filter
-- [ ] T057 [P] [US6] Update `apps/client_app/src/lib/api/feed.ts` to pass `sort`/`mediaType` (already parameterized in T023)
-- [ ] T058 [US6] Add sort + media-type filter controls to `apps/client_app/src/components/feed/feed-list.tsx` (or `page.tsx`) with an active-filter indicator and a Clear control (FR-017/018/019)
+- [X] T054 [P] [US6] Extend `apps/core_microservice/src/modules/posts/dto/feed-query.dto.ts` with `sort?: 'newest' | 'oldest' | 'most_liked'` (default `newest`) and `mediaType?: 'photos' | 'videos' | 'text'`
+- [X] T055 [US6] Extend `apps/core_microservice/src/modules/posts/infrastructure/repository/post.repository.ts` to order by `createdAt DESC` / `ASC` / like-count `DESC` and filter by media type (`photos` → ≥1 image asset, `videos` → ≥1 video asset, `text` → no assets, derived from asset `mimeType`)
+- [X] T056 [US6] Extend `apps/core_microservice/src/modules/posts/posts.service.ts` `getFeed` to pass `sort`/`mediaType` through; add spec coverage in `posts.service.spec.ts` for sort order and media-type filter
+- [X] T057 [P] [US6] Update `apps/client_app/src/lib/api/feed.ts` to pass `sort`/`mediaType` (already parameterized in T023)
+- [X] T058 [US6] Add sort + media-type filter controls to `apps/client_app/src/components/feed/feed-list.tsx` (or `page.tsx`) with an active-filter indicator and a Clear control (FR-017/018/019)
 
 **Checkpoint**: Sort/filter works in under 2 s with clear reset.
 

@@ -8,8 +8,35 @@ import { RepostRepositoryKey } from './domain/interfaces/repost-repository.port'
 import { CommentRepository } from '../comments/infrastructure/repository/comment.repository';
 import { FollowRepositoryKey } from '../follows/domain/interfaces/follow-repository.port';
 import { fakePost } from './__tests__/fakers/post.faker';
-import { InvalidPostStateError, PostStatus } from './domain/entities/post.entity';
+import {
+  InvalidPostStateError,
+  type Post,
+  PostStatus,
+} from './domain/entities/post.entity';
+import { PostAsset } from './domain/entities/post-asset.entity';
+import { Asset } from '../assets/domain/entities/asset.entity';
 import { RepostNotAllowedError } from './domain/errors/post.errors';
+
+/** Build a `PostAsset` with a nested `Asset` of the given MIME type. */
+function fakeAsset(mimeType: string): PostAsset {
+  const attachment = new PostAsset();
+  attachment.assetId = `asset-${mimeType}`;
+  attachment.displayOrder = 0;
+  attachment.asset = Object.assign(new Asset(), { mimeType });
+  return attachment;
+}
+
+/** Minimal re-post shape the feed merge consumes. */
+function fakeRepost(id: string, originalPost: Post) {
+  return {
+    id,
+    originalPostId: originalPost.id,
+    authorId: 'reposter-1',
+    originalPost,
+    author: { authUserId: 'reposter-1', username: 'reposter' },
+    createdAt: new Date('2026-02-01T00:00:00.000Z'),
+  };
+}
 
 describe('PostsService', () => {
   let service: PostsService;
@@ -172,6 +199,86 @@ describe('PostsService', () => {
           limit: 10,
         }),
       );
+    });
+
+    it('orders merged feed entries oldest-first when sort=oldest', async () => {
+      const older = fakePost({
+        id: 'older',
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+      });
+      const newer = fakePost({
+        id: 'newer',
+        createdAt: new Date('2026-02-01T00:00:00.000Z'),
+      });
+      // Repository returns them newest-first; the service re-orders the merge.
+      postRepository.getFeed.mockResolvedValue([[newer, older], 2]);
+
+      const result = await service.getFeed(
+        viewer,
+        'discover',
+        'oldest',
+        undefined,
+        1,
+        20,
+      );
+
+      expect(result.items.map((item) => item.kind === 'post' && item.post.id)).toEqual(
+        ['older', 'newer'],
+      );
+    });
+
+    it('orders merged feed entries by like count when sort=most_liked', async () => {
+      const popular = fakePost({ id: 'popular' });
+      const quiet = fakePost({ id: 'quiet' });
+      postRepository.getFeed.mockResolvedValue([[quiet, popular], 2]);
+      postLikeRepository.countByPostIds.mockResolvedValue(
+        new Map([
+          ['popular', 9],
+          ['quiet', 1],
+        ]),
+      );
+
+      const result = await service.getFeed(
+        viewer,
+        'discover',
+        'most_liked',
+        undefined,
+        1,
+        20,
+      );
+
+      expect(result.items.map((item) => item.kind === 'post' && item.post.id)).toEqual(
+        ['popular', 'quiet'],
+      );
+    });
+
+    it('excludes re-posts whose original post does not match the media filter', async () => {
+      const withPhoto = fakePost({
+        id: 'photo-post',
+        assets: [fakeAsset('image/png')],
+      });
+      const textOnly = fakePost({ id: 'text-post', assets: [] });
+      postRepository.getFeed.mockResolvedValue([[], 0]);
+      repostRepository.findFeed.mockResolvedValue([
+        [
+          fakeRepost('repost-photo', withPhoto),
+          fakeRepost('repost-text', textOnly),
+        ],
+        2,
+      ]);
+
+      const result = await service.getFeed(
+        viewer,
+        'discover',
+        'newest',
+        'photos',
+        1,
+        20,
+      );
+
+      expect(result.items).toHaveLength(1);
+      const entry = result.items[0];
+      expect(entry.kind === 'repost' && entry.repost.id).toBe('repost-photo');
     });
   });
 
