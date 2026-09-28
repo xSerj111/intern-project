@@ -78,7 +78,12 @@ export abstract class TypeormRepositoryBase<
         if (index === segments.length - 1) {
           node[segment] = node[segment] ?? true;
         } else {
-          node[segment] = (node[segment] as Record<string, unknown>) ?? {};
+          // A dotted path requires the parent to be an object; overwrite a
+          // previously-declared `true` leaf (e.g. `assets` then `assets.asset`).
+          const current = node[segment];
+          if (typeof current !== "object" || current === null) {
+            node[segment] = {};
+          }
           node = node[segment] as Record<string, unknown>;
         }
       });
