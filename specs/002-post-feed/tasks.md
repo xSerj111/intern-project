@@ -190,10 +190,10 @@
 
 **Purpose**: Resilience, verification, and quality gates.
 
-- [ ] T062 [P] Add client component specs (`@testing-library/react`) for `apps/client_app/src/components/feed/post-card.tsx`, `post-form.tsx`, `comments.tsx`, and sort/filter controls (mirrors `research.md` §14)
-- [ ] T063 [P] Verify feed/error recovery: the feed uses the existing `ErrorState`/retry + `refetchInterval` from `apps/client_app/src/lib/query/provider.tsx` for FR-003 auto-recovery
-- [ ] T064 Run `npm run lint` (apps), `npm run test -w core_microservice`, `npm run test -w client_app` (if configured), and `npm run build` (type-check surrogate) and fix failures
-- [ ] T065 Walk through all 9 `quickstart.md` scenarios and record pass/fail
+- [X] T062 [P] Add client component specs (`@testing-library/react`) for `apps/client_app/src/components/feed/post-card.tsx`, `post-form.tsx`, `comments.tsx`, and sort/filter controls (mirrors `research.md` §14)
+- [X] T063 [P] Verify feed/error recovery: the feed uses the existing `ErrorState`/retry + `refetchInterval` from `apps/client_app/src/lib/query/provider.tsx` for FR-003 auto-recovery
+- [X] T064 Run `npm run lint` (apps), `npm run test -w core_microservice`, `npm run test -w client_app` (if configured), and `npm run build` (type-check surrogate) and fix failures
+- [X] T065 Walk through all 9 `quickstart.md` scenarios and record pass/fail
 
 ---
 
