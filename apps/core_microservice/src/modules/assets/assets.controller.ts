@@ -6,6 +6,7 @@ import {
   UploadedFile,
   ParseFilePipe,
   MaxFileSizeValidator,
+  FileTypeValidator,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiConsumes, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
@@ -35,7 +36,14 @@ export class AssetsController {
     @CurrentUser('sub') userId: string,
     @UploadedFile(
       new ParseFilePipe({
-        validators: [new MaxFileSizeValidator({ maxSize: 10 * 1024 * 1024 })],
+        validators: [
+          new MaxFileSizeValidator({ maxSize: 10 * 1024 * 1024 }),
+          // FR-006: only image/video uploads are accepted.
+          new FileTypeValidator({
+            fileType:
+              /^(image\/(jpeg|png|gif|webp)|video\/(mp4|webm|quicktime))$/,
+          }),
+        ],
       }),
     )
     file: Express.Multer.File,

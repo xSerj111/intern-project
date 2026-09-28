@@ -55,12 +55,12 @@ export class Post extends TypeormEntityBase {
   /** Factory: a new post always starts as a draft. */
   static create(props: {
     authorId: string;
-    content: string;
+    content?: string;
     assets?: PostAsset[];
   }): Post {
     const post = new Post();
     post.authorId = props.authorId;
-    post.content = props.content;
+    post.content = props.content ?? '';
     post.status = PostStatus.Draft;
 
     if (props.assets) {

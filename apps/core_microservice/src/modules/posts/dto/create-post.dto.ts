@@ -1,6 +1,6 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
-  IsNotEmpty,
+  IsBoolean,
   IsOptional,
   IsString,
   IsUUID,
@@ -10,15 +10,16 @@ import {
 } from 'class-validator';
 
 export class CreatePostDto {
-  @ApiProperty({
+  @ApiPropertyOptional({
     example: 'Just set up my new microservice architecture! #NestJS',
-    description: 'The text content of the post',
+    description:
+      'The text content of the post. Optional so empty drafts can be saved.',
     maxLength: 500,
   })
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   @MaxLength(500)
-  content!: string;
+  content?: string;
 
   @ApiPropertyOptional({
     example: ['123e4567-e89b-12d3-a456-426614174000'],
@@ -29,4 +30,13 @@ export class CreatePostDto {
   @IsUUID('4', { each: true })
   @ArrayMaxSize(10) // Opcjonalny limit np. 10 plików na post
   assetIds?: string[];
+
+  @ApiPropertyOptional({
+    description:
+      'Publish immediately. Defaults to false (save as draft). Publishing requires non-empty content.',
+    default: false,
+  })
+  @IsOptional()
+  @IsBoolean()
+  publish?: boolean;
 }

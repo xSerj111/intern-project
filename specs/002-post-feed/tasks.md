@@ -81,14 +81,14 @@
 
 ### Implementation for User Story 2
 
-- [ ] T027 [P] [US2] Relax `apps/core_microservice/src/modules/posts/dto/create-post.dto.ts`: make `content` optional (`@IsOptional`, keep `@MaxLength(500)`), and add `publish?: boolean` (default `false`)
-- [ ] T028 [US2] Extend `apps/core_microservice/src/modules/posts/posts.service.ts` `createPost` to honor `publish`: when `publish: true`, call `post.publish()` before save (which throws `InvalidPostStateError` for empty content → HTTP 400, enforcing FR-007)
-- [ ] T029 [P] [US2] Harden `apps/core_microservice/src/modules/assets/assets.controller.ts` upload with a MIME whitelist validator (`image/jpeg|image/png|image/gif|image/webp|video/mp4|video/webm|video/quicktime`) alongside the existing 10 MB `MaxFileSizeValidator`; unsupported type → HTTP 400
-- [ ] T030 [US2] Extend `apps/core_microservice/src/modules/posts/posts.service.spec.ts` to cover create-with-publish vs draft and the empty-publish rejection
-- [ ] T031 [P] [US2] Create `apps/client_app/src/lib/api/assets.ts` with `uploadAsset(file, token, onProgress?)` using `FormData` + `coreApi` against `POST /assets/upload`, returning `IAssetResponse`
-- [ ] T032 [P] [US2] Create `apps/client_app/src/lib/api/posts.ts` with `createPost(token, ICreatePostRequest)` against `POST /posts`
-- [ ] T033 [US2] Create `apps/client_app/src/components/posts/post-form.tsx` (compose form): text area (≤500 chars counter), media picker (≤10 items), upload progress/error UI (rejecting >10 MB or non-image/video with a friendly message per FR-006), and Publish / Save-draft actions (disable Publish when no text and no media — FR-007)
-- [ ] T034 [US2] Create `apps/client_app/src/app/compose/page.tsx` route that renders `PostForm` and redirects to the feed after a successful publish
+- [X] T027 [P] [US2] Relax `apps/core_microservice/src/modules/posts/dto/create-post.dto.ts`: make `content` optional (`@IsOptional`, keep `@MaxLength(500)`), and add `publish?: boolean` (default `false`)
+- [X] T028 [US2] Extend `apps/core_microservice/src/modules/posts/posts.service.ts` `createPost` to honor `publish`: when `publish: true`, call `post.publish()` before save (which throws `InvalidPostStateError` for empty content → HTTP 400, enforcing FR-007)
+- [X] T029 [P] [US2] Harden `apps/core_microservice/src/modules/assets/assets.controller.ts` upload with a MIME whitelist validator (`image/jpeg|image/png|image/gif|image/webp|video/mp4|video/webm|video/quicktime`) alongside the existing 10 MB `MaxFileSizeValidator`; unsupported type → HTTP 400
+- [X] T030 [US2] Extend `apps/core_microservice/src/modules/posts/posts.service.spec.ts` to cover create-with-publish vs draft and the empty-publish rejection
+- [X] T031 [P] [US2] Create `apps/client_app/src/lib/api/assets.ts` with `uploadAsset(file, token, onProgress?)` using `FormData` + `coreApi` against `POST /assets/upload`, returning `IAssetResponse`
+- [X] T032 [P] [US2] Create `apps/client_app/src/lib/api/posts.ts` with `createPost(token, ICreatePostRequest)` against `POST /posts`
+- [X] T033 [US2] Create `apps/client_app/src/components/posts/post-form.tsx` (compose form): text area (≤500 chars counter), media picker (≤10 items), upload progress/error UI (rejecting >10 MB or non-image/video with a friendly message per FR-006), and Publish / Save-draft actions (disable Publish when no text and no media — FR-007)
+- [X] T034 [US2] Create `apps/client_app/src/app/compose/page.tsx` route that renders `PostForm` and redirects to the feed after a successful publish
 
 **Checkpoint**: Create-and-publish loop works end-to-end; MVP (US1 + US2) is shippable.
 

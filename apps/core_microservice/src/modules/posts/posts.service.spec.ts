@@ -8,7 +8,7 @@ import { RepostRepositoryKey } from './domain/interfaces/repost-repository.port'
 import { CommentRepository } from '../comments/infrastructure/repository/comment.repository';
 import { FollowRepositoryKey } from '../follows/domain/interfaces/follow-repository.port';
 import { fakePost } from './__tests__/fakers/post.faker';
-import { PostStatus } from './domain/entities/post.entity';
+import { InvalidPostStateError, PostStatus } from './domain/entities/post.entity';
 
 describe('PostsService', () => {
   let service: PostsService;
@@ -177,6 +177,51 @@ describe('PostsService', () => {
       expect(result.post).toBe(post);
       expect(result.engagement.likedByMe).toBe(false);
       expect(postLikeRepository.findLikedPostIds).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('createPost', () => {
+    it('saves a draft by default', async () => {
+      postRepository.save.mockImplementation(async (post) => post);
+
+      const post = await service.createPost('author-1', { content: 'hello' });
+
+      expect(post.status).toBe(PostStatus.Draft);
+      expect(postRepository.save).toHaveBeenCalledTimes(1);
+    });
+
+    it('publishes immediately when publish=true and content is present', async () => {
+      postRepository.save.mockImplementation(async (post) => post);
+
+      const post = await service.createPost('author-1', {
+        content: 'hello',
+        publish: true,
+      });
+
+      expect(post.status).toBe(PostStatus.Published);
+    });
+
+    it('rejects an empty publish with InvalidPostStateError and does not save', async () => {
+      await expect(
+        service.createPost('author-1', { content: '', publish: true }),
+      ).rejects.toThrow(InvalidPostStateError);
+
+      expect(postRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('maps assetIds to ordered PostAsset rows', async () => {
+      postRepository.save.mockImplementation(async (post) => post);
+
+      const post = await service.createPost('author-1', {
+        content: 'with media',
+        assetIds: ['asset-a', 'asset-b'],
+      });
+
+      expect(post.assets.map((asset) => asset.assetId)).toEqual([
+        'asset-a',
+        'asset-b',
+      ]);
+      expect(post.assets.map((asset) => asset.displayOrder)).toEqual([0, 1]);
     });
   });
 });

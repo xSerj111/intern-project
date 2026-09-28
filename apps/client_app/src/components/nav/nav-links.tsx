@@ -13,6 +13,7 @@ interface NavLink {
 /** Baseline primary destinations (spec Assumptions: Home/Feed and Profile). */
 const LINKS: NavLink[] = [
   { href: '/', label: 'Home' },
+  { href: '/compose', label: 'Compose' },
   { href: '/profile', label: 'Profile' },
 ];
 

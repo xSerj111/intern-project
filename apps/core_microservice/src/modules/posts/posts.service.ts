@@ -91,6 +91,12 @@ export class PostsService {
       assets: postAssets,
     });
 
+    // Publishing is a domain transition; publish() throws InvalidPostStateError
+    // (-> HTTP 400) when the content is empty (FR-007).
+    if (createPostDto.publish) {
+      post.publish();
+    }
+
     const savedPost = await this.postRepository.save(post);
     this.logger.debug('Post created', { props: { postId: savedPost.id } });
 
