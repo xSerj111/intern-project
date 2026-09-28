@@ -33,4 +33,12 @@ export class PostLike {
 
   @DeleteDateColumn()
   deletedAt!: Date;
+
+  /** Factory: build a like of a post by a user. */
+  static create(postId: string, userId: string): PostLike {
+    const like = new PostLike();
+    like.postId = postId;
+    like.userId = userId;
+    return like;
+  }
 }

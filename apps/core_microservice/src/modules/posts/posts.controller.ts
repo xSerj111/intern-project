@@ -81,6 +81,7 @@ export class PostsController {
   }
 
   @Patch(':id')
+  @UseGuards(JwtAuthGuard)
   async updatePost(
     @CurrentUser('sub') userId: string,
     @Param('id', ParseUUIDPipe) id: string,
@@ -92,6 +93,7 @@ export class PostsController {
   }
 
   @HttpPost(':id/publish')
+  @UseGuards(JwtAuthGuard)
   async publishPost(
     @CurrentUser('sub') userId: string,
     @Param('id', ParseUUIDPipe) id: string,
@@ -100,6 +102,7 @@ export class PostsController {
   }
 
   @HttpPost(':id/archive')
+  @UseGuards(JwtAuthGuard)
   async archivePost(
     @CurrentUser('sub') userId: string,
     @Param('id', ParseUUIDPipe) id: string,
@@ -108,6 +111,7 @@ export class PostsController {
   }
 
   @Delete(':id')
+  @UseGuards(JwtAuthGuard)
   @HttpCode(HttpStatus.NO_CONTENT) // 204 No Content is the standard for successful deletes
   async deletePost(
     @CurrentUser('sub') userId: string,

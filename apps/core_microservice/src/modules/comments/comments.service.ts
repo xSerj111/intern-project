@@ -1,8 +1,9 @@
-import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import {
   CreateCommentDto,
   LoggerKey,
   type Logger,
+  UnauthorizedError,
   UpdateCommentDto,
 } from '@repo/shared';
 import { Comment } from './domain/entities/comment.entity';
@@ -40,7 +41,7 @@ export class CommentsService {
     const comment = await this.commentRepository.findOneByIdOrThrow(id);
 
     if (comment.authorId !== userId) {
-      throw new ForbiddenException(
+      throw new UnauthorizedError(
         'You are not allowed to update this comment',
       );
     }
@@ -68,7 +69,7 @@ export class CommentsService {
     const comment = await this.commentRepository.findOneByIdOrThrow(id);
 
     if (comment.authorId !== userId) {
-      throw new ForbiddenException(
+      throw new UnauthorizedError(
         'You are not allowed to delete this comment',
       );
     }

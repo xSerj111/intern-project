@@ -9,6 +9,7 @@ import {
   DatabaseQueryError,
   EntityByIdNotFoundError,
   EntityNotFoundError,
+  UnauthorizedError,
   UniqueConstraintViolationError,
 } from "../errors/database.errors";
 import { DomainError } from "../errors/domain.error";
@@ -61,6 +62,9 @@ export class DomainExceptionFilter implements ExceptionFilter {
     }
     if (error instanceof UniqueConstraintViolationError) {
       return HttpStatus.CONFLICT;
+    }
+    if (error instanceof UnauthorizedError) {
+      return HttpStatus.UNAUTHORIZED;
     }
     if (error instanceof DatabaseQueryError) {
       return HttpStatus.INTERNAL_SERVER_ERROR;

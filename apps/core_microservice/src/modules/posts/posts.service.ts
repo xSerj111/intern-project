@@ -1,5 +1,5 @@
-import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
-import { type Logger, LoggerKey } from '@repo/shared';
+import { Inject, Injectable } from '@nestjs/common';
+import { type Logger, LoggerKey, UnauthorizedError } from '@repo/shared';
 import { CreatePostDto } from './dto/create-post.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 import { Post } from './domain/entities/post.entity';
@@ -81,7 +81,7 @@ export class PostsService {
     const post = await this.getPost(id);
 
     if (post.authorId !== userId) {
-      throw new ForbiddenException('You are not allowed to update this post');
+      throw new UnauthorizedError('You are not allowed to update this post');
     }
     if (updatePostDto.content) {
       post.content = updatePostDto.content;
@@ -95,7 +95,7 @@ export class PostsService {
     const post = await this.getPost(id);
 
     if (post.authorId !== userId) {
-      throw new ForbiddenException('You are not allowed to delete this post');
+      throw new UnauthorizedError('You are not allowed to delete this post');
     }
 
     await this.postRepository.softDelete(post);
@@ -106,7 +106,7 @@ export class PostsService {
     const post = await this.getPost(id);
 
     if (post.authorId !== userId) {
-      throw new ForbiddenException('You are not allowed to publish this post');
+      throw new UnauthorizedError('You are not allowed to publish this post');
     }
     // publish() enforces the rule and throws InvalidPostStateError (-> HTTP 400).
     post.publish();
@@ -121,7 +121,7 @@ export class PostsService {
     const post = await this.getPost(id);
 
     if (post.authorId !== userId) {
-      throw new ForbiddenException('You are not allowed to archive this post');
+      throw new UnauthorizedError('You are not allowed to archive this post');
     }
 
     post.archive();
