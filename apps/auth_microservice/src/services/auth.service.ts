@@ -87,7 +87,7 @@ export class AuthService {
 
     await this.cacheService.delete(redisKey);
 
-    return this.generateTokensAndSession(user as AuthUser);
+    return this.generateTokensAndSession(user);
   }
 
   async logout(refreshToken: string): Promise<void> {
