@@ -16,6 +16,7 @@ import { PostsService } from './posts.service';
 import { CreatePostDto } from './dto/create-post.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 import { PostResponseDto } from './dto/post-response.dto';
+import type { IFeedResponse, ISearchResponse } from '@repo/contracts';
 import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { FeedQueryDto } from './dto/feed-query.dto';
 import { SearchQueryDto } from './dto/search-query.dto';
@@ -31,8 +32,6 @@ export class PostsController {
     @CurrentUser('sub') userId: string,
     @Body() createPostDto: CreatePostDto,
   ): Promise<PostResponseDto> {
-    console.log('User Id from token:', userId);
-
     return new PostResponseDto(
       await this.postsService.createPost(userId, createPostDto),
     );
@@ -43,14 +42,19 @@ export class PostsController {
   async getFeed(
     @CurrentUser('sub') userId: string,
     @Query() query: FeedQueryDto,
-  ) {
+  ): Promise<IFeedResponse> {
     const { items, total } = await this.postsService.getFeed(
       userId,
+      query.feed,
+      query.sort,
+      query.mediaType,
       query.page,
       query.limit,
     );
     return {
-      items: items.map((post) => new PostResponseDto(post)),
+      items: items.map(
+        ({ post, engagement }) => new PostResponseDto(post, engagement),
+      ),
       total,
       page: query.page,
       limit: query.limit,
@@ -58,7 +62,7 @@ export class PostsController {
   }
 
   @Get('search')
-  async searchPosts(@Query() query: SearchQueryDto) {
+  async searchPosts(@Query() query: SearchQueryDto): Promise<ISearchResponse> {
     const { items, total } = await this.postsService.searchPosts(
       query.keyword,
       query.page,
@@ -66,7 +70,9 @@ export class PostsController {
     );
 
     return {
-      items: items.map((post) => new PostResponseDto(post)),
+      items: items.map(
+        ({ post, engagement }) => new PostResponseDto(post, engagement),
+      ),
       total,
       page: query.page,
       limit: query.limit,
@@ -76,8 +82,13 @@ export class PostsController {
   @Get(':id')
   async getPost(
     @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('sub') userId?: string,
   ): Promise<PostResponseDto> {
-    return new PostResponseDto(await this.postsService.getPost(id));
+    const { post, engagement } = await this.postsService.getPostDetail(
+      id,
+      userId,
+    );
+    return new PostResponseDto(post, engagement);
   }
 
   @Patch(':id')

@@ -1,44 +1,78 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { type Logger, LoggerKey, UnauthorizedError } from '@repo/shared';
+import type {
+  FeedType,
+  MediaTypeFilter,
+  PostSort,
+} from '@repo/contracts';
 import { CreatePostDto } from './dto/create-post.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 import { Post } from './domain/entities/post.entity';
 import { PostRepository } from './infrastructure/repository/post.repository';
+import { PostLikeRepository } from './infrastructure/repository/post-like.repository';
+import {
+  RepostRepositoryKey,
+  type IRepostRepository,
+} from './domain/interfaces/repost-repository.port';
+import { CommentRepository } from '../comments/infrastructure/repository/comment.repository';
 import { PostAsset } from './domain/entities/post-asset.entity';
 import { FollowRepositoryKey } from '../follows/domain/interfaces/follow-repository.port';
 import type { IFollowRepository } from '../follows/domain/interfaces/follow-repository.port';
+import type { PostEngagement } from './dto/post-response.dto';
+
+/** A post paired with its bulk-computed engagement counters. */
+export interface PostWithEngagement {
+  post: Post;
+  engagement: PostEngagement;
+}
 
 @Injectable()
 export class PostsService {
   constructor(
     @Inject(LoggerKey) private readonly logger: Logger,
     private readonly postRepository: PostRepository,
+    private readonly postLikeRepository: PostLikeRepository,
+    @Inject(RepostRepositoryKey)
+    private readonly repostRepository: IRepostRepository,
+    private readonly commentRepository: CommentRepository,
     @Inject(FollowRepositoryKey)
     private readonly followRepository: IFollowRepository,
   ) {}
 
   async getFeed(
     userId: string,
+    feed: FeedType,
+    sort: PostSort,
+    mediaType: MediaTypeFilter | undefined,
     page: number,
     limit: number,
-  ): Promise<{ items: Post[]; total: number }> {
-    const follows = await this.followRepository.findFollowing(userId);
-    const followingIds = follows.map((f) => f.followingId);
+  ): Promise<{ items: PostWithEngagement[]; total: number }> {
+    const authorIds =
+      feed === 'discover' ? undefined : await this.resolveFollowingAuthorIds(userId);
 
-    const targetAuthorIds = [...followingIds, userId];
-
-    const [items, total] = await this.postRepository.getFeedForAuthors(
-      targetAuthorIds,
+    const [posts, total] = await this.postRepository.getFeed({
+      authorIds,
+      sort,
+      mediaType,
       page,
       limit,
-    );
-
-    this.logger.debug('Feed retrieved', {
-      props: { userId, count: items.length, total },
     });
 
-    return { items, total };
+    const engagement = await this.attachEngagement(posts, userId);
+
+    this.logger.debug('Feed retrieved', {
+      props: { userId, feed, count: posts.length, total },
+    });
+
+    return {
+      items: posts.map((post) => ({
+        post,
+        engagement: engagement.get(post.id)!,
+      })),
+      total,
+    };
   }
+
   async createPost(
     userId: string,
     createPostDto: CreatePostDto,
@@ -71,6 +105,16 @@ export class PostsService {
     });
 
     return retrievedPost;
+  }
+
+  /** A single post plus its engagement counters (and viewer like state). */
+  async getPostDetail(
+    id: string,
+    viewerId?: string,
+  ): Promise<PostWithEngagement> {
+    const post = await this.getPost(id);
+    const engagement = await this.attachEngagement([post], viewerId);
+    return { post, engagement: engagement.get(post.id)! };
   }
 
   async updatePost(
@@ -136,17 +180,64 @@ export class PostsService {
     keyword: string,
     page: number,
     limit: number,
-  ): Promise<{ items: Post[]; total: number }> {
-    const [items, total] = await this.postRepository.searchPublishedPosts(
+  ): Promise<{ items: PostWithEngagement[]; total: number }> {
+    const [posts, total] = await this.postRepository.searchPublishedPosts(
       keyword,
       page,
       limit,
     );
+    const engagement = await this.attachEngagement(posts);
 
     this.logger.debug('Posts searched', {
-      props: { keyword, count: items.length, total },
+      props: { keyword, count: posts.length, total },
     });
 
-    return { items, total };
+    return {
+      items: posts.map((post) => ({
+        post,
+        engagement: engagement.get(post.id)!,
+      })),
+      total,
+    };
+  }
+
+  /** The following feed author set: the viewer plus every account they follow. */
+  private async resolveFollowingAuthorIds(userId: string): Promise<string[]> {
+    const follows = await this.followRepository.findFollowing(userId);
+    return [...new Set([userId, ...follows.map((f) => f.followingId)])];
+  }
+
+  /**
+   * Compute engagement counters for a page of posts using batched aggregate
+   * queries (one per source table) — never one query per post.
+   */
+  private async attachEngagement(
+    posts: Post[],
+    viewerId?: string,
+  ): Promise<Map<string, PostEngagement>> {
+    const ids = posts.map((post) => post.id);
+    if (ids.length === 0) return new Map();
+
+    const [likeCounts, commentCounts, repostCounts, likedIds] =
+      await Promise.all([
+        this.postLikeRepository.countByPostIds(ids),
+        this.commentRepository.countByPostIds(ids),
+        this.repostRepository.countByOriginalPostIds(ids),
+        viewerId
+          ? this.postLikeRepository.findLikedPostIds(viewerId, ids)
+          : Promise.resolve(new Set<string>()),
+      ]);
+
+    return new Map(
+      ids.map((id) => [
+        id,
+        {
+          likeCount: likeCounts.get(id) ?? 0,
+          commentCount: commentCounts.get(id) ?? 0,
+          repostCount: repostCounts.get(id) ?? 0,
+          likedByMe: likedIds.has(id),
+        },
+      ]),
+    );
   }
 }

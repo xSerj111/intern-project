@@ -1,5 +1,5 @@
 import { Logo } from '../components/brand/logo';
-import { FeedList } from '../components/feed/feed-list';
+import { FeedTabs } from '../components/feed/feed-tabs';
 
 import styles from './page.module.css';
 
@@ -14,7 +14,7 @@ export default function HomePage() {
 
       <section aria-label="Home feed">
         <h2 className={styles.sectionTitle}>Home feed</h2>
-        <FeedList />
+        <FeedTabs />
       </section>
     </main>
   );

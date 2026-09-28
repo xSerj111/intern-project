@@ -1,51 +1,81 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import Link from 'next/link';
+import { useEffect, useRef } from 'react';
 
-import type { IPostResponse } from '@repo/contracts';
+import type {
+  FeedType,
+  IFeedItem,
+  IRepostResponse,
+  MediaTypeFilter,
+  PostSort,
+} from '@repo/contracts';
 
 import { getFeed } from '../../lib/api/feed';
 import { useAuth } from '../../lib/auth/auth-context';
 import { ErrorState, LoadingState } from '../common/async-state';
+import { PostCard } from './post-card';
 
 import styles from './feed-list.module.css';
 
-function formatDate(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) {
-    return '';
-  }
-  return date.toLocaleDateString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  });
+const PAGE_SIZE = 20;
+
+function isRepost(item: IFeedItem): item is IRepostResponse {
+  return 'repostAuthor' in item;
 }
 
-function PostCard({ post }: { post: IPostResponse }) {
-  return (
-    <li className={styles.post}>
-      <div className={styles.postHeader}>
-        <span className={styles.author}>{post.authorId}</span>
-        <time className={styles.time} dateTime={post.createdAt}>
-          {formatDate(post.createdAt)}
-        </time>
-      </div>
-      <p className={styles.content}>{post.content}</p>
-    </li>
-  );
+export interface FeedListProps {
+  feed?: FeedType;
+  sort?: PostSort;
+  mediaType?: MediaTypeFilter;
 }
 
-/** Home/Feed section: renders the authenticated user's feed posts. */
-export function FeedList() {
+/** Home/Feed section: paginated list of posts (and re-posts) for the viewer. */
+export function FeedList({
+  feed = 'following',
+  sort = 'newest',
+  mediaType,
+}: FeedListProps) {
   const { accessToken, isHydrated, isSignedIn } = useAuth();
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
 
-  const query = useQuery({
-    queryKey: ['feed', accessToken],
-    queryFn: ({ signal }) => getFeed({ token: accessToken, signal }),
+  const query = useInfiniteQuery({
+    queryKey: ['feed', feed, sort, mediaType, accessToken],
+    initialPageParam: 1,
+    queryFn: ({ pageParam, signal }) =>
+      getFeed({
+        feed,
+        sort,
+        mediaType,
+        page: pageParam,
+        limit: PAGE_SIZE,
+        token: accessToken,
+        signal,
+      }),
+    getNextPageParam: (lastPage) => {
+      const loaded = lastPage.page * lastPage.limit;
+      return loaded < lastPage.total ? lastPage.page + 1 : undefined;
+    },
     enabled: isHydrated && Boolean(accessToken),
   });
+
+  const { fetchNextPage, hasNextPage, isFetchingNextPage } = query;
+
+  // Progressive pagination: load the next page when the sentinel scrolls in.
+  useEffect(() => {
+    const node = sentinelRef.current;
+    if (!node) return;
+
+    const observer = new IntersectionObserver((entries) => {
+      if (entries[0]?.isIntersecting && hasNextPage && !isFetchingNextPage) {
+        void fetchNextPage();
+      }
+    });
+
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [fetchNextPage, hasNextPage, isFetchingNextPage]);
 
   if (!isHydrated) {
     return <LoadingState label="Loading your session…" />;
@@ -77,21 +107,47 @@ export function FeedList() {
     );
   }
 
-  const { items } = query.data;
+  const items = query.data.pages.flatMap((page) => page.items);
 
   if (items.length === 0) {
     return (
       <p className={`muted ${styles.empty}`}>
-        Your feed is empty. Follow people to see their posts here.
+        {feed === 'discover'
+          ? 'No public posts yet. Be the first to share something!'
+          : 'Your feed is empty. Follow people to see their posts here.'}
       </p>
     );
   }
 
   return (
-    <ul className={styles.list}>
-      {items.map((post) => (
-        <PostCard key={post.id} post={post} />
-      ))}
-    </ul>
+    <>
+      <ul className={styles.list}>
+        {items.map((item) =>
+          isRepost(item) ? (
+            <li key={item.id} className={styles.repostWrapper}>
+              <p className={`muted ${styles.repostAttribution}`}>
+                Reposted by {item.repostAuthor.displayName || item.repostAuthor.username}
+              </p>
+              {item.post ? (
+                <PostCard post={item.post} />
+              ) : (
+                <p className={`muted ${styles.unavailable}`}>
+                  This post is no longer available.
+                </p>
+              )}
+            </li>
+          ) : (
+            <li key={item.id}>
+              <PostCard post={item} />
+            </li>
+          ),
+        )}
+      </ul>
+
+      <div ref={sentinelRef} aria-hidden="true" />
+      {isFetchingNextPage && (
+        <p className={`muted ${styles.loadingMore}`}>Loading more posts…</p>
+      )}
+    </>
   );
 }

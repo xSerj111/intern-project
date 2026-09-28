@@ -46,3 +46,28 @@
 .empty {
   padding: 1rem 0;
 }
+
+.repostWrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.repostAttribution {
+  margin: 0;
+  font-size: 0.8rem;
+  padding-left: 0.25rem;
+}
+
+.unavailable {
+  background: var(--innogram-surface);
+  border: 1px dashed var(--innogram-border);
+  border-radius: var(--innogram-radius);
+  padding: 1rem 1.25rem;
+  margin: 0;
+}
+
+.loadingMore {
+  text-align: center;
+  padding: 0.75rem 0;
+}

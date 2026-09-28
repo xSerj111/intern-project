@@ -29,4 +29,19 @@ export class CommentRepository extends TypeormRepositoryBase<
       order: { createdAt: 'DESC' },
     });
   }
+
+  /** Batch comment counts keyed by post id (non-deleted only). */
+  async countByPostIds(postIds: string[]): Promise<Map<string, number>> {
+    if (postIds.length === 0) return new Map();
+
+    const rows = await this.repository
+      .createQueryBuilder('comment')
+      .select('comment.postId', 'postId')
+      .addSelect('COUNT(*)', 'count')
+      .where('comment.postId IN (:...postIds)', { postIds })
+      .groupBy('comment.postId')
+      .getRawMany<{ postId: string; count: string }>();
+
+    return new Map(rows.map((row) => [row.postId, Number(row.count)]));
+  }
 }

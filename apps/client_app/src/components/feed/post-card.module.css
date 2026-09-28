@@ -1,0 +1,113 @@
+.card {
+  background: var(--innogram-surface);
+  border: 1px solid var(--innogram-border);
+  border-radius: var(--innogram-radius);
+  box-shadow: var(--innogram-shadow);
+  padding: 1rem 1.25rem;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
+}
+
+.avatar {
+  flex: 0 0 auto;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 50%;
+  background: var(--innogram-primary);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  font-weight: 700;
+  overflow: hidden;
+}
+
+.avatarImage {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.authorBlock {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.authorName {
+  font-weight: 600;
+  font-size: 0.95rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.authorName:hover {
+  color: var(--innogram-primary);
+}
+
+.handle {
+  font-size: 0.8rem;
+}
+
+.time {
+  margin-left: auto;
+  font-size: 0.8rem;
+  color: var(--innogram-muted);
+  flex: 0 0 auto;
+}
+
+.content {
+  margin: 0 0 0.75rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.media {
+  list-style: none;
+  margin: 0 0 0.75rem;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 0.4rem;
+}
+
+.mediaItem {
+  margin: 0;
+}
+
+.mediaButton {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 1px solid var(--innogram-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #000;
+  cursor: pointer;
+}
+
+.mediaVisual {
+  width: 100%;
+  height: 160px;
+  object-fit: cover;
+  display: block;
+}
+
+.engagement {
+  display: flex;
+  gap: 1rem;
+  font-size: 0.85rem;
+  color: var(--innogram-muted);
+}
+
+.liked {
+  color: var(--innogram-accent);
+  font-weight: 600;
+}

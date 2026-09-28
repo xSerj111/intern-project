@@ -12,12 +12,14 @@ import { RepostRepository } from './infrastructure/repository/repost.repository'
 import { RepostRepositoryKey } from './domain/interfaces/repost-repository.port';
 import { LoggerModule } from '@repo/shared';
 import { FollowsModule } from '../follows/follows.module';
+import { CommentsModule } from '../comments/comments.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Post, PostLike, PostAsset, Repost]),
     LoggerModule.forFeature('PostsService'),
     FollowsModule,
+    CommentsModule,
   ],
   controllers: [PostsController],
   providers: [

@@ -14,5 +14,6 @@ import { LoggerModule } from '@repo/shared';
   ],
   controllers: [CommentsController],
   providers: [CommentsService, CommentRepository],
+  exports: [CommentRepository],
 })
 export class CommentsModule {}
