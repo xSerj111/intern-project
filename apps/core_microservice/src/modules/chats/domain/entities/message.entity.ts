@@ -32,7 +32,7 @@ export class Message {
   authorId!: string;
 
   @ManyToOne('UserProfile', { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'authorId' })
+  @JoinColumn({ name: 'authorId', referencedColumnName: 'authUserId' })
   author!: UserProfile;
 
   // Nullable because a message could just be an image/asset with no text!

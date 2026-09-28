@@ -21,7 +21,7 @@ export class ProfileToProfileConfiguration {
   actorId!: string;
 
   @ManyToOne(() => UserProfile, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'actorId' })
+  @JoinColumn({ name: 'actorId', referencedColumnName: 'authUserId' })
   actor!: UserProfile;
 
   // The profile being targeted/configured
@@ -29,7 +29,7 @@ export class ProfileToProfileConfiguration {
   targetId!: string;
 
   @ManyToOne(() => UserProfile, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'targetId' })
+  @JoinColumn({ name: 'targetId', referencedColumnName: 'authUserId' })
   target!: UserProfile;
 
   // --- Configuration Toggles ---
