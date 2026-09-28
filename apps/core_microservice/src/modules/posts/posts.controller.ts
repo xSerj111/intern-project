@@ -22,6 +22,7 @@ import { CurrentUser } from 'src/common/decorators/current-user.decorator';
 import { FeedQueryDto } from './dto/feed-query.dto';
 import { SearchQueryDto } from './dto/search-query.dto';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from 'src/common/guards/optional-jwt-auth.guard';
 
 @Controller('posts')
 export class PostsController {
@@ -87,6 +88,7 @@ export class PostsController {
   }
 
   @Get(':id')
+  @UseGuards(OptionalJwtAuthGuard)
   async getPost(
     @Param('id', ParseUUIDPipe) id: string,
     @CurrentUser('sub') userId?: string,
