@@ -78,6 +78,36 @@
   gap: 0.4rem;
 }
 
+.media1 {
+  grid-template-columns: 1fr;
+}
+
+.media1 .mediaVisual {
+  height: 320px;
+}
+
+.media2 {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.media3 {
+  grid-template-columns: 2fr 1fr;
+  grid-template-rows: repeat(2, 1fr);
+}
+
+.media3 .mediaItem:first-child {
+  grid-row: span 2;
+}
+
+.media3 .mediaItem:first-child .mediaVisual {
+  height: 100%;
+  min-height: 320px;
+}
+
+.media4 {
+  grid-template-columns: repeat(2, 1fr);
+}
+
 .mediaItem {
   margin: 0;
 }

@@ -80,7 +80,9 @@ export function PostCard({
       {post.content && <p className={styles.content}>{post.content}</p>}
 
       {assets.length > 0 && (
-        <ul className={styles.media}>
+        <ul
+          className={`${styles.media} ${styles[`media${Math.min(assets.length, 4)}`] ?? ''}`}
+        >
           {assets.map((asset, index) => (
             <li key={asset.assetId} className={styles.mediaItem}>
               <button
@@ -89,7 +91,10 @@ export function PostCard({
                 onClick={() => openMedia(index)}
                 aria-label={`Open media ${index + 1} of ${assets.length}`}
               >
-                <MediaPreview asset={asset} />
+                <MediaPreview
+                  asset={asset}
+                  description={`${asset.mediaType === 'video' ? 'Video' : 'Image'} ${index + 1} of ${assets.length} by @${author.username}`}
+                />
               </button>
             </li>
           ))}
@@ -100,6 +105,7 @@ export function PostCard({
         <MediaGallery
           assets={assets}
           startIndex={galleryIndex}
+          authorLabel={`@${author.username}`}
           onClose={() => setGalleryIndex(null)}
         />
       )}
@@ -113,7 +119,13 @@ export function PostCard({
   );
 }
 
-function MediaPreview({ asset }: { asset: IPostMediaResponse }) {
+function MediaPreview({
+  asset,
+  description,
+}: {
+  asset: IPostMediaResponse;
+  description: string;
+}) {
   if (asset.mediaType === 'video') {
     return (
       <video
@@ -122,8 +134,9 @@ function MediaPreview({ asset }: { asset: IPostMediaResponse }) {
         muted
         playsInline
         preload="metadata"
+        aria-label={description}
       />
     );
   }
-  return <img src={asset.url} alt="" className={styles.mediaVisual} />;
+  return <img src={asset.url} alt={description} className={styles.mediaVisual} />;
 }
