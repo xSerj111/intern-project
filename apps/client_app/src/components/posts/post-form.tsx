@@ -3,12 +3,17 @@
 import { useRouter } from 'next/navigation';
 import { useRef, useState } from 'react';
 
-import type { IPostResponse, MediaKind } from '@repo/contracts';
+import {
+  PostStatus,
+  type IPostResponse,
+  type MediaKind,
+} from '@repo/contracts';
 
 import { uploadAsset, validateUploadFile } from '../../lib/api/assets';
 import { useAuth } from '../../lib/auth/auth-context';
 import {
   useCreatePost,
+  usePublishPost,
   useUpdatePost,
 } from '../../lib/hooks/use-post-mutations';
 
@@ -41,6 +46,7 @@ export function PostForm({ initialPost, onSuccess }: PostFormProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const createMutation = useCreatePost();
   const updateMutation = useUpdatePost(initialPost?.id ?? '');
+  const publishMutation = usePublishPost(initialPost?.id ?? '');
 
   const [content, setContent] = useState(initialPost?.content ?? '');
   const [media, setMedia] = useState<MediaItem[]>(
@@ -56,6 +62,7 @@ export function PostForm({ initialPost, onSuccess }: PostFormProps) {
   const [isSaving, setIsSaving] = useState(false);
 
   const isEdit = Boolean(initialPost);
+  const isDraft = initialPost?.status === PostStatus.Draft;
   const isEmpty = content.trim().length === 0 && media.length === 0;
 
   async function handleFiles(files: FileList | null) {
@@ -108,9 +115,19 @@ export function PostForm({ initialPost, onSuccess }: PostFormProps) {
     setIsSaving(true);
     try {
       const assetIds = media.map((item) => item.assetId);
-      const saved = initialPost
-        ? await updateMutation.mutateAsync({ content, assetIds })
-        : await createMutation.mutateAsync({ content, assetIds, publish });
+      let saved: IPostResponse;
+      if (initialPost) {
+        saved = await updateMutation.mutateAsync({ content, assetIds });
+        if (publish && isDraft) {
+          saved = await publishMutation.mutateAsync();
+        }
+      } else {
+        saved = await createMutation.mutateAsync({
+          content,
+          assetIds,
+          publish,
+        });
+      }
 
       if (onSuccess) {
         onSuccess(saved);
@@ -218,20 +235,24 @@ export function PostForm({ initialPost, onSuccess }: PostFormProps) {
       )}
 
       <div className={styles.actions}>
-        <button
-          type="button"
-          className="button button--ghost"
-          disabled={isSaving || progress !== null}
-          onClick={() => void submit(false)}
-        >
-          Save draft
-        </button>
+        {(!isEdit || isDraft) && (
+          <button
+            type="button"
+            className="button button--ghost"
+            disabled={isSaving || progress !== null}
+            onClick={() => void submit(false)}
+          >
+            Save draft
+          </button>
+        )}
         <button
           type="submit"
           className="button"
-          disabled={isSaving || progress !== null || (!isEdit && isEmpty)}
+          disabled={
+            isSaving || progress !== null || ((!isEdit || isDraft) && isEmpty)
+          }
         >
-          {isEdit ? 'Save changes' : 'Publish'}
+          {isEdit && !isDraft ? 'Save changes' : 'Publish'}
         </button>
       </div>
     </form>

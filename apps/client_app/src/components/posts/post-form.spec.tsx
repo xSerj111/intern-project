@@ -3,7 +3,9 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactElement } from 'react';
 
 import { fakeMedia, fakePost } from '../../test/fixtures';
-import { createPost, updatePost } from '../../lib/api/posts';
+import { createPost, publishPost, updatePost } from '../../lib/api/posts';
+import { PostStatus } from '@repo/contracts';
+
 import { PostForm } from './post-form';
 
 jest.mock('next/navigation', () => ({
@@ -22,6 +24,7 @@ jest.mock('../../lib/api/assets', () => ({
 jest.mock('../../lib/api/posts', () => ({
   createPost: jest.fn(),
   updatePost: jest.fn(),
+  publishPost: jest.fn(),
 }));
 
 function renderForm(ui: ReactElement, client = new QueryClient()) {
@@ -103,5 +106,35 @@ describe('PostForm', () => {
         assetIds: ['asset-1'],
       });
     });
+  });
+
+  it('offers Publish for a draft and publishes after saving edits', async () => {
+    const draft = fakePost({ id: 'post-3', status: PostStatus.Draft });
+    jest.mocked(updatePost).mockResolvedValue(draft);
+    jest
+      .mocked(publishPost)
+      .mockResolvedValue({ ...draft, status: PostStatus.Published });
+
+    renderForm(<PostForm initialPost={draft} onSuccess={jest.fn()} />);
+
+    expect(screen.getByRole('button', { name: 'Save draft' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+
+    await waitFor(() => {
+      expect(publishPost).toHaveBeenCalledWith('test-token', 'post-3');
+    });
+    expect(updatePost).toHaveBeenCalled();
+  });
+
+  it('hides Save draft when editing a published post', () => {
+    renderForm(<PostForm initialPost={fakePost()} />);
+
+    expect(
+      screen.queryByRole('button', { name: 'Save draft' }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save changes' })).toBeVisible();
+    expect(
+      screen.queryByRole('button', { name: 'Publish' }),
+    ).not.toBeInTheDocument();
   });
 });
