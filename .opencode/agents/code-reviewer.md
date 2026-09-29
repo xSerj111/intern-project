@@ -27,8 +27,8 @@ back to the main agent.
 
 ## What to review
 
-1. Locate the active feature's task list. Look in `.specify/features/*/tasks.md`
-   (or the current feature directory) for `tasks.md`, and read the relevant
+1. Locate the active feature: `.specify/feature.json` gives its
+   `feature_directory` (e.g. `specs/002-post-feed`). Read its `tasks.md`, plus
    `plan.md`, `spec.md`, and any `data-model.md` / `contracts/` if present.
 2. Identify the task(s) just completed. Cross-reference recently changed files
    against the task descriptions and file paths listed in `tasks.md`.
