@@ -6,8 +6,11 @@ import { useRef, useState } from 'react';
 import type { IPostResponse, MediaKind } from '@repo/contracts';
 
 import { uploadAsset, validateUploadFile } from '../../lib/api/assets';
-import { createPost, updatePost } from '../../lib/api/posts';
 import { useAuth } from '../../lib/auth/auth-context';
+import {
+  useCreatePost,
+  useUpdatePost,
+} from '../../lib/hooks/use-post-mutations';
 
 import styles from './post-form.module.css';
 
@@ -36,6 +39,8 @@ export function PostForm({ initialPost, onSuccess }: PostFormProps) {
   const router = useRouter();
   const { accessToken } = useAuth();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const createMutation = useCreatePost();
+  const updateMutation = useUpdatePost(initialPost?.id ?? '');
 
   const [content, setContent] = useState(initialPost?.content ?? '');
   const [media, setMedia] = useState<MediaItem[]>(
@@ -104,8 +109,8 @@ export function PostForm({ initialPost, onSuccess }: PostFormProps) {
     try {
       const assetIds = media.map((item) => item.assetId);
       const saved = initialPost
-        ? await updatePost(accessToken, initialPost.id, { content, assetIds })
-        : await createPost(accessToken, { content, assetIds, publish });
+        ? await updateMutation.mutateAsync({ content, assetIds })
+        : await createMutation.mutateAsync({ content, assetIds, publish });
 
       if (onSuccess) {
         onSuccess(saved);

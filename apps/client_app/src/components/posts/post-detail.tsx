@@ -1,14 +1,19 @@
 'use client';
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
 import { PostStatus } from '@repo/contracts';
 
-import { archivePost, deletePost, getPost } from '../../lib/api/posts';
+import { getPost } from '../../lib/api/posts';
 import { useAuth } from '../../lib/auth/auth-context';
+import {
+  useArchivePost,
+  useDeletePost,
+} from '../../lib/hooks/use-post-mutations';
+import { postKeys } from '../../lib/query/keys';
 import { ErrorState, LoadingState } from '../common/async-state';
 import { Comments } from './comments';
 import { PostActions } from './post-actions';
@@ -20,31 +25,17 @@ import styles from './post-detail.module.css';
 /** Full post view: the post, actions, owner controls and the comment thread. */
 export function PostDetail({ postId }: { postId: string }) {
   const router = useRouter();
-  const queryClient = useQueryClient();
   const { accessToken, user, isHydrated } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
 
   const query = useQuery({
-    queryKey: ['post', postId],
+    queryKey: postKeys.post(postId),
     queryFn: ({ signal }) => getPost(postId, accessToken, signal),
     enabled: isHydrated,
   });
 
-  const archiveMutation = useMutation({
-    mutationFn: () => archivePost(accessToken, postId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['post', postId] });
-      void queryClient.invalidateQueries({ queryKey: ['feed'] });
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: () => deletePost(accessToken, postId),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ['feed'] });
-      router.push('/');
-    },
-  });
+  const archiveMutation = useArchivePost(postId);
+  const deleteMutation = useDeletePost(postId);
 
   if (!isHydrated || query.isPending) {
     return <LoadingState label="Loading post…" />;
@@ -80,16 +71,7 @@ export function PostDetail({ postId }: { postId: string }) {
 
       {isEditing ? (
         <section className="card" aria-label="Edit post">
-          <PostForm
-            initialPost={post}
-            onSuccess={() => {
-              setIsEditing(false);
-              void queryClient.invalidateQueries({
-                queryKey: ['post', postId],
-              });
-              void queryClient.invalidateQueries({ queryKey: ['feed'] });
-            }}
-          />
+          <PostForm initialPost={post} onSuccess={() => setIsEditing(false)} />
         </section>
       ) : (
         <section aria-label="Post">
@@ -108,7 +90,10 @@ export function PostDetail({ postId }: { postId: string }) {
                 <button
                   type="button"
                   className={styles.ownerButton}
-                  disabled={archiveMutation.isPending || post.status !== PostStatus.Published}
+                  disabled={
+                    archiveMutation.isPending ||
+                    post.status !== PostStatus.Published
+                  }
                   onClick={() => archiveMutation.mutate()}
                 >
                   Archive
@@ -118,8 +103,12 @@ export function PostDetail({ postId }: { postId: string }) {
                   className={`${styles.ownerButton} ${styles.danger}`}
                   disabled={deleteMutation.isPending}
                   onClick={() => {
-                    if (window.confirm('Delete this post? This cannot be undone.')) {
-                      deleteMutation.mutate();
+                    if (
+                      window.confirm('Delete this post? This cannot be undone.')
+                    ) {
+                      deleteMutation.mutate(undefined, {
+                        onSuccess: () => router.push('/'),
+                      });
                     }
                   }}
                 >

@@ -1,4 +1,6 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { ReactElement } from 'react';
 
 import { fakeMedia, fakePost } from '../../test/fixtures';
 import { createPost, updatePost } from '../../lib/api/posts';
@@ -22,9 +24,15 @@ jest.mock('../../lib/api/posts', () => ({
   updatePost: jest.fn(),
 }));
 
+function renderForm(ui: ReactElement, client = new QueryClient()) {
+  return render(
+    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
+  );
+}
+
 describe('PostForm', () => {
   it('disables Publish until there is text or media', () => {
-    render(<PostForm />);
+    renderForm(<PostForm />);
 
     const publish = screen.getByRole('button', { name: 'Publish' });
     expect(publish).toBeDisabled();
@@ -40,7 +48,7 @@ describe('PostForm', () => {
     const onSuccess = jest.fn();
     jest.mocked(createPost).mockResolvedValue(fakePost());
 
-    render(<PostForm onSuccess={onSuccess} />);
+    renderForm(<PostForm onSuccess={onSuccess} />);
 
     fireEvent.change(screen.getByPlaceholderText('Share something…'), {
       target: { value: 'Draft text' },
@@ -57,6 +65,23 @@ describe('PostForm', () => {
     expect(onSuccess).toHaveBeenCalled();
   });
 
+  it('invalidates the feed after creating a post', async () => {
+    const client = new QueryClient();
+    const invalidate = jest.spyOn(client, 'invalidateQueries');
+    jest.mocked(createPost).mockResolvedValue(fakePost());
+
+    renderForm(<PostForm onSuccess={jest.fn()} />, client);
+
+    fireEvent.change(screen.getByPlaceholderText('Share something…'), {
+      target: { value: 'Hello' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Publish' }));
+
+    await waitFor(() => {
+      expect(invalidate).toHaveBeenCalledWith({ queryKey: ['feed'] });
+    });
+  });
+
   it('prefills and updates an existing post in edit mode', async () => {
     const initialPost = fakePost({
       id: 'post-9',
@@ -65,7 +90,7 @@ describe('PostForm', () => {
     });
     jest.mocked(updatePost).mockResolvedValue(initialPost);
 
-    render(<PostForm initialPost={initialPost} />);
+    renderForm(<PostForm initialPost={initialPost} />);
 
     expect(screen.getByDisplayValue('Original text')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Save changes' })).toBeEnabled();
