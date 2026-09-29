@@ -1,33 +1,22 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 
-import {
-  PostStatus,
-  type IPostResponse,
-  type MediaKind,
-} from '@repo/contracts';
+import { PostStatus, type IPostResponse } from '@repo/contracts';
 
-import { uploadAsset, validateUploadFile } from '../../lib/api/assets';
-import { useAuth } from '../../lib/auth/auth-context';
 import {
   useCreatePost,
   usePublishPost,
   useUpdatePost,
 } from '../../lib/hooks/use-post-mutations';
 
+import { MediaUploader, type MediaItem } from './media-uploader';
+
 import styles from './post-form.module.css';
 
 const MAX_MEDIA = 10;
 const MAX_CONTENT = 500;
-
-interface MediaItem {
-  assetId: string;
-  url: string;
-  mediaType: MediaKind;
-  name: string;
-}
 
 export interface PostFormProps {
   /** When present, the form edits this post instead of creating a new one. */
@@ -42,73 +31,19 @@ export interface PostFormProps {
  */
 export function PostForm({ initialPost, onSuccess }: PostFormProps) {
   const router = useRouter();
-  const { accessToken } = useAuth();
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const createMutation = useCreatePost();
   const updateMutation = useUpdatePost(initialPost?.id ?? '');
   const publishMutation = usePublishPost(initialPost?.id ?? '');
 
   const [content, setContent] = useState(initialPost?.content ?? '');
-  const [media, setMedia] = useState<MediaItem[]>(
-    initialPost?.assets.map((asset) => ({
-      assetId: asset.assetId,
-      url: asset.url,
-      mediaType: asset.mediaType,
-      name: asset.assetId,
-    })) ?? [],
-  );
-  const [progress, setProgress] = useState<number | null>(null);
+  const [media, setMedia] = useState<MediaItem[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   const isEdit = Boolean(initialPost);
   const isDraft = initialPost?.status === PostStatus.Draft;
   const isEmpty = content.trim().length === 0 && media.length === 0;
-
-  async function handleFiles(files: FileList | null) {
-    if (!files || files.length === 0) return;
-    setError(null);
-
-    const remainingSlots = MAX_MEDIA - media.length;
-    if (files.length > remainingSlots) {
-      setError(`You can attach at most ${MAX_MEDIA} media items.`);
-      return;
-    }
-
-    for (const file of Array.from(files)) {
-      const validationError = validateUploadFile(file);
-      if (validationError) {
-        setError(validationError);
-        continue;
-      }
-
-      try {
-        setProgress(0);
-        const asset = await uploadAsset(file, accessToken, setProgress);
-        setMedia((current) => [
-          ...current,
-          {
-            assetId: asset.id,
-            url: asset.url,
-            mediaType: asset.mimeType.startsWith('video/') ? 'video' : 'image',
-            name: file.name,
-          },
-        ]);
-      } catch (uploadError) {
-        setError(
-          uploadError instanceof Error
-            ? uploadError.message
-            : 'Upload failed. Please try again.',
-        );
-      } finally {
-        setProgress(null);
-      }
-    }
-
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  }
 
   async function submit(publish: boolean) {
     setError(null);
@@ -145,9 +80,13 @@ export function PostForm({ initialPost, onSuccess }: PostFormProps) {
     }
   }
 
-  function removeMedia(assetId: string) {
-    setMedia((current) => current.filter((item) => item.assetId !== assetId));
-  }
+  const initialItems: MediaItem[] =
+    initialPost?.assets.map((asset) => ({
+      assetId: asset.assetId,
+      url: asset.url,
+      mediaType: asset.mediaType,
+      name: asset.assetId,
+    })) ?? [];
 
   return (
     <form
@@ -172,61 +111,14 @@ export function PostForm({ initialPost, onSuccess }: PostFormProps) {
         </span>
       </label>
 
-      <div className={styles.mediaSection}>
-        <div className={styles.mediaHeader}>
-          <span className={styles.label}>Media</span>
-          <span className="muted">
-            {media.length}/{MAX_MEDIA}
-          </span>
-        </div>
-
-        {media.length > 0 && (
-          <ul className={styles.mediaList}>
-            {media.map((item) => (
-              <li key={item.assetId} className={styles.mediaItem}>
-                {item.mediaType === 'video' ? (
-                  <video
-                    src={item.url}
-                    className={styles.mediaThumb}
-                    muted
-                    playsInline
-                    preload="metadata"
-                  />
-                ) : (
-                  <img
-                    src={item.url}
-                    alt={item.name}
-                    className={styles.mediaThumb}
-                  />
-                )}
-                <button
-                  type="button"
-                  className={styles.remove}
-                  onClick={() => removeMedia(item.assetId)}
-                  aria-label={`Remove ${item.name}`}
-                >
-                  ×
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*,video/*"
-          multiple
-          className={styles.fileInput}
-          onChange={(event) => void handleFiles(event.target.files)}
-        />
-
-        {progress !== null && (
-          <p className={`muted ${styles.progress}`} role="status">
-            Uploading… {progress}%
-          </p>
-        )}
-      </div>
+      <MediaUploader
+        initialItems={initialItems}
+        max={MAX_MEDIA}
+        onChange={(items, busy) => {
+          setMedia(items);
+          setIsUploading(busy);
+        }}
+      />
 
       {error && (
         <p className={styles.error} role="alert">
@@ -239,7 +131,7 @@ export function PostForm({ initialPost, onSuccess }: PostFormProps) {
           <button
             type="button"
             className="button button--ghost"
-            disabled={isSaving || progress !== null}
+            disabled={isSaving || isUploading}
             onClick={() => void submit(false)}
           >
             Save draft
@@ -249,7 +141,7 @@ export function PostForm({ initialPost, onSuccess }: PostFormProps) {
           type="submit"
           className="button"
           disabled={
-            isSaving || progress !== null || ((!isEdit || isDraft) && isEmpty)
+            isSaving || isUploading || ((!isEdit || isDraft) && isEmpty)
           }
         >
           {isEdit && !isDraft ? 'Save changes' : 'Publish'}

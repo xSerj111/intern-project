@@ -3,7 +3,7 @@ import type { IAssetResponse } from '@repo/contracts';
 import { config } from '../config';
 import { ApiError } from './client';
 
-const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
+export const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024;
 
 /** Accepted upload MIME types (mirrors the backend whitelist, FR-006). */
 export const ACCEPTED_UPLOAD_TYPES = [
@@ -48,12 +48,13 @@ function messageFrom(payload: unknown): string | undefined {
 /**
  * Upload a single image/video to `POST /assets/upload`, reporting progress as a
  * percentage (0–100). Uses XMLHttpRequest because `fetch` cannot report upload
- * progress (FR-005).
+ * progress (FR-005). Aborting `signal` cancels the request.
  */
 export function uploadAsset(
   file: File,
   token: string | null,
   onProgress?: (percent: number) => void,
+  signal?: AbortSignal,
 ): Promise<IAssetResponse> {
   return new Promise<IAssetResponse>((resolve, reject) => {
     const form = new FormData();
@@ -89,6 +90,16 @@ export function uploadAsset(
     xhr.onerror = () => {
       reject(new ApiError('Unable to reach the service', 0, null));
     };
+
+    xhr.onabort = () => {
+      reject(new ApiError('Upload cancelled', 0, null));
+    };
+
+    if (signal?.aborted) {
+      reject(new ApiError('Upload cancelled', 0, null));
+      return;
+    }
+    signal?.addEventListener('abort', () => xhr.abort(), { once: true });
 
     xhr.send(form);
   });

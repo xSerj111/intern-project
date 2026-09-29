@@ -1,0 +1,100 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.label {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.drop,
+.dropActive {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem;
+  border: 2px dashed var(--innogram-border);
+  border-radius: 10px;
+}
+
+.dropActive {
+  border-color: var(--innogram-accent);
+  background: rgba(109, 40, 217, 0.06);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.item {
+  display: grid;
+  grid-template-columns: 56px 1fr auto;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem;
+  border: 1px solid var(--innogram-border);
+  border-radius: 8px;
+}
+
+.thumb {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 6px;
+  background: #000;
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85rem;
+  grid-column: 2;
+}
+
+.item progress {
+  grid-column: 2;
+  width: 100%;
+}
+
+.controls {
+  grid-column: 3;
+  grid-row: 1;
+  display: flex;
+  gap: 0.25rem;
+}
+
+.controls button {
+  font: inherit;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--innogram-border);
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+}
+
+.controls button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.error {
+  margin: 0;
+  grid-column: 2;
+  font-size: 0.85rem;
+  color: var(--innogram-danger);
+}
