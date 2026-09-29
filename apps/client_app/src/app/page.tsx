@@ -1,3 +1,5 @@
+import { Suspense } from 'react';
+
 import { Logo } from '../components/brand/logo';
 import { FeedTabs } from '../components/feed/feed-tabs';
 
@@ -14,7 +16,9 @@ export default function HomePage() {
 
       <section aria-label="Home feed">
         <h2 className={styles.sectionTitle}>Home feed</h2>
-        <FeedTabs />
+        <Suspense fallback={null}>
+          <FeedTabs />
+        </Suspense>
       </section>
     </main>
   );

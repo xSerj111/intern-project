@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 
 import type { FeedType, MediaTypeFilter, PostSort } from '@repo/contracts';
 
@@ -25,14 +25,44 @@ const MEDIA_FILTERS: { value: MediaTypeFilter; label: string }[] = [
   { value: 'text', label: 'Text' },
 ];
 
+const FEEDS = FEED_TABS.map((tab) => tab.value);
+const SORTS = SORT_OPTIONS.map((option) => option.value);
+const MEDIA = MEDIA_FILTERS.map((option) => option.value);
+
+function pick<T extends string>(
+  value: string | null,
+  allowed: readonly T[],
+): T | undefined {
+  return allowed.find((candidate) => candidate === value);
+}
+
 /**
  * Following/Discover tabs plus sort and media-type filters (FR-017/018/019/023).
- * Changing any control resets the feed query, which refetches the first page.
+ * State lives in the URL (`?feed&sort&mediaType`) so it survives refresh and
+ * back navigation; changing a control refetches the first page.
  */
 export function FeedTabs() {
-  const [feed, setFeed] = useState<FeedType>('following');
-  const [sort, setSort] = useState<PostSort>('newest');
-  const [mediaType, setMediaType] = useState<MediaTypeFilter | undefined>();
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  const feed = pick(searchParams.get('feed'), FEEDS) ?? 'following';
+  const sort = pick(searchParams.get('sort'), SORTS) ?? 'newest';
+  const mediaType = pick(searchParams.get('mediaType'), MEDIA);
+
+  function update(next: {
+    feed?: FeedType;
+    sort?: PostSort;
+    mediaType?: MediaTypeFilter;
+  }) {
+    const merged = { feed, sort, mediaType, ...next };
+    const params = new URLSearchParams();
+    if (merged.feed !== 'following') params.set('feed', merged.feed);
+    if (merged.sort !== 'newest') params.set('sort', merged.sort);
+    if (merged.mediaType) params.set('mediaType', merged.mediaType);
+    const query = params.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  }
 
   const hasActiveFilter = sort !== 'newest' || mediaType !== undefined;
 
@@ -50,7 +80,7 @@ export function FeedTabs() {
                 ? `${styles.tab} ${styles.tabActive}`
                 : styles.tab
             }
-            onClick={() => setFeed(tab.value)}
+            onClick={() => update({ feed: tab.value })}
           >
             {tab.label}
           </button>
@@ -63,7 +93,9 @@ export function FeedTabs() {
           <select
             className="input"
             value={sort}
-            onChange={(event) => setSort(event.target.value as PostSort)}
+            onChange={(event) =>
+              update({ sort: event.target.value as PostSort })
+            }
           >
             {SORT_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
@@ -79,9 +111,11 @@ export function FeedTabs() {
             className="input"
             value={mediaType ?? ''}
             onChange={(event) =>
-              setMediaType((event.target.value || undefined) as
-                | MediaTypeFilter
-                | undefined)
+              update({
+                mediaType: (event.target.value || undefined) as
+                  | MediaTypeFilter
+                  | undefined,
+              })
             }
           >
             <option value="">All</option>
@@ -98,8 +132,7 @@ export function FeedTabs() {
             type="button"
             className={`button button--ghost ${styles.clear}`}
             onClick={() => {
-              setSort('newest');
-              setMediaType(undefined);
+              update({ sort: 'newest', mediaType: undefined });
             }}
           >
             Clear

@@ -84,7 +84,11 @@ export function FeedList({
   if (!isSignedIn) {
     return (
       <div className={styles.empty}>
-        <p className="muted">Sign in to see posts from people you follow.</p>
+        <p className="muted">
+          {feed === 'discover'
+            ? 'Sign in to discover what people are sharing.'
+            : 'Sign in to see posts from people you follow.'}
+        </p>
         <Link href="/login" className="button">
           Sign in
         </Link>
@@ -107,7 +111,11 @@ export function FeedList({
     );
   }
 
-  const items = query.data.pages.flatMap((page) => page.items);
+  // Posts and reposts are paged separately by the API, so pages can overlap.
+  const seen = new Set<string>();
+  const items = query.data.pages
+    .flatMap((page) => page.items)
+    .filter((item) => !seen.has(item.id) && Boolean(seen.add(item.id)));
 
   if (items.length === 0) {
     return (
