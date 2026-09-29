@@ -57,4 +57,16 @@ describe('PostCard', () => {
       screen.queryByRole('dialog', { name: 'Media gallery' }),
     ).not.toBeInTheDocument();
   });
+
+  it('highlights the search term case-insensitively, escaping regex characters', () => {
+    const { container } = render(
+      <PostCard post={fakePost({ content: 'Hello (world) hello' })} highlight="HELLO" />,
+    );
+    expect(container.querySelectorAll('mark')).toHaveLength(2);
+
+    const { container: other } = render(
+      <PostCard post={fakePost({ content: 'a (b) c' })} highlight="(b)" />,
+    );
+    expect(other.querySelector('mark')).toHaveTextContent('(b)');
+  });
 });

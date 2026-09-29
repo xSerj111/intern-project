@@ -37,6 +37,8 @@ export interface PostCardProps {
   onMediaSelect?: (index: number) => void;
   /** Hide the like/comment/repost summary footer (e.g. when `PostActions` renders it). */
   showEngagement?: boolean;
+  /** Highlights case-insensitive matches of this text in the post content. */
+  highlight?: string;
 }
 
 /** Renders a single post: author, text, media and engagement summary. */
@@ -44,6 +46,7 @@ export function PostCard({
   post,
   onMediaSelect,
   showEngagement = true,
+  highlight,
 }: PostCardProps) {
   const { author, assets } = post;
   const [galleryIndex, setGalleryIndex] = useState<number | null>(null);
@@ -77,7 +80,11 @@ export function PostCard({
         </time>
       </header>
 
-      {post.content && <p className={styles.content}>{post.content}</p>}
+      {post.content && (
+        <p className={styles.content}>
+          <Highlighted text={post.content} term={highlight} />
+        </p>
+      )}
 
       {assets.length > 0 && (
         <ul
@@ -139,4 +146,23 @@ function MediaPreview({
     );
   }
   return <img src={asset.url} alt={description} className={styles.mediaVisual} />;
+}
+
+function Highlighted({ text, term }: { text: string; term?: string }) {
+  const needle = term?.trim();
+  if (!needle) return <>{text}</>;
+
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const parts = text.split(new RegExp(`(${escaped})`, 'i'));
+  return (
+    <>
+      {parts.map((part, index) =>
+        part.toLowerCase() === needle.toLowerCase() ? (
+          <mark key={index}>{part}</mark>
+        ) : (
+          part
+        ),
+      )}
+    </>
+  );
 }

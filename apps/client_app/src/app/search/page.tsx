@@ -1,10 +1,12 @@
 'use client';
 
 import { useInfiniteQuery } from '@tanstack/react-query';
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useRef, useState, type FormEvent } from 'react';
 
 import { searchPosts } from '../../lib/api/search';
 import { useAuth } from '../../lib/auth/auth-context';
+import { useDebouncedValue } from '../../lib/hooks/use-debounced-value';
 import { ErrorState, LoadingState } from '../../components/common/async-state';
 import { PostCard } from '../../components/feed/post-card';
 
@@ -13,19 +15,57 @@ import styles from './page.module.css';
 /** Minimum keyword length accepted by the API (FR-022). */
 const MIN_KEYWORD_LENGTH = 3;
 const PAGE_SIZE = 20;
+const DEBOUNCE_MS = 400;
+
+export default function SearchPage() {
+  return (
+    <Suspense fallback={null}>
+      <SearchContent />
+    </Suspense>
+  );
+}
 
 /**
- * Dedicated post search (FR-020/021/022): a keyword prompt, paginated results
- * reusing `PostCard`, and a friendly no-results state.
+ * Dedicated post search (FR-020/021/022): the keyword lives in `?q=`, is
+ * searched as you type (debounced) or on submit, and results reuse `PostCard`.
  */
-export default function SearchPage() {
+function SearchContent() {
   const { accessToken } = useAuth();
-  const [input, setInput] = useState('');
-  const [keyword, setKeyword] = useState('');
+  const router = useRouter();
+  const pathname = usePathname();
+  const keyword = (useSearchParams().get('q') ?? '').trim();
+  const [input, setInput] = useState(keyword);
+  // The last keyword this page wrote to the URL, to tell it apart from external changes.
+  const lastPushed = useRef(keyword);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
   const trimmed = input.trim();
   const tooShort = trimmed.length > 0 && trimmed.length < MIN_KEYWORD_LENGTH;
+  const debounced = useDebouncedValue(trimmed, DEBOUNCE_MS);
+
+  function setKeyword(next: string) {
+    if (next === keyword) return;
+    lastPushed.current = next;
+    router.replace(
+      next ? `${pathname}?q=${encodeURIComponent(next)}` : pathname,
+      { scroll: false },
+    );
+  }
+
+  // Back/forward or a nav link changed `?q=` from outside: mirror it in the box.
+  useEffect(() => {
+    if (keyword !== lastPushed.current) {
+      lastPushed.current = keyword;
+      setInput(keyword);
+    }
+  }, [keyword]);
+
+  // Search as you type once the input settles; clearing the box clears the URL.
+  useEffect(() => {
+    if (debounced.length >= MIN_KEYWORD_LENGTH || debounced.length === 0) {
+      setKeyword(debounced);
+    }
+  }, [debounced]);
 
   const {
     data,
@@ -132,7 +172,7 @@ export default function SearchPage() {
           <ul className={styles.list}>
             {items.map((post) => (
               <li key={post.id}>
-                <PostCard post={post} />
+                <PostCard post={post} highlight={keyword} />
               </li>
             ))}
           </ul>
