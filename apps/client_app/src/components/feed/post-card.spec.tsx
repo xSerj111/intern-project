@@ -1,7 +1,12 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, screen } from '@testing-library/react';
 
 import { fakeMedia, fakePost } from '../../test/fixtures';
+import { renderWithQuery as render } from '../../test/render';
 import { PostCard } from './post-card';
+
+jest.mock('../../lib/auth/auth-context', () => ({
+  useAuth: () => ({ accessToken: 'test-token' }),
+}));
 
 describe('PostCard', () => {
   it('renders the author, text and engagement counts', () => {

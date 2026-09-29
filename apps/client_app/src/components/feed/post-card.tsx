@@ -5,6 +5,7 @@ import { useState } from 'react';
 
 import type { IPostMediaResponse, IPostResponse } from '@repo/contracts';
 
+import { PostActions } from '../posts/post-actions';
 import { MediaGallery } from '../posts/media-gallery';
 import styles from './post-card.module.css';
 
@@ -105,11 +106,7 @@ export function PostCard({
 
       {showEngagement && (
         <footer className={styles.engagement}>
-          <span className={post.likedByMe ? styles.liked : undefined}>
-            ♥ {post.likeCount}
-          </span>
-          <span>💬 {post.commentCount}</span>
-          <span>🔁 {post.repostCount}</span>
+          <PostActions post={post} />
         </footer>
       )}
     </article>

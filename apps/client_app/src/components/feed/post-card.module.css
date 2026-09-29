@@ -106,8 +106,3 @@
   font-size: 0.85rem;
   color: var(--innogram-muted);
 }
-
-.liked {
-  color: var(--innogram-accent);
-  font-weight: 600;
-}

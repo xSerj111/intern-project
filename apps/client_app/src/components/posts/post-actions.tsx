@@ -1,50 +1,22 @@
 'use client';
 
-import { useMutation, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useState } from 'react';
 
 import type { IPostResponse } from '@repo/contracts';
 
-import { likePost, unlikePost } from '../../lib/api/likes';
-import { repostPost, unrepostPost } from '../../lib/api/reposts';
-import { useAuth } from '../../lib/auth/auth-context';
+import { usePostInteractions } from '../../lib/hooks/use-post-interactions';
 
 import styles from './post-actions.module.css';
 
 /**
- * Like, comment-count, share and re-post actions for a post. Mutations
- * invalidate the feed and post queries so counts/state stay consistent.
+ * Like, comment-count, share and re-post actions for a post. Like and re-post
+ * update the cached post optimistically and roll back on failure.
  */
 export function PostActions({ post }: { post: IPostResponse }) {
-  const { accessToken } = useAuth();
-  const queryClient = useQueryClient();
   const [shared, setShared] = useState(false);
-  const [reposted, setReposted] = useState(false);
-
-  function invalidate() {
-    void queryClient.invalidateQueries({ queryKey: ['feed'] });
-    void queryClient.invalidateQueries({ queryKey: ['post', post.id] });
-  }
-
-  const likeMutation = useMutation({
-    mutationFn: () =>
-      post.likedByMe
-        ? unlikePost(accessToken, post.id)
-        : likePost(accessToken, post.id),
-    onSuccess: invalidate,
-  });
-
-  const repostMutation = useMutation({
-    mutationFn: () =>
-      reposted
-        ? unrepostPost(accessToken, post.id)
-        : repostPost(accessToken, post.id),
-    onSuccess: () => {
-      setReposted((value) => !value);
-      invalidate();
-    },
-  });
+  const { reposted, toggleLike, toggleRepost, isLikePending, isRepostPending } =
+    usePostInteractions(post);
 
   async function share() {
     const url =
@@ -75,8 +47,8 @@ export function PostActions({ post }: { post: IPostResponse }) {
       <button
         type="button"
         className={post.likedByMe ? styles.active : styles.action}
-        onClick={() => likeMutation.mutate()}
-        disabled={likeMutation.isPending}
+        onClick={toggleLike}
+        disabled={isLikePending}
         aria-pressed={post.likedByMe}
       >
         ♥ {post.likeCount}
@@ -89,8 +61,8 @@ export function PostActions({ post }: { post: IPostResponse }) {
       <button
         type="button"
         className={reposted ? styles.active : styles.action}
-        onClick={() => repostMutation.mutate()}
-        disabled={repostMutation.isPending}
+        onClick={toggleRepost}
+        disabled={isRepostPending}
         aria-pressed={reposted}
       >
         🔁 {post.repostCount}
