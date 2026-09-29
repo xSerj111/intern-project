@@ -50,7 +50,7 @@ The CLI uses the `data-source.ts` at the app root (not `src/`), which loads the 
 
 ## Specs (Spec Kit / Speckit)
 
-Feature work is spec-driven. Each feature lives in `specs/NNN-name/` (`spec.md`, `plan.md`, `tasks.md`, `research.md`, `data-model.md`, `quickstart.md`, plus `contracts/` wire-format docs and `checklists/`). The Spec Kit CLI state is in `.specify/` (`feature.json` points at the active feature, currently `specs/002-post-feed`), and the `/speckit.*` slash commands (`.opencode/commands/`) drive the specify → plan → tasks → implement → analyze loop. A read-only `code-reviewer` agent (`.opencode/agents/code-reviewer.md`) reviews completed tasks against `tasks.md`.
+Feature work is spec-driven. Each feature lives in `specs/NNN-name/` (`spec.md`, `plan.md`, `tasks.md`, `research.md`, `data-model.md`, `quickstart.md`, plus `contracts/` wire-format docs and `checklists/`). The Spec Kit CLI state is in `.specify/` (`feature.json` points at the active feature), and the `/speckit.*` slash commands (`.opencode/commands/`) drive the specify → plan → tasks → implement → analyze loop. A read-only `code-reviewer` agent (`.opencode/agents/code-reviewer.md`) reviews completed tasks against `tasks.md`.
 
 ## Lint / format
 
