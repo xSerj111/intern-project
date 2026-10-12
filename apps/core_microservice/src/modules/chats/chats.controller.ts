@@ -1,32 +1,26 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Patch,
-  Param,
-  Delete,
-} from '@nestjs/common';
+import { Controller, Post, Body, UseGuards } from '@nestjs/common';
 import { ChatsService } from './chats.service';
 import { CreateMessageDto } from './dto/create-message.dto';
 import { MessageResponseDto } from './dto/message-response.dto';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @Controller('chats')
 export class ChatsController {
   constructor(private readonly chatsService: ChatsService) {}
 
   @Post('messages')
-  async sendMessage(@Body() createMessageDto: CreateMessageDto): Promise<MessageResponseDto> {
-    //TODO: change temp userid for real from jwt
-    const TEMP_USER_ID = 'test-user-123';
-
+  @UseGuards(JwtAuthGuard)
+  async sendMessage(
+    @CurrentUser('sub') authorId: string,
+    @Body() createMessageDto: CreateMessageDto,
+  ): Promise<MessageResponseDto> {
     const message = await this.chatsService.sendMessage(
-      TEMP_USER_ID,
+      authorId,
       createMessageDto.chatId,
-      createMessageDto.content
-      );
+      createMessageDto.content,
+    );
 
     return new MessageResponseDto(message);
   }
-    
 }

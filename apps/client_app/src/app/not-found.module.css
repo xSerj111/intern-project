@@ -1,0 +1,19 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  text-align: center;
+  min-height: 60vh;
+  padding: 2rem 1rem;
+}
+
+.code {
+  font-size: 2.5rem;
+  margin: 0;
+}
+
+.actions {
+  margin-top: 0.5rem;
+}

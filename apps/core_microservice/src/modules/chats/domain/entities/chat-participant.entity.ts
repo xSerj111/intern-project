@@ -29,7 +29,7 @@ export class ChatParticipant {
   userId!: string;
 
   @ManyToOne('UserProfile', { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'userId' })
+  @JoinColumn({ name: 'userId', referencedColumnName: 'authUserId' })
   user!: UserProfile;
 
   // e.g., 'ADMIN' or 'MEMBER'

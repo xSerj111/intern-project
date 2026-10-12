@@ -1,7 +1,6 @@
 import {
   Controller,
   Get,
-  Post,
   Body,
   Patch,
   Param,
@@ -20,6 +19,21 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 @Controller('profiles')
 export class ProfilesController {
   constructor(private readonly profilesService: ProfilesService) {}
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Fetch the authenticated user profile' })
+  @Get('me')
+  async getMyProfile(
+    @CurrentUser() user: { sub: string; email: string },
+  ): Promise<ProfileResponseDto> {
+    return new ProfileResponseDto(
+      await this.profilesService.getOrCreateProfileByAuthUserId(
+        user.sub,
+        user.email,
+      ),
+    );
+  }
 
   @ApiOperation({ summary: 'Fetch a profile by ID' })
   @Get(':id')

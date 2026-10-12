@@ -1,0 +1,32 @@
+.nav {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  order: 3;
+  width: 100%;
+  border-top: 1px solid var(--innogram-border);
+}
+
+.link {
+  padding: 0.6rem 0.9rem;
+  font-weight: 600;
+  color: var(--innogram-muted);
+  border-bottom: 2px solid transparent;
+}
+
+.link:hover {
+  color: var(--innogram-text);
+}
+
+.active {
+  color: var(--innogram-primary);
+  border-bottom-color: var(--innogram-primary);
+}
+
+@media (min-width: 640px) {
+  .nav {
+    order: 0;
+    width: auto;
+    border-top: none;
+  }
+}
