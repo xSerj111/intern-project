@@ -127,3 +127,11 @@ export function authApi<T>(
 ): Promise<T> {
   return apiRequest<T>(config.authServiceUrl, path, options);
 }
+
+/** Request against the notifications service (`NOTIFICATIONS_SERVICE_URL`). */
+export function notificationsRequest<T>(
+  path: string,
+  options?: ApiRequestOptions,
+): Promise<T> {
+  return apiRequest<T>(config.notificationsServiceUrl, path, options);
+}

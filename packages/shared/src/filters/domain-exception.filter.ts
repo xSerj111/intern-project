@@ -5,6 +5,7 @@ import {
   HttpStatus,
 } from "@nestjs/common";
 
+import { AccessDeniedError } from "../errors/access-denied.error";
 import {
   DatabaseQueryError,
   EntityByIdNotFoundError,
@@ -58,6 +59,9 @@ export class DomainExceptionFilter implements ExceptionFilter {
       error instanceof EntityNotFoundError
     ) {
       return HttpStatus.NOT_FOUND;
+    }
+    if (error instanceof AccessDeniedError) {
+      return HttpStatus.FORBIDDEN;
     }
     if (error instanceof UniqueConstraintViolationError) {
       return HttpStatus.CONFLICT;

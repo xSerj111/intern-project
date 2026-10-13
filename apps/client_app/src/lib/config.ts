@@ -10,6 +10,8 @@ export interface ClientConfig {
   authServiceUrl: string;
   /** Base URL of the core service (`CORE_SERVICE_URL`). */
   coreServiceUrl: string;
+  /** Base URL of the notifications service (`NOTIFICATIONS_SERVICE_URL`). */
+  notificationsServiceUrl: string;
   /** The client's own port (`CLIENT_PORT`, default 3000). */
   clientPort: number;
   /** Google OAuth *client* id (`GOOGLE_CLIENT_ID`). Empty when unconfigured. */
@@ -21,6 +23,9 @@ export const config: ClientConfig = {
     process.env.NEXT_PUBLIC_AUTH_SERVICE_URL ?? 'http://localhost:3002',
   coreServiceUrl:
     process.env.NEXT_PUBLIC_CORE_SERVICE_URL ?? 'http://localhost:3001',
+  notificationsServiceUrl:
+    process.env.NEXT_PUBLIC_NOTIFICATIONS_SERVICE_URL ||
+    'http://localhost:3003',
   clientPort: Number(process.env.NEXT_PUBLIC_CLIENT_PORT ?? '3000'),
   googleClientId: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID ?? '',
 };
