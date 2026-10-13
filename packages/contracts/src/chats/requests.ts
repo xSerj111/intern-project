@@ -1,8 +1,3 @@
-export interface ICreateMessageRequest {
-  chatId: string;
-  content: string;
-}
-
 export interface ICreateDirectChatRequest {
   userId: string;
 }

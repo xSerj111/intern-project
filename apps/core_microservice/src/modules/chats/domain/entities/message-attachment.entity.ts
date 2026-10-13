@@ -12,7 +12,7 @@ import type { Asset } from '../../../assets/domain/entities/asset.entity';
 
 @Entity('message_assets')
 @Index(['messageId', 'assetId'], { unique: true })
-export class MessageAsset {
+export class MessageAttachment {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
@@ -23,6 +23,7 @@ export class MessageAsset {
   @JoinColumn({ name: 'messageId' })
   message!: Message;
 
+  @Index('IDX_message_assets_assetId', { unique: true }) // one asset belongs to at most one message
   @Column({ type: 'uuid' })
   assetId!: string;
 
@@ -30,6 +31,7 @@ export class MessageAsset {
   @JoinColumn({ name: 'assetId' })
   asset!: Asset;
 
+  // The sender's order, starting at 0.
   @Column({ type: 'int', default: 0 })
   displayOrder!: number;
 

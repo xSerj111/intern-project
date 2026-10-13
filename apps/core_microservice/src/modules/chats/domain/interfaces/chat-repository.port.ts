@@ -1,0 +1,44 @@
+import type { EntityManager } from 'typeorm';
+import type { Chat } from '../entities/chat.entity';
+import type { ChatParticipant } from '../entities/chat-participant.entity';
+import type { Message } from '../entities/message.entity';
+
+/** Opaque transaction handle passed between the chat and message ports. */
+export type ChatTransaction = EntityManager;
+
+export interface ListChatsOptions {
+  /** `lastActivityAt` cursor: only chats with activity strictly before it. */
+  before?: Date;
+  limit: number;
+}
+
+/** One row of the conversation list, with the per-viewer projections. */
+export interface ChatSummary {
+  chat: Chat;
+  unreadCount: number;
+  lastMessage: Message | null;
+  memberCount: number;
+  /** DIRECT only: the other active participant. */
+  counterpart: ChatParticipant | null;
+  myRole: ChatParticipant['role'];
+}
+
+export interface IChatRepository {
+  findById(chatId: string): Promise<Chat | null>;
+  /** Direct chat for the unordered user pair, identified by its direct key. */
+  findDirectByKey(directKey: string): Promise<Chat | null>;
+  /** Active (`leftAt IS NULL`) participation of the user in the chat. */
+  findActiveParticipation(
+    chatId: string,
+    userId: string,
+  ): Promise<ChatParticipant | null>;
+  listForUser(
+    userId: string,
+    options: ListChatsOptions,
+  ): Promise<ChatSummary[]>;
+  findActiveChatIdsForUser(userId: string): Promise<string[]>;
+  save(chat: Chat, tx?: ChatTransaction): Promise<Chat>;
+  runInTransaction<T>(work: (tx: ChatTransaction) => Promise<T>): Promise<T>;
+}
+
+export const CHAT_REPOSITORY = Symbol.for('IChatRepository');
