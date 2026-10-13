@@ -1,0 +1,259 @@
+import { Inject, Logger, UseFilters } from '@nestjs/common';
+import {
+  Ack,
+  ConnectedSocket,
+  MessageBody,
+  OnGatewayConnection,
+  OnGatewayDisconnect,
+  OnGatewayInit,
+  SubscribeMessage,
+  WebSocketGateway,
+  WebSocketServer,
+} from '@nestjs/websockets';
+import Redis from 'ioredis';
+import type { DefaultEventsMap, Namespace } from 'socket.io';
+import {
+  REALTIME_NAMESPACE,
+  type ClientToServerEvents,
+  type IRealtimeAckError,
+  type ServerToClientEvents,
+} from '@repo/contracts';
+import { AccessTokenVerifier, RedisKeys } from '@repo/shared';
+import { ACCESS_TOKEN_VERIFIER } from '../../../../common/auth/access-token-verifier.provider';
+import { REDIS_CLIENT } from '../../../../common/redis/redis.module';
+import type {
+  ChatRealtimeEvent,
+  ChatRealtimePayload,
+  IChatRealtimePort,
+} from '../../domain/interfaces/chat-realtime.port';
+import {
+  createSocketAuthMiddleware,
+  type RealtimeSocket,
+  type RealtimeSocketData,
+} from './socket-auth.middleware';
+import { WsDomainExceptionFilter } from './ws-domain-exception.filter';
+
+export type RealtimeNamespace = Namespace<
+  ClientToServerEvents,
+  ServerToClientEvents,
+  DefaultEventsMap,
+  RealtimeSocketData
+>;
+
+type RenewAck = (
+  res: { ok: true; expiresAt: string } | IRealtimeAckError,
+) => void;
+
+/** setTimeout overflows above 2^31-1 ms (~24.8 days). */
+const MAX_TIMER_MS = 2_147_483_647;
+
+export const userRoom = (userId: string): string => `user:${userId}`;
+export const chatRoom = (chatId: string): string => `chat:${chatId}`;
+
+/** Read lazily: decorator options are evaluated before config is loaded. */
+const clientUrl = (): string =>
+  process.env.CLIENT_URL || 'http://localhost:3000';
+
+@UseFilters(WsDomainExceptionFilter)
+@WebSocketGateway({
+  namespace: REALTIME_NAMESPACE,
+  cors: {
+    origin: (
+      _origin: string | undefined,
+      cb: (err: Error | null, origin?: string) => void,
+    ) => cb(null, clientUrl()),
+    credentials: true,
+  },
+})
+export class ChatsGateway
+  implements
+    IChatRealtimePort,
+    OnGatewayInit<RealtimeNamespace>,
+    OnGatewayConnection<RealtimeSocket>,
+    OnGatewayDisconnect<RealtimeSocket>
+{
+  /** With a namespace configured, Nest injects the `Namespace`, not the root `Server`. */
+  @WebSocketServer()
+  server!: RealtimeNamespace;
+
+  private readonly logger = new Logger('ChatsGateway');
+  private readonly expiryTimers = new Map<string, NodeJS.Timeout>();
+
+  constructor(
+    @Inject(ACCESS_TOKEN_VERIFIER)
+    private readonly verifier: AccessTokenVerifier,
+    @Inject(REDIS_CLIENT) private readonly redis: Redis,
+  ) {}
+
+  afterInit(server: RealtimeNamespace): void {
+    server.use(createSocketAuthMiddleware(this.verifier));
+    this.logger.log(`Realtime gateway listening on ${REALTIME_NAMESPACE}`);
+  }
+
+  async handleConnection(socket: RealtimeSocket): Promise<void> {
+    await socket.join(userRoom(socket.data.userId));
+    this.scheduleExpiry(socket);
+  }
+
+  handleDisconnect(socket: RealtimeSocket): void {
+    this.clearExpiry(socket.id);
+  }
+
+  // ---- IChatRealtimePort ----
+
+  emitToChat<E extends ChatRealtimeEvent>(
+    chatId: string,
+    event: E,
+    payload: ChatRealtimePayload<E>,
+  ): void {
+    this.emitToRoom(chatRoom(chatId), event, payload);
+  }
+
+  emitToUser<E extends ChatRealtimeEvent>(
+    userId: string,
+    event: E,
+    payload: ChatRealtimePayload<E>,
+  ): void {
+    this.emitToRoom(userRoom(userId), event, payload);
+  }
+
+  joinUserToChat(userId: string, chatId: string): void {
+    this.server.in(userRoom(userId)).socketsJoin(chatRoom(chatId));
+  }
+
+  removeUserFromChat(userId: string, chatId: string): void {
+    this.server.in(userRoom(userId)).socketsLeave(chatRoom(chatId));
+  }
+
+  isUserViewingChat(userId: string, chatId: string): boolean {
+    // Synchronous lookup: valid for the default in-memory adapter (one instance).
+    const socketIds = this.server.adapter.rooms.get(userRoom(userId));
+    if (!socketIds) return false;
+    for (const id of socketIds) {
+      if (this.server.sockets.get(id)?.data.viewingChatId === chatId) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // ---- Client to server ----
+
+  @SubscribeMessage('auth:renew')
+  async handleAuthRenew(
+    @ConnectedSocket() socket: RealtimeSocket,
+    @MessageBody() body: { token?: unknown } | undefined,
+    @Ack() ack: RenewAck,
+  ): Promise<void> {
+    if (!(await this.ensureSessionActive(socket, ack))) return;
+
+    const token = typeof body?.token === 'string' ? body.token : undefined;
+    const result = await this.verifier.verify(token);
+    const { userId, sid } = socket.data;
+
+    if (
+      !result.ok ||
+      result.payload.sub !== userId ||
+      (sid !== null && result.payload.sid !== sid)
+    ) {
+      const reason = result.ok ? 'mismatch' : result.reason;
+      this.reply(ack, {
+        ok: false,
+        error: {
+          code: 'unauthorized',
+          message: `Token renewal failed: ${reason}`,
+        },
+      });
+      socket.disconnect(true);
+      return;
+    }
+
+    socket.data.jti = result.payload.jti;
+    socket.data.sid = result.payload.sid ?? null;
+    socket.data.exp = result.payload.exp;
+    this.scheduleExpiry(socket);
+
+    this.reply(ack, {
+      ok: true,
+      expiresAt: new Date(result.payload.exp * 1000).toISOString(),
+    });
+  }
+
+  // ---- Helpers ----
+
+  /**
+   * Re-checks the blacklist for the socket's current `jti` (one `EXISTS`).
+   * Every client-to-server handler calls it first, so a missed pub/sub
+   * revocation is still caught. Revoked: emits `session:expired` and
+   * disconnects. Redis down: fails closed with an `unavailable` ack.
+   */
+  async ensureSessionActive(
+    socket: RealtimeSocket,
+    ack?: (res: IRealtimeAckError) => void,
+  ): Promise<boolean> {
+    let revoked: boolean;
+    try {
+      revoked =
+        (await this.redis.exists(
+          RedisKeys.accessBlacklist(socket.data.jti),
+        )) === 1;
+    } catch {
+      this.reply(ack, {
+        ok: false,
+        error: { code: 'unavailable', message: 'Session check unavailable' },
+      });
+      return false;
+    }
+
+    if (revoked) {
+      this.reply(ack, {
+        ok: false,
+        error: { code: 'unauthorized', message: 'Session revoked' },
+      });
+      socket.emit('session:expired', { reason: 'revoked' });
+      socket.disconnect(true);
+      return false;
+    }
+    return true;
+  }
+
+  private emitToRoom<E extends ChatRealtimeEvent>(
+    room: string,
+    event: E,
+    payload: ChatRealtimePayload<E>,
+  ): void {
+    // The typed emit can't resolve a generic event's parameters; the public
+    // signatures above keep callers type-safe.
+    const target = this.server.to(room) as unknown as {
+      emit(ev: string, data: unknown): boolean;
+    };
+    target.emit(event, payload);
+  }
+
+  private scheduleExpiry(socket: RealtimeSocket): void {
+    this.clearExpiry(socket.id);
+    const delay = Math.min(
+      Math.max(socket.data.exp * 1000 - Date.now(), 0),
+      MAX_TIMER_MS,
+    );
+    const timer = setTimeout(() => {
+      this.expiryTimers.delete(socket.id);
+      socket.emit('session:expired', { reason: 'expired' });
+      socket.disconnect(true);
+    }, delay);
+    timer.unref?.();
+    this.expiryTimers.set(socket.id, timer);
+  }
+
+  private clearExpiry(socketId: string): void {
+    const timer = this.expiryTimers.get(socketId);
+    if (timer) {
+      clearTimeout(timer);
+      this.expiryTimers.delete(socketId);
+    }
+  }
+
+  private reply<T>(ack: ((res: T) => void) | undefined, res: T): void {
+    if (typeof ack === 'function') ack(res);
+  }
+}
