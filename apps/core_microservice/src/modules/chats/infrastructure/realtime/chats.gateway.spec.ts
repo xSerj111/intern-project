@@ -1,6 +1,6 @@
 import type { AccessTokenVerifier, VerifyResult } from '@repo/shared';
 import { DomainError } from '@repo/shared';
-import type { ArgumentsHost } from '@nestjs/common';
+import { Logger, type ArgumentsHost } from '@nestjs/common';
 import { SessionRevocationListener } from '../../../../common/redis/session-revocation.listener';
 import { ChatsGateway } from './chats.gateway';
 import {
@@ -101,6 +101,7 @@ describe('ChatsGateway auth:renew', () => {
     gateway = new ChatsGateway(
       { verify } as unknown as AccessTokenVerifier,
       redis as never,
+      { findActiveChatIdsForUser: jest.fn().mockResolvedValue([]) } as never,
     );
   });
 
@@ -234,5 +235,45 @@ describe('SessionRevocationListener', () => {
     await listener.handleMessage('{"userId":"not-a-uuid"}');
     await listener.handleMessage('garbage');
     expect(gateway.server.in).not.toHaveBeenCalled();
+  });
+});
+
+describe('ChatsGateway handleConnection', () => {
+  const build = (find: jest.Mock) =>
+    new ChatsGateway(
+      {} as never,
+      {} as never,
+      {
+        findActiveChatIdsForUser: find,
+      } as never,
+    );
+  const socket = () => {
+    const join = jest.fn().mockResolvedValue(undefined);
+    return {
+      join,
+      s: {
+        id: 's1',
+        data: { userId: 'u1', exp: Math.floor(Date.now() / 1000) + 3600 },
+        join,
+      } as never as Parameters<ChatsGateway['handleConnection']>[0],
+    };
+  };
+
+  it('joins the user room and every active chat room', async () => {
+    const gateway = build(jest.fn().mockResolvedValue(['c1', 'c2']));
+    const { s, join } = socket();
+    await gateway.handleConnection(s);
+    expect(join).toHaveBeenCalledWith('user:u1');
+    expect(join).toHaveBeenCalledWith(['chat:c1', 'chat:c2']);
+    gateway.handleDisconnect(s);
+  });
+
+  it('stays connected on the user room when the lookup fails', async () => {
+    const gateway = build(jest.fn().mockRejectedValue(new Error('db down')));
+    jest.spyOn(Logger.prototype, 'error').mockImplementation();
+    const { s, join } = socket();
+    await expect(gateway.handleConnection(s)).resolves.toBeUndefined();
+    expect(join).toHaveBeenCalledTimes(1);
+    gateway.handleDisconnect(s);
   });
 });

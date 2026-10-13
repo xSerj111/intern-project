@@ -7,11 +7,14 @@ import {
   ParseUUIDPipe,
   UseGuards,
   ForbiddenException,
+  Query,
 } from '@nestjs/common';
 import { ProfilesService } from './profiles.service';
 import { UpdateProfileDto } from '@repo/shared';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { ProfileResponseDto } from './dto/profile-response.dto';
+import type { IChatUser } from '@repo/contracts';
+import { SearchProfilesQueryDto } from './dto/search-profiles-query.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
@@ -32,6 +35,21 @@ export class ProfilesController {
         user.sub,
         user.email,
       ),
+    );
+  }
+
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard)
+  @ApiOperation({ summary: 'Search users by username prefix' })
+  @Get('search')
+  async searchProfiles(
+    @Query() query: SearchProfilesQueryDto,
+    @CurrentUser('sub') authUserId: string,
+  ): Promise<IChatUser[]> {
+    return this.profilesService.searchProfiles(
+      query.q,
+      query.limit,
+      authUserId,
     );
   }
 

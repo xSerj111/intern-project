@@ -36,6 +36,25 @@ export interface IChatRepository {
     userId: string,
     options: ListChatsOptions,
   ): Promise<ChatSummary[]>;
+  /**
+   * Exact per-viewer summary of one chat (same projections as `listForUser`);
+   * null when the chat is deleted or the user is not an active participant.
+   */
+  getSummary(
+    chatId: string,
+    userId: string,
+    tx?: ChatTransaction,
+  ): Promise<ChatSummary | null>;
+  /**
+   * Raises the active participant's `lastReadSeq` to `seq` (never lowers it) and
+   * returns the stored value; throws `ChatNotFoundError` when not a member.
+   */
+  advanceReadSeq(
+    chatId: string,
+    userId: string,
+    seq: number,
+    tx?: ChatTransaction,
+  ): Promise<number>;
   findActiveChatIdsForUser(userId: string): Promise<string[]>;
   save(chat: Chat, tx?: ChatTransaction): Promise<Chat>;
   runInTransaction<T>(work: (tx: ChatTransaction) => Promise<T>): Promise<T>;

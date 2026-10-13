@@ -19,6 +19,10 @@ import {
   type ServerToClientEvents,
 } from '@repo/contracts';
 import { AccessTokenVerifier, RedisKeys } from '@repo/shared';
+import {
+  CHAT_REPOSITORY,
+  type IChatRepository,
+} from '../../domain/interfaces/chat-repository.port';
 import { ACCESS_TOKEN_VERIFIER } from '../../../../common/auth/access-token-verifier.provider';
 import { REDIS_CLIENT } from '../../../../common/redis/redis.module';
 import type {
@@ -83,6 +87,7 @@ export class ChatsGateway
     @Inject(ACCESS_TOKEN_VERIFIER)
     private readonly verifier: AccessTokenVerifier,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    @Inject(CHAT_REPOSITORY) private readonly chats: IChatRepository,
   ) {}
 
   afterInit(server: RealtimeNamespace): void {
@@ -91,7 +96,18 @@ export class ChatsGateway
   }
 
   async handleConnection(socket: RealtimeSocket): Promise<void> {
-    await socket.join(userRoom(socket.data.userId));
+    const { userId } = socket.data;
+    await socket.join(userRoom(userId));
+    try {
+      const chatIds = await this.chats.findActiveChatIdsForUser(userId);
+      await socket.join(chatIds.map(chatRoom));
+    } catch (err) {
+      // Keep the socket on its user room; live chat events resume on reconnect.
+      this.logger.error(
+        `Failed to join chat rooms for user ${userId}`,
+        err instanceof Error ? err.stack : String(err),
+      );
+    }
     this.scheduleExpiry(socket);
   }
 

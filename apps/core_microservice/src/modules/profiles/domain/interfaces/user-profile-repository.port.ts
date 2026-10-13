@@ -12,6 +12,14 @@ export interface IUserProfileRepository extends RepositoryPort<
   UserProfileProps
 > {
   findByAuthUserId(authUserId: string): Promise<UserProfile | null>;
+  /** Single `IN` lookup; missing ids are simply absent from the result. */
+  findByAuthUserIds(authUserIds: string[]): Promise<UserProfile[]>;
+  /** Case-insensitive username prefix match; deleted profiles and `excludeAuthUserId` left out. */
+  searchByUsername(
+    prefix: string,
+    limit: number,
+    excludeAuthUserId: string,
+  ): Promise<UserProfile[]>;
 }
 
 /** DI token, for when the service should depend on the interface, not the class. */

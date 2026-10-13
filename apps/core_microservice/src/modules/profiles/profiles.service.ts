@@ -7,6 +7,7 @@ import {
   UniqueConstraintViolationError,
   UpdateProfileDto,
 } from '@repo/shared';
+import type { IChatUser } from '@repo/contracts';
 import { UserProfile } from './domain/entities/user-profile.entity';
 import { UserProfileRepository } from './infrastructure/repository/user-profile.repository';
 
@@ -155,5 +156,24 @@ export class ProfilesService {
   private deriveHandle(email?: string): string {
     const localPart = email?.split('@')[0]?.trim();
     return localPart || 'user';
+  }
+
+  /** Username-prefix search for starting conversations; the caller is left out. */
+  async searchProfiles(
+    q: string,
+    limit: number,
+    callerAuthUserId: string,
+  ): Promise<IChatUser[]> {
+    const profiles = await this.userProfileRepository.searchByUsername(
+      q,
+      limit,
+      callerAuthUserId,
+    );
+    return profiles.map((p) => ({
+      userId: p.authUserId,
+      username: p.username,
+      displayName: p.displayName,
+      avatarUrl: p.avatarUrl ?? null,
+    }));
   }
 }

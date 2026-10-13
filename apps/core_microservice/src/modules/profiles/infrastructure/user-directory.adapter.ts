@@ -18,12 +18,9 @@ export class UserDirectoryAdapter implements IUserDirectoryPort {
 
   public async getUsers(userIds: string[]): Promise<Map<string, IChatUser>> {
     const unique = [...new Set(userIds)];
-    const found = await Promise.all(
-      unique.map((id) => this.profiles.findByAuthUserId(id)),
-    );
+    const found = await this.profiles.findByAuthUserIds(unique);
     const result = new Map<string, IChatUser>();
     for (const profile of found) {
-      if (!profile) continue;
       result.set(profile.authUserId, {
         userId: profile.authUserId,
         username: profile.username,
