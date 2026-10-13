@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { CommentsController } from './comments.controller';
 import { CommentsService } from './comments.service';
-import { CommentRepository } from './infrastructure/repository/comment.repository';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 
 describe('CommentsController', () => {
   let controller: CommentsController;
@@ -9,8 +9,11 @@ describe('CommentsController', () => {
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [CommentsController],
-      providers: [CommentsService, { provide: CommentRepository, useValue: {} }],
-    }).compile();
+      providers: [{ provide: CommentsService, useValue: {} }],
+    })
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     controller = module.get<CommentsController>(CommentsController);
   });
