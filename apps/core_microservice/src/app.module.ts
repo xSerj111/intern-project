@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AppConfigModule } from './config/app-config.module';
 import { AppConfigService } from './config/app-config.service';
+import { RedisModule } from './common/redis/redis.module';
 import { ProfilesModule } from './modules/profiles/profiles.module';
 import { PostsModule } from './modules/posts/posts.module';
 import { CommentsModule } from './modules/comments/comments.module';
@@ -14,6 +15,7 @@ import { InternalEventsModule } from './modules/internal-events/internal-events.
 @Module({
   imports: [
     AppConfigModule,
+    RedisModule,
 
     TypeOrmModule.forRootAsync({
       inject: [AppConfigService],

@@ -37,6 +37,7 @@ export const env = {
   },
   jwt: {
     accessTokenSecret: requireEnv('JWT_SECRET', 'your-super-secret-jwt-key-here'),
+    refreshTokenSecret: requireEnv('JWT_REFRESH_SECRET', 'your-super-secret-jwt-refresh-key-here'),
     accessTokenExpiry: requireEnv('JWT_EXPIRES_IN', '15m'),
     refreshTokenExpiry: requireEnv('JWT_REFRESH_EXPIRES_IN', '7d'),
   },

@@ -28,6 +28,9 @@ export * from "./database/typeorm-error.guard";
 export * from "./errors/domain.error";
 export * from "./errors/database.errors";
 
+// Redis key layout (auth sessions + token blacklists)
+export * from "./redis/redis-keys";
+
 // Filters (domain errors -> HTTP)
 export * from "./filters/domain-exception.filter";
 

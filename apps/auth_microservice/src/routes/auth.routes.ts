@@ -1,9 +1,15 @@
-import { Router } from 'express';
+import { Request, Router } from 'express';
 import { AuthService } from '../services/auth.service';
 import { validateBody } from '../middleware/validate.middleware';
 import { GoogleLoginDto, LoginDto } from '@repo/shared';
 import { requireAuth } from '../middleware/auth.middleware';
 import { RefreshTokenDto } from '@repo/shared';
+import { SessionContext } from '../domain/interfaces/session-context';
+
+const sessionContext = (req: Request): SessionContext => ({
+  ipAddress: req.ip,
+  userAgent: req.get('user-agent'),
+});
 
 export function createAuthRouter(authService: AuthService): Router {
   const router = Router();
@@ -39,7 +45,7 @@ export function createAuthRouter(authService: AuthService): Router {
   router.post('/login', validateBody(LoginDto), async (req, res, next) => {
     try {
       const { email, password } = req.body;
-      const result = await authService.login(email, password);
+      const result = await authService.login(email, password, sessionContext(req));
       res.status(200).json(result);
     } catch (error) {
       next(error);
@@ -74,7 +80,7 @@ export function createAuthRouter(authService: AuthService): Router {
   router.post('/google', validateBody(GoogleLoginDto), async (req, res, next) => {
     try {
       const { idToken } = req.body;
-      const result = await authService.loginWithGoogle(idToken);
+      const result = await authService.loginWithGoogle(idToken, sessionContext(req));
       res.status(200).json(result);
     } catch (error) {
       next(error);
@@ -129,7 +135,7 @@ export function createAuthRouter(authService: AuthService): Router {
   router.post('/refresh', validateBody(RefreshTokenDto), async (req, res, next) => {
     try {
       const { refreshToken } = req.body;
-      const result = await authService.refreshToken(refreshToken);
+      const result = await authService.refreshToken(refreshToken, sessionContext(req));
       res.status(200).json(result);
     } catch (error) {
       next(error);
@@ -140,8 +146,14 @@ export function createAuthRouter(authService: AuthService): Router {
    * @openapi
    * /auth/logout:
    *   post:
-   *     summary: Logout user and invalidate refresh token
+   *     summary: Logout user and revoke the refresh token (and the access token, when sent)
+   *     description: >
+   *       The Authorization bearer token is optional. When present and still valid,
+   *       its jti is blacklisted until it expires.
    *     tags: [Auth]
+   *     security:
+   *       - bearerAuth: []
+   *       - {}
    *     requestBody:
    *       required: true
    *       content:
@@ -155,7 +167,9 @@ export function createAuthRouter(authService: AuthService): Router {
   router.post('/logout', validateBody(RefreshTokenDto), async (req, res, next) => {
     try {
       const { refreshToken } = req.body;
-      await authService.logout(refreshToken);
+      // Optional: logout must still work when the access token has already expired.
+      const [type, accessToken] = req.headers.authorization?.split(' ') ?? [];
+      await authService.logout(refreshToken, type === 'Bearer' ? accessToken : undefined);
       res.status(200).json({ message: 'Logged out successfully' });
     } catch (error) {
       next(error);

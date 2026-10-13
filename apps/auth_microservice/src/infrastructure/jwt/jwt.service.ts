@@ -1,7 +1,11 @@
-import { IJwtService, JwtPayload } from 'src/domain/interfaces/jwt.service.interface';
+import {
+  IJwtService,
+  JwtPayload,
+  RefreshTokenPayload,
+} from '../../domain/interfaces/jwt.service.interface';
 import jwt from 'jsonwebtoken';
 import { env } from '../../config/env';
-import { randomBytes } from 'crypto';
+import { randomUUID } from 'crypto';
 
 export class JwtService implements IJwtService {
   signAccessToken(payload: JwtPayload): string {
@@ -9,7 +13,7 @@ export class JwtService implements IJwtService {
       payload,
       env.jwt.accessTokenSecret,
       // Używamy "as any", aby uniknąć problemu z typowaniem wartości literowych (StringValue), z którym mierzyliśmy się wcześniej
-      { expiresIn: env.jwt.accessTokenExpiry as any },
+      { expiresIn: env.jwt.accessTokenExpiry as any, jwtid: randomUUID() },
     );
   }
 
@@ -20,8 +24,23 @@ export class JwtService implements IJwtService {
     return decoded;
   }
 
-  generateRefreshToken(): string {
-    return randomBytes(40).toString('hex');
+  signRefreshToken(userId: string): { token: string; jti: string; expiresAt: Date } {
+    const jti = randomUUID();
+    const token = jwt.sign({}, env.jwt.refreshTokenSecret, {
+      subject: userId,
+      jwtid: jti,
+      expiresIn: this.parseExpiryToSeconds(env.jwt.refreshTokenExpiry),
+    });
+    const { exp } = jwt.decode(token) as { exp: number };
+    return { token, jti, expiresAt: new Date(exp * 1000) };
+  }
+
+  verifyRefreshToken(token: string): RefreshTokenPayload {
+    const decoded = jwt.verify(token, env.jwt.refreshTokenSecret) as Partial<RefreshTokenPayload>;
+    if (!decoded.sub || !decoded.jti || !decoded.exp) {
+      throw new Error('Malformed refresh token');
+    }
+    return { sub: decoded.sub, jti: decoded.jti, exp: decoded.exp };
   }
 
   parseExpiryToSeconds(expiry: string): number {

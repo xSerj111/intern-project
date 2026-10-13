@@ -36,10 +36,6 @@ export class RedisService implements ICacheService {
     return this.client.del(key);
   }
 
-  async del(key: string): Promise<number> {
-    return this.client.del(key);
-  }
-
   async has(key: string): Promise<boolean> {
     const result = await this.client.exists(key);
     return result === 1;

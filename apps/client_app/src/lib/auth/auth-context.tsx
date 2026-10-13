@@ -12,6 +12,7 @@ import {
 
 import type { IAuthUserResponse, ILoginResponse } from '@repo/contracts';
 
+import { authApi } from '../api/client';
 import { googleLogin } from './google';
 import { login as loginRequest } from './login';
 
@@ -39,7 +40,7 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>;
   /** Authenticate with Google and persist the session (auto-registers users). */
   loginWithGoogle: (idToken: string) => Promise<void>;
-  /** Clear the session. */
+  /** Revoke the tokens on the server (best effort) and clear the session. */
   logout: () => void;
 }
 
@@ -88,9 +89,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(() => {
+    // Revoke both tokens server-side; local state is cleared whatever the call returns.
+    if (session) {
+      authApi('/auth/logout', {
+        method: 'POST',
+        body: { refreshToken: session.refreshToken },
+        token: session.accessToken,
+      }).catch(() => undefined);
+    }
     window.localStorage.removeItem(STORAGE_KEY);
     setSession(null);
-  }, []);
+  }, [session]);
 
   const value = useMemo<AuthContextValue>(
     () => ({

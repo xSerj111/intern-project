@@ -33,6 +33,15 @@ export class AppConfigService {
     };
   }
 
+  /** Redis connection settings (shared with auth_microservice's token blacklist). */
+  get redis() {
+    return {
+      host: this.config.get<string>('REDIS_HOST', 'localhost'),
+      port: parseInt(this.config.get<string>('REDIS_PORT', '6379'), 10),
+      password: this.config.get<string>('REDIS_PASSWORD') || undefined,
+    };
+  }
+
   get s3() {
     const port = Number(this.config.get<string>('S3_PORT', '9000'));
 
