@@ -45,6 +45,7 @@ describe('AuthService', () => {
   let cache: FakeCache;
   let jwtService: JwtService;
   let service: AuthService;
+  let publisher: { publish: jest.Mock };
   let logger: { debug: jest.Mock; warn: jest.Mock; error: jest.Mock; info: jest.Mock };
 
   beforeEach(() => {
@@ -61,6 +62,9 @@ describe('AuthService', () => {
       compare: jest.fn().mockResolvedValue(true),
     };
     const oauthService: IOAuthService = { verifyIdToken: jest.fn() };
+    publisher = {
+      publish: jest.fn().mockImplementation(async () => {}),
+    };
 
     service = new AuthService(
       usersService,
@@ -69,6 +73,7 @@ describe('AuthService', () => {
       cryptoService,
       jwtService,
       oauthService,
+      publisher,
     );
   });
 
@@ -85,6 +90,7 @@ describe('AuthService', () => {
     const session = JSON.parse(entry!.value);
     expect(session).toEqual({
       userId: user.id,
+      sid: expect.any(String),
       ipAddress: ctx.ipAddress,
       userAgent: ctx.userAgent,
       expiresAt: expect.any(String),
@@ -119,8 +125,14 @@ describe('AuthService', () => {
   });
 
   it('logout blacklists the access jti and verifyToken then rejects it', async () => {
-    const { accessToken, refreshToken } = await service.login(user.email, 'password', ctx);
-    await expect(service.verifyToken(accessToken)).resolves.toMatchObject({ sub: user.id });
+    const { accessToken, refreshToken } = await service.login(
+      user.email,
+      'password',
+      ctx,
+    );
+    await expect(service.verifyToken(accessToken)).resolves.toMatchObject({
+      sub: user.id,
+    });
 
     await service.logout(refreshToken, accessToken);
 
@@ -129,7 +141,73 @@ describe('AuthService', () => {
     expect(entry!.ttl).toBeGreaterThan(0);
     expect(cache.store.has(RedisKeys.refreshSession(jtiOf(refreshToken)))).toBe(false);
     expect(cache.store.has(RedisKeys.refreshBlacklist(jtiOf(refreshToken)))).toBe(true);
-    await expect(service.verifyToken(accessToken)).rejects.toThrow('Token has been revoked');
+    await expect(service.verifyToken(accessToken)).rejects.toThrow(
+      'Token has been revoked',
+    );
+  });
+
+  const sidOf = (token: string) => (jwt.decode(token) as { sid?: string }).sid;
+
+  it('login puts the same sid in both tokens and the session record', async () => {
+    const { accessToken, refreshToken } = await service.login(
+      user.email,
+      'password',
+      ctx,
+    );
+    const sid = sidOf(accessToken);
+
+    expect(sid).toEqual(expect.any(String));
+    expect(sidOf(refreshToken)).toBe(sid);
+    const session = JSON.parse(
+      cache.store.get(RedisKeys.refreshSession(jtiOf(refreshToken)))!.value,
+    );
+    expect(session.sid).toBe(sid);
+  });
+
+  it('refresh keeps the sid', async () => {
+    const first = await service.login(user.email, 'password', ctx);
+    const second = await service.refreshToken(first.refreshToken, ctx);
+
+    expect(sidOf(second.accessToken)).toBe(sidOf(first.accessToken));
+    expect(sidOf(second.refreshToken)).toBe(sidOf(first.accessToken));
+    const session = JSON.parse(
+      cache.store.get(RedisKeys.refreshSession(jtiOf(second.refreshToken)))!.value,
+    );
+    expect(session.sid).toBe(sidOf(first.accessToken));
+  });
+
+  it('logout publishes once, after blacklisting, with the right sid and jti', async () => {
+    const { accessToken, refreshToken } = await service.login(
+      user.email,
+      'password',
+      ctx,
+    );
+    publisher.publish.mockImplementation(async () => {
+      expect(cache.store.has(RedisKeys.accessBlacklist(jtiOf(accessToken)))).toBe(true);
+      expect(cache.store.has(RedisKeys.refreshBlacklist(jtiOf(refreshToken)))).toBe(true);
+    });
+
+    await service.logout(refreshToken, accessToken);
+
+    expect(publisher.publish).toHaveBeenCalledTimes(1);
+    expect(publisher.publish).toHaveBeenCalledWith({
+      userId: user.id,
+      sid: sidOf(accessToken),
+      jti: jtiOf(accessToken),
+      revokedAt: expect.any(String),
+    });
+  });
+
+  it('a publisher failure does not fail logout', async () => {
+    const { accessToken, refreshToken } = await service.login(
+      user.email,
+      'password',
+      ctx,
+    );
+    publisher.publish.mockRejectedValue(new Error('redis down'));
+
+    await expect(service.logout(refreshToken, accessToken)).resolves.toBeUndefined();
+    expect(logger.error).toHaveBeenCalled();
   });
 
   it('logout does not fail on an invalid refresh token', async () => {
@@ -137,9 +215,13 @@ describe('AuthService', () => {
   });
 
   it('verifyToken rejects an access token without jti', async () => {
-    const token = jwt.sign({ sub: user.id, email: user.email }, env.jwt.accessTokenSecret, {
-      expiresIn: 60,
-    });
+    const token = jwt.sign(
+      { sub: user.id, email: user.email },
+      env.jwt.accessTokenSecret,
+      {
+        expiresIn: 60,
+      },
+    );
 
     await expect(service.verifyToken(token)).rejects.toBeInstanceOf(UnauthorizedError);
   });

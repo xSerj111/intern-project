@@ -15,6 +15,8 @@ import { setupSwagger } from './config/swagger';
 import { RedisService } from './infrastructure/cache/redis.service';
 import { env } from './config/env';
 import { JwtService } from './infrastructure/jwt/jwt.service';
+import { createRedisClient } from './config/redis';
+import { RedisSessionRevocationPublisher } from './infrastructure/events/redis-session-revocation.publisher';
 import { HttpEventPublisher } from './infrastructure/events/http-event-publisher';
 
 export function createApp(
@@ -60,6 +62,7 @@ export function createApp(
     cryptoService,
     jwtService,
     oauthService,
+    new RedisSessionRevocationPublisher(createRedisClient(), logger),
   );
 
   app.use('/users', createUsersRouter(usersService));

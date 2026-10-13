@@ -24,9 +24,12 @@ export class JwtService implements IJwtService {
     return decoded;
   }
 
-  signRefreshToken(userId: string): { token: string; jti: string; expiresAt: Date } {
+  signRefreshToken(
+    userId: string,
+    sid?: string,
+  ): { token: string; jti: string; expiresAt: Date } {
     const jti = randomUUID();
-    const token = jwt.sign({}, env.jwt.refreshTokenSecret, {
+    const token = jwt.sign(sid ? { sid } : {}, env.jwt.refreshTokenSecret, {
       subject: userId,
       jwtid: jti,
       expiresIn: this.parseExpiryToSeconds(env.jwt.refreshTokenExpiry),
@@ -36,11 +39,14 @@ export class JwtService implements IJwtService {
   }
 
   verifyRefreshToken(token: string): RefreshTokenPayload {
-    const decoded = jwt.verify(token, env.jwt.refreshTokenSecret) as Partial<RefreshTokenPayload>;
+    const decoded = jwt.verify(
+      token,
+      env.jwt.refreshTokenSecret,
+    ) as Partial<RefreshTokenPayload>;
     if (!decoded.sub || !decoded.jti || !decoded.exp) {
       throw new Error('Malformed refresh token');
     }
-    return { sub: decoded.sub, jti: decoded.jti, exp: decoded.exp };
+    return { sub: decoded.sub, jti: decoded.jti, exp: decoded.exp, sid: decoded.sid };
   }
 
   parseExpiryToSeconds(expiry: string): number {

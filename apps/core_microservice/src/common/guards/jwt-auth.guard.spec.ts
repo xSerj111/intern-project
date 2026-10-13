@@ -3,9 +3,8 @@ import {
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import * as jwt from 'jsonwebtoken';
-import Redis from 'ioredis';
+import { AccessTokenVerifier, RedisKeys } from '@repo/shared';
 import { JwtAuthGuard } from './jwt-auth.guard';
 
 const SECRET = 'test-secret';
@@ -32,10 +31,11 @@ describe('JwtAuthGuard', () => {
 
   beforeEach(() => {
     redis = { exists: jest.fn().mockResolvedValue(0) };
-    const config = {
-      get: jest.fn((key: string) => (key === 'JWT_SECRET' ? SECRET : undefined)),
-    } as unknown as ConfigService;
-    guard = new JwtAuthGuard(config, redis as unknown as Redis);
+    const verifier = new AccessTokenVerifier(
+      SECRET,
+      async (jti) => (await redis.exists(RedisKeys.accessBlacklist(jti))) === 1,
+    );
+    guard = new JwtAuthGuard(verifier);
   });
 
   it('lets a valid, non-blacklisted token through and attaches the payload', async () => {

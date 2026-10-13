@@ -28,7 +28,7 @@ export class AccessTokenVerifier {
 
     let decoded: jwt.JwtPayload;
     try {
-      const result = jwt.verify(token, this.secret);
+      const result = jwt.verify(token, this.secret, { algorithms: ['HS256'] });
       if (typeof result === "string") return { ok: false, reason: "invalid" };
       decoded = result;
     } catch {

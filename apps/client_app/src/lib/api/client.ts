@@ -1,3 +1,4 @@
+import { getAccessToken, refreshTokens } from '../auth/refresh';
 import { config } from '../config';
 
 /** Error thrown for any non-2xx response or network failure. */
@@ -19,6 +20,7 @@ export interface ApiRequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   /** JWT attached as `Authorization: Bearer <token>`. */
   token?: string | null;
+  /** JSON-serialized, except `FormData`, which is sent as multipart as-is. */
   body?: unknown;
   query?: Record<string, string | number | boolean | undefined | null>;
   signal?: AbortSignal;
@@ -65,32 +67,35 @@ function errorMessage(payload: unknown): string | undefined {
   return undefined;
 }
 
-/**
- * Typed `fetch` wrapper. Attaches the caller's JWT and parses JSON, throwing an
- * {@link ApiError} on any non-2xx status or network failure so UI error states can
- * render uniformly.
- */
-export async function apiRequest<T>(
+async function send(
   baseUrl: string,
   path: string,
-  options: ApiRequestOptions = {},
-): Promise<T> {
-  const { method = 'GET', token, body, query, signal } = options;
+  options: ApiRequestOptions,
+  token: string | null | undefined,
+): Promise<Response> {
+  const { method = 'GET', body, query, signal } = options;
+  const isFormData =
+    typeof FormData !== 'undefined' && body instanceof FormData;
 
   const headers: Record<string, string> = { Accept: 'application/json' };
-  if (body !== undefined) {
+  // FormData sets its own multipart Content-Type (with boundary).
+  if (body !== undefined && !isFormData) {
     headers['Content-Type'] = 'application/json';
   }
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   }
 
-  let response: Response;
   try {
-    response = await fetch(buildUrl(baseUrl, path, query), {
+    return await fetch(buildUrl(baseUrl, path, query), {
       method,
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body:
+        body === undefined
+          ? undefined
+          : isFormData
+            ? body
+            : JSON.stringify(body),
       signal,
       cache: 'no-store',
     });
@@ -99,17 +104,60 @@ export async function apiRequest<T>(
     // so the retry UI can treat it the same as a 5xx.
     throw new ApiError('Unable to reach the service', 0, cause);
   }
+}
 
+async function toApiError(response: Response): Promise<ApiError> {
   const payload = await parseBody(response);
-  if (!response.ok) {
-    throw new ApiError(
-      errorMessage(payload) ?? `Request failed with status ${response.status}`,
-      response.status,
-      payload,
-    );
+  return new ApiError(
+    errorMessage(payload) ?? `Request failed with status ${response.status}`,
+    response.status,
+    payload,
+  );
+}
+
+/**
+ * Token to retry a 401 with: the current one when another request already
+ * refreshed past the token we sent, otherwise a freshly refreshed one.
+ */
+async function retryToken(sentToken: string): Promise<string | null> {
+  const current = getAccessToken();
+  if (current && current !== sentToken) {
+    return current;
+  }
+  try {
+    return await refreshTokens();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Typed `fetch` wrapper. Attaches the caller's JWT and parses JSON, throwing an
+ * {@link ApiError} on any non-2xx status or network failure so UI error states can
+ * render uniformly. A 401 on a request that carried a token triggers one token
+ * refresh and a single retry with the new token.
+ */
+export async function apiRequest<T>(
+  baseUrl: string,
+  path: string,
+  options: ApiRequestOptions = {},
+): Promise<T> {
+  const { token } = options;
+
+  let response = await send(baseUrl, path, options, token);
+  if (response.status === 401 && token) {
+    const nextToken = await retryToken(token);
+    if (!nextToken) {
+      throw await toApiError(response);
+    }
+    response = await send(baseUrl, path, options, nextToken);
   }
 
-  return payload as T;
+  if (!response.ok) {
+    throw await toApiError(response);
+  }
+
+  return (await parseBody(response)) as T;
 }
 
 /** Request against the core service (`CORE_SERVICE_URL`). */

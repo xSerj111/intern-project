@@ -1,4 +1,5 @@
 import { ICryptoService } from '../domain/interfaces/crypto.service.interface';
+import { randomUUID } from 'crypto';
 import { RedisKeys, UnauthorizedError, WinstonLogger, secondsUntil } from '@repo/shared';
 import { UsersService } from './users.service';
 import { AuthUser } from '../domain/entities/auth-user.entity';
@@ -10,6 +11,7 @@ import {
 } from '../domain/interfaces/jwt.service.interface';
 import { SessionContext } from '../domain/interfaces/session-context';
 import { IOAuthService } from '../domain/interfaces/oauth.service.interface';
+import { ISessionRevocationPublisher } from '../domain/interfaces/session-revocation-publisher';
 
 export interface LoginResult {
   accessToken: string;
@@ -25,9 +27,14 @@ export class AuthService {
     private readonly cryptoService: ICryptoService,
     private readonly jwtService: IJwtService,
     private readonly oauthService: IOAuthService,
+    private readonly sessionRevocationPublisher: ISessionRevocationPublisher,
   ) {}
 
-  async login(email: string, password: string, ctx: SessionContext): Promise<LoginResult> {
+  async login(
+    email: string,
+    password: string,
+    ctx: SessionContext,
+  ): Promise<LoginResult> {
     const user = await this.usersService.findByEmailWithPassword(email);
 
     if (!user || !user.passwordHash) {
@@ -46,7 +53,7 @@ export class AuthService {
     }
 
     this.logger.debug('User logged in', { props: { userId: user.id } });
-    return this.generateTokensAndSession(user, ctx);
+    return this.generateTokensAndSession(user, ctx, randomUUID());
   }
 
   async loginWithGoogle(idToken: string, ctx: SessionContext): Promise<LoginResult> {
@@ -62,7 +69,7 @@ export class AuthService {
         props: { userId: user.id },
       });
 
-      return this.generateTokensAndSession(user, ctx);
+      return this.generateTokensAndSession(user, ctx, randomUUID());
     } catch (error) {
       this.logger.error('Google OAuth verification failed', { error });
       throw new UnauthorizedError('Invalid Google token');
@@ -114,7 +121,7 @@ export class AuthService {
       throw new UnauthorizedError('Invalid or expired refresh token');
     }
 
-    let session: { userId?: string };
+    let session: { userId?: string; sid?: string };
     try {
       session = JSON.parse(rawSession);
     } catch {
@@ -136,7 +143,7 @@ export class AuthService {
 
     const user = await this.usersService.getUserById(payload.sub);
 
-    return this.generateTokensAndSession(user as AuthUser, ctx);
+    return this.generateTokensAndSession(user, ctx, session.sid);
   }
 
   async logout(refreshToken: string, accessToken?: string): Promise<void> {
@@ -153,16 +160,16 @@ export class AuthService {
       this.logger.debug('User logged out successfully, refresh token revoked');
     }
 
-    if (!accessToken) return;
-
-    let access: JwtPayload;
-    try {
-      access = this.jwtService.verifyAccessToken(accessToken);
-    } catch {
-      return; // Already invalid or expired, nothing to blacklist.
+    let access: JwtPayload | null = null;
+    if (accessToken) {
+      try {
+        access = this.jwtService.verifyAccessToken(accessToken);
+      } catch {
+        // Already invalid or expired, nothing to blacklist.
+      }
     }
 
-    if (access.jti && access.exp) {
+    if (access?.jti && access.exp) {
       const ttl = secondsUntil(access.exp);
       if (ttl > 0) {
         await this.cacheService.setWithExpiry(
@@ -171,6 +178,20 @@ export class AuthService {
           ttl,
         );
       }
+    }
+
+    // Notify only after the blacklists are written; a publish failure must not fail logout.
+    const userId = refresh?.sub ?? access?.sub;
+    if (!userId) return;
+    try {
+      await this.sessionRevocationPublisher.publish({
+        userId,
+        sid: refresh?.sid ?? access?.sid ?? null,
+        jti: access?.jti ?? null,
+        revokedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      this.logger.error('Failed to publish session revocation', { error });
     }
   }
 
@@ -184,20 +205,25 @@ export class AuthService {
   private async generateTokensAndSession(
     user: AuthUser,
     ctx: SessionContext,
+    sid?: string,
   ): Promise<LoginResult> {
     const accessToken = this.jwtService.signAccessToken({
       sub: user.id,
       email: user.email,
+      ...(sid && { sid }),
     });
 
-    const { token: refreshToken, jti, expiresAt } = this.jwtService.signRefreshToken(
-      user.id,
-    );
+    const {
+      token: refreshToken,
+      jti,
+      expiresAt,
+    } = this.jwtService.signRefreshToken(user.id, sid);
 
     await this.cacheService.setWithExpiry(
       RedisKeys.refreshSession(jti),
       JSON.stringify({
         userId: user.id,
+        ...(sid && { sid }),
         ipAddress: ctx.ipAddress,
         userAgent: ctx.userAgent,
         expiresAt: expiresAt.toISOString(),

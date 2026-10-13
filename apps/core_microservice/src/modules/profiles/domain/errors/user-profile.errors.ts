@@ -1,4 +1,4 @@
-import { DomainError } from '@repo/shared';
+import { DomainError, EntityNotFoundError } from '@repo/shared';
 
 export class InvalidDisplayNameError extends DomainError {
   constructor(value: string) {
@@ -9,5 +9,11 @@ export class InvalidDisplayNameError extends DomainError {
 export class InvalidProfileBioError extends DomainError {
   constructor(length: number) {
     super(`Profile bio is too long: ${length} characters (max 160).`);
+  }
+}
+
+export class UserNotFoundError extends EntityNotFoundError {
+  constructor(userIds: string[]) {
+    super('User', { userIds });
   }
 }
