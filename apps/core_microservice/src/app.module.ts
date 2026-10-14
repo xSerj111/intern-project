@@ -14,6 +14,7 @@ import { AssetsModule } from './modules/assets/assets.module';
 import { FollowsModule } from './modules/follows/follows.module';
 import { LikesModule } from './modules/likes/likes.module';
 import { InternalEventsModule } from './modules/internal-events/internal-events.module';
+import { NotificationsRelayModule } from './modules/notifications-relay/notifications-relay.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { InternalEventsModule } from './modules/internal-events/internal-events.
     FollowsModule,
     LikesModule,
     InternalEventsModule,
+    NotificationsRelayModule,
   ],
 })
 export class AppModule {}

@@ -1,5 +1,11 @@
 import { Test, type TestingModule } from '@nestjs/testing';
-import { LoggerKey, UniqueConstraintViolationError } from '@repo/shared';
+import {
+  LoggerKey,
+  RoutingKeys,
+  UniqueConstraintViolationError,
+} from '@repo/shared';
+import { OUTBOX_PORT } from '../../common/messaging/outbox.port';
+import { USER_DIRECTORY_PORT } from '../profiles/domain/interfaces/user-directory.port';
 import { MessagesService } from './messages.service';
 import { Chat } from './domain/entities/chat.entity';
 import {
@@ -25,6 +31,7 @@ import type { SendMessageDto } from './dto/send-message.dto';
 
 const ME = '11111111-1111-4111-8111-111111111111';
 const OTHER = '22222222-2222-4222-8222-222222222222';
+const THIRD = '77777777-7777-4777-8777-777777777777';
 const STRANGER = '33333333-3333-4333-8333-333333333333';
 const CHAT_ID = '44444444-4444-4444-8444-444444444444';
 const CLIENT_ID = '55555555-5555-4555-8555-555555555555';
@@ -62,6 +69,13 @@ function attachmentFile(
     originalName: `${assetId}.bin`,
   };
 }
+
+const SENDER = {
+  userId: ME,
+  username: 'me',
+  displayName: 'Me',
+  avatarUrl: null,
+};
 
 function makeChat(lastSeq = 4): Chat {
   const chat = Chat.createDirect(ME, OTHER);
@@ -126,6 +140,8 @@ describe('MessagesService', () => {
     presign: jest.fn(),
     deleteObjects: jest.fn(),
   };
+  const outbox = { add: jest.fn() };
+  const directory = { getUsers: jest.fn() };
   const logger = {
     debug: jest.fn(),
     info: jest.fn(),
@@ -170,6 +186,8 @@ describe('MessagesService', () => {
     });
     messageRepo.findAttachedAssetIds.mockResolvedValue([]);
     messageRepo.insertAttachments.mockResolvedValue(undefined);
+    outbox.add.mockResolvedValue({});
+    directory.getUsers.mockResolvedValue(new Map([[ME, SENDER]]));
     storage.findAssets.mockResolvedValue([]);
     storage.softDeleteAssets.mockResolvedValue(undefined);
     storage.deleteObjects.mockResolvedValue(undefined);
@@ -187,6 +205,8 @@ describe('MessagesService', () => {
         { provide: MESSAGE_REPOSITORY, useValue: messageRepo },
         { provide: CHAT_REALTIME_PORT, useValue: realtime },
         { provide: ATTACHMENT_STORAGE_PORT, useValue: storage },
+        { provide: OUTBOX_PORT, useValue: outbox },
+        { provide: USER_DIRECTORY_PORT, useValue: directory },
         { provide: LoggerKey, useValue: logger },
       ],
     }).compile();
@@ -308,6 +328,176 @@ describe('MessagesService', () => {
 
       await expect(service.send(ME, CHAT_ID, dto)).rejects.toBe(error);
       expect(realtime.emitToChat).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('send alerts', () => {
+    function useGroup(): void {
+      const { chat: group } = Chat.createGroup(ME, 'Team', [OTHER, THIRD]);
+      group.id = CHAT_ID;
+      group.lastSeq = 4;
+      for (const p of group.participants) p.chatId = CHAT_ID;
+      chatRepo.findById.mockResolvedValue(group);
+      chatRepo.findByIdForUpdate.mockResolvedValue(group);
+    }
+
+    function alertedRows(): Array<{ recipientId: string }> {
+      return outbox.add.mock.calls.map(
+        (c: unknown[]) => c[1] as { recipientId: string },
+      );
+    }
+
+    it('writes one outbox row per non-viewing recipient inside the tx and alerts after commit', async () => {
+      useGroup();
+      const committedAtAlert: boolean[] = [];
+      realtime.emitToUser.mockImplementation(() => {
+        committedAtAlert.push(committed);
+      });
+      const committedAtOutbox: boolean[] = [];
+      outbox.add.mockImplementation(() => {
+        committedAtOutbox.push(committed);
+        return Promise.resolve({});
+      });
+
+      const result = await service.send(ME, CHAT_ID, dto);
+
+      const expected = (recipientId: string) => ({
+        actor: SENDER,
+        recipientId,
+        chatId: CHAT_ID,
+        messageId: result.message.id,
+        chatTitle: 'Team',
+        preview: 'hi',
+      });
+      expect(outbox.add).toHaveBeenCalledTimes(2);
+      expect(outbox.add).toHaveBeenCalledWith(
+        RoutingKeys.CHAT_MESSAGE_ALERTED,
+        expected(OTHER),
+        tx,
+      );
+      expect(outbox.add).toHaveBeenCalledWith(
+        RoutingKeys.CHAT_MESSAGE_ALERTED,
+        expected(THIRD),
+        tx,
+      );
+      expect(committedAtOutbox).toEqual([false, false]);
+      expect(realtime.emitToUser).toHaveBeenCalledTimes(2);
+      expect(realtime.emitToUser).toHaveBeenCalledWith(OTHER, 'chat:alert', {
+        actor: SENDER,
+        chatId: CHAT_ID,
+        messageId: result.message.id,
+        chatTitle: 'Team',
+        preview: 'hi',
+      });
+      expect(committedAtAlert).toEqual([true, true]);
+    });
+
+    it('skips a recipient who is viewing the chat for both outbox and socket alert', async () => {
+      useGroup();
+      realtime.isUserViewingChat.mockImplementation(
+        (userId: string) => userId === OTHER,
+      );
+
+      await service.send(ME, CHAT_ID, dto);
+
+      expect(realtime.isUserViewingChat).toHaveBeenCalledWith(OTHER, CHAT_ID);
+      expect(alertedRows()).toEqual([
+        expect.objectContaining({ recipientId: THIRD }),
+      ]);
+      expect(realtime.emitToUser).toHaveBeenCalledTimes(1);
+      expect(realtime.emitToUser).toHaveBeenCalledWith(
+        THIRD,
+        'chat:alert',
+        expect.anything(),
+      );
+    });
+
+    it('never alerts the sender and leaves chatTitle null for a direct chat', async () => {
+      await service.send(ME, CHAT_ID, dto);
+
+      expect(alertedRows()).toEqual([
+        expect.objectContaining({ recipientId: OTHER, chatTitle: null }),
+      ]);
+      expect(realtime.emitToUser).not.toHaveBeenCalledWith(
+        ME,
+        expect.anything(),
+        expect.anything(),
+      );
+    });
+
+    it('does not alert a participant who left', async () => {
+      useGroup();
+      const group = (await chatRepo.findById()) as Chat;
+      group.participants.find((p) => p.userId === THIRD)!.leftAt = new Date();
+
+      await service.send(ME, CHAT_ID, dto);
+
+      expect(alertedRows().map((r) => r.recipientId)).toEqual([OTHER]);
+    });
+
+    it('truncates the preview to 100 characters', async () => {
+      await service.send(ME, CHAT_ID, {
+        clientMessageId: CLIENT_ID,
+        content: 'x'.repeat(150),
+      });
+
+      const row = alertedRows()[0] as unknown as { preview: string };
+      expect(row.preview).toBe('x'.repeat(100));
+    });
+
+    it('uses "📎 Attachment" as the preview of an attachment-only message', async () => {
+      storage.findAssets.mockResolvedValue([storedAsset(ASSET_1)]);
+
+      await service.send(ME, CHAT_ID, {
+        clientMessageId: CLIENT_ID,
+        attachmentIds: [ASSET_1],
+      });
+
+      expect(realtime.emitToUser).toHaveBeenCalledWith(
+        OTHER,
+        'chat:alert',
+        expect.objectContaining({ preview: '📎 Attachment' }),
+      );
+      expect(alertedRows()[0]).toEqual(
+        expect.objectContaining({ preview: '📎 Attachment' }),
+      );
+    });
+
+    it('writes no outbox row and no alert for an idempotent replay', async () => {
+      messageRepo.findByClientMessageId.mockResolvedValue(existingMessage());
+
+      await service.send(ME, CHAT_ID, dto);
+
+      expect(outbox.add).not.toHaveBeenCalled();
+      expect(realtime.emitToUser).not.toHaveBeenCalled();
+      expect(directory.getUsers).not.toHaveBeenCalled();
+    });
+
+    it('rolls back without alerting when the outbox write fails', async () => {
+      outbox.add.mockRejectedValue(new Error('db'));
+
+      await expect(service.send(ME, CHAT_ID, dto)).rejects.toThrow('db');
+      expect(realtime.emitToUser).not.toHaveBeenCalled();
+    });
+
+    it('skips alerts when the sender has no profile', async () => {
+      directory.getUsers.mockResolvedValue(new Map());
+
+      const result = await service.send(ME, CHAT_ID, dto);
+
+      expect(result.created).toBe(true);
+      expect(outbox.add).not.toHaveBeenCalled();
+      expect(realtime.emitToUser).not.toHaveBeenCalled();
+    });
+
+    it('still resolves when the chat:alert emit fails', async () => {
+      realtime.emitToUser.mockImplementation(() => {
+        throw new Error('socket down');
+      });
+
+      const result = await service.send(ME, CHAT_ID, dto);
+
+      expect(result.created).toBe(true);
     });
   });
 

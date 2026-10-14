@@ -1,6 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import {
+  AMQP_CONNECTION,
   AmqpConnectionLifecycle,
   amqpConnectionProvider,
 } from './amqp-connection.provider';
@@ -37,6 +38,6 @@ export class OutboxRelayModule {}
     { provide: EVENT_BUS, useClass: AmqpEventBus },
     { provide: OUTBOX_PORT, useClass: TypeOrmOutboxAdapter },
   ],
-  exports: [OUTBOX_PORT, EVENT_BUS],
+  exports: [OUTBOX_PORT, EVENT_BUS, AMQP_CONNECTION],
 })
 export class MessagingModule {}

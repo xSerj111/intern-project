@@ -7,9 +7,21 @@ import type {
 } from '@repo/contracts';
 import {
   LoggerKey,
+  MESSAGE_PREVIEW_MAX_LENGTH,
+  RoutingKeys,
   UniqueConstraintViolationError,
+  type ActorSnapshot,
+  type ChatMessageAlertedPayload,
   type Logger,
 } from '@repo/shared';
+import {
+  OUTBOX_PORT,
+  type IOutboxPort,
+} from '../../common/messaging/outbox.port';
+import {
+  USER_DIRECTORY_PORT,
+  type IUserDirectoryPort,
+} from '../profiles/domain/interfaces/user-directory.port';
 import type { Chat } from './domain/entities/chat.entity';
 import type { ChatParticipant } from './domain/entities/chat-participant.entity';
 import {
@@ -50,6 +62,9 @@ import type { MessageChangesQueryDto } from './dto/message-changes-query.dto';
 import type { MessageResponseDto } from './dto/message-response.dto';
 import type { SendMessageDto } from './dto/send-message.dto';
 
+/** Preview of a message that has no text (FR-028). */
+const ATTACHMENT_PREVIEW = '📎 Attachment';
+
 /** Result of a send: `created: false` means an idempotent replay (HTTP 200, not 201). */
 export interface SendMessageResult {
   message: MessageResponseDto;
@@ -65,6 +80,9 @@ export class MessagesService {
     @Inject(CHAT_REALTIME_PORT) private readonly realtime: IChatRealtimePort,
     @Inject(ATTACHMENT_STORAGE_PORT)
     private readonly storage: IAttachmentStoragePort,
+    @Inject(OUTBOX_PORT) private readonly outbox: IOutboxPort,
+    @Inject(USER_DIRECTORY_PORT)
+    private readonly directory: IUserDirectoryPort,
   ) {}
 
   /**
@@ -88,9 +106,12 @@ export class MessagesService {
     if (existing) return this.replay(existing);
 
     const attachmentIds = dto.attachmentIds ?? [];
+    // One profile lookup per send, outside the tx. Null: no alerts (the send still succeeds).
+    const actor = await this.loadActor(me);
     let message: Message;
+    let alerts: ChatMessageAlertedPayload[] = [];
     try {
-      message = await this.chats.runInTransaction(async (tx) => {
+      ({ message, alerts } = await this.chats.runInTransaction(async (tx) => {
         chat.assertCanPost(me);
         const assets = await this.loadAttachmentAssets(attachmentIds, tx);
         const candidates = await this.toCandidates(attachmentIds, assets, tx);
@@ -112,8 +133,14 @@ export class MessagesService {
         // Targeted UPDATE: a cascading chat save would rewind other
         // participants' concurrent read pointers.
         await this.chats.advanceReadSeq(chatId, me, seq, tx);
-        return inserted;
-      });
+        // USER messages only (this path never creates SYSTEM ones). The outbox
+        // rows commit or roll back with the message.
+        const rows = actor ? this.alertsFor(chat, inserted, actor) : [];
+        for (const row of rows) {
+          await this.outbox.add(RoutingKeys.CHAT_MESSAGE_ALERTED, row, tx);
+        }
+        return { message: inserted, alerts: rows };
+      }));
     } catch (err: unknown) {
       if (!(err instanceof UniqueConstraintViolationError)) throw err;
       // Postgres aborted the tx, so re-read outside it.
@@ -132,7 +159,8 @@ export class MessagesService {
     });
     this.emitToChat(chatId, 'message:new', { message: response });
     this.emitTypingStopped(chatId, me);
-    // US6: alert recipients not viewing the chat.
+    // Same set as the outbox rows: a viewer gets neither the socket alert nor the email.
+    for (const alert of alerts) this.emitChatAlert(alert);
     return { message: response, created: true };
   }
 
@@ -469,6 +497,78 @@ export class MessagesService {
       this.logger.warn(`${event} emit failed`, {
         props: {
           chatId,
+          error: err instanceof Error ? err.message : String(err),
+        },
+      });
+    }
+  }
+
+  /**
+   * One alert per active recipient other than the sender with no socket
+   * viewing the chat, decided now (research §10). The set feeds both the
+   * outbox rows (email only, FR-034) and the post-commit `chat:alert`.
+   */
+  private alertsFor(
+    chat: Chat,
+    message: Message,
+    actor: ActorSnapshot,
+  ): ChatMessageAlertedPayload[] {
+    const preview = this.previewOf(message);
+    return chat
+      .activeParticipants()
+      .map((p) => p.userId)
+      .filter(
+        (userId) =>
+          userId !== message.authorId &&
+          !this.realtime.isUserViewingChat(userId, chat.id),
+      )
+      .map((recipientId) => ({
+        actor,
+        recipientId,
+        chatId: chat.id,
+        messageId: message.id,
+        chatTitle: chat.title,
+        preview,
+      }));
+  }
+
+  /** Text up to 100 chars (never splitting a surrogate pair), else the attachment label. */
+  private previewOf(message: Message): string {
+    const text = message.content ?? '';
+    if (text.length === 0) return ATTACHMENT_PREVIEW;
+    let end = Math.min(text.length, MESSAGE_PREVIEW_MAX_LENGTH);
+    if (end < text.length) {
+      const last = text.charCodeAt(end - 1);
+      if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+    }
+    return text.slice(0, end);
+  }
+
+  private async loadActor(userId: string): Promise<ActorSnapshot | null> {
+    const user = (await this.directory.getUsers([userId])).get(userId);
+    if (!user) {
+      this.logger.warn('Skipping chat alerts: sender has no profile', {
+        props: { userId },
+      });
+      return null;
+    }
+    return { ...user };
+  }
+
+  // Post-commit, best-effort: the outbox row still drives the email.
+  private emitChatAlert(alert: ChatMessageAlertedPayload): void {
+    try {
+      this.realtime.emitToUser(alert.recipientId, 'chat:alert', {
+        chatId: alert.chatId,
+        messageId: alert.messageId,
+        actor: alert.actor,
+        chatTitle: alert.chatTitle,
+        preview: alert.preview,
+      });
+    } catch (err: unknown) {
+      this.logger.warn('chat:alert emit failed', {
+        props: {
+          chatId: alert.chatId,
           error: err instanceof Error ? err.message : String(err),
         },
       });

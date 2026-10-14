@@ -1,6 +1,7 @@
 // env.ts fails fast on these at import time, so set them before anything loads it.
 process.env.CORE_SERVICE_URL = 'http://localhost:3001';
 process.env.AUTH_ALLOWED_ORIGINS = 'http://localhost:3000';
+process.env.INTERNAL_API_TOKEN = 'x'.repeat(32);
 
 import { RedisKeys, UnauthorizedError, WinstonLogger } from '@repo/shared';
 import { AuthService } from './auth.service';
