@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ChatsService } from './chats.service';
 import { ChatsController } from './chats.controller';
+import { ChatMembershipService } from './chat-membership.service';
 import { MessagesService } from './messages.service';
 import { MessagesController } from './messages.controller';
 import { Chat } from './domain/entities/chat.entity';
@@ -35,6 +36,7 @@ import { ProfilesModule } from '../profiles/profiles.module';
   providers: [
     ChatsService,
     MessagesService,
+    ChatMembershipService,
     { provide: CHAT_REPOSITORY, useClass: ChatRepository },
     { provide: MESSAGE_REPOSITORY, useClass: MessageRepository },
     ChatsGateway,

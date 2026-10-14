@@ -19,3 +19,8 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.members {
+  margin-left: auto;
+  flex: 0 0 auto;
+}

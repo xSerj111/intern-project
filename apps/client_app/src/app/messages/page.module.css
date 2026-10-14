@@ -17,3 +17,8 @@
   font-size: 1.75rem;
   letter-spacing: -0.02em;
 }
+
+.actions {
+  display: flex;
+  gap: 0.5rem;
+}

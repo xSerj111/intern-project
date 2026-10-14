@@ -402,6 +402,27 @@ export function handleChatUpsert(
   void client.invalidateQueries({ queryKey: detailKey, exact: true });
 }
 
+/**
+ * `chat:removed`: the user lost access (removed, or left). Drops the chat from the
+ * list and from the detail and messages caches. A page that still observes the chat
+ * refetches it, gets the 404 a non-participant sees, and shows its not-found state.
+ */
+export function handleChatRemoved(
+  client: QueryClient,
+  { chatId }: { chatId: string; reason: 'removed' | 'left' },
+): void {
+  client.setQueryData<ConversationListData>(chatKeys.list(), (list) =>
+    list ? { ...list, items: list.items.filter((c) => c.id !== chatId) } : list,
+  );
+  stateOf(client).missedWhileLoading.delete(chatId);
+  for (const key of [chatKeys.detail(chatId), chatKeys.messages(chatId)]) {
+    void client.cancelQueries({ queryKey: key, exact: true });
+    client.removeQueries({ queryKey: key, exact: true, type: 'inactive' });
+    // Observed queries stay until their page unmounts; refetching yields the 404.
+    void client.invalidateQueries({ queryKey: key, exact: true });
+  }
+}
+
 /** `chat:read`: the read pointer moved in some session; take its unread count. */
 export function handleChatRead(client: QueryClient, state: IReadState): void {
   patchConversation(client, state.chatId, (summary) => ({
@@ -553,6 +574,10 @@ export function registerChatCacheHandlers(
   const onChatUpsert = (payload: { conversation: IConversationSummary }) =>
     handleChatUpsert(client, payload);
   const onChatRead = (state: IReadState) => handleChatRead(client, state);
+  const onChatRemoved = (payload: {
+    chatId: string;
+    reason: 'removed' | 'left';
+  }) => handleChatRemoved(client, payload);
   const onConnect = () => {
     void catchUpAllChats(client).catch(() => undefined);
   };
@@ -560,12 +585,14 @@ export function registerChatCacheHandlers(
   socket.on('message:new', onMessageNew);
   socket.on('chat:upsert', onChatUpsert);
   socket.on('chat:read', onChatRead);
+  socket.on('chat:removed', onChatRemoved);
   socket.on('connect', onConnect);
 
   return () => {
     socket.off('message:new', onMessageNew);
     socket.off('chat:upsert', onChatUpsert);
     socket.off('chat:read', onChatRead);
+    socket.off('chat:removed', onChatRemoved);
     socket.off('connect', onConnect);
   };
 }

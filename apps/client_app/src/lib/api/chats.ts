@@ -1,4 +1,6 @@
 import type {
+  IAddMembersRequest,
+  ICreateGroupChatRequest,
   IConversationDetail,
   IConversationSummary,
   ICursorPage,
@@ -7,6 +9,7 @@ import type {
   IMarkReadRequest,
   IMessage,
   IMessageChangesQuery,
+  IRenameGroupRequest,
   IReadState,
   ISendMessageRequest,
 } from '@repo/contracts';
@@ -110,5 +113,83 @@ export function markRead(
     token,
     signal,
     body: { seq } satisfies IMarkReadRequest,
+  });
+}
+
+/** Create a group (`POST /chats/groups`, 201): `memberIds` 2-99, excluding the caller. */
+export function createGroupChat(
+  body: ICreateGroupChatRequest,
+  { token, signal }: Auth = {},
+): Promise<IConversationDetail> {
+  return coreApi<IConversationDetail>('/chats/groups', {
+    method: 'POST',
+    token,
+    signal,
+    body,
+  });
+}
+
+/** Rename a group (`PATCH /chats/:chatId`, admin only). */
+export function renameGroup(
+  chatId: string,
+  title: IRenameGroupRequest['title'],
+  { token, signal }: Auth = {},
+): Promise<IConversationDetail> {
+  return coreApi<IConversationDetail>(`/chats/${chatId}`, {
+    method: 'PATCH',
+    token,
+    signal,
+    body: { title } satisfies IRenameGroupRequest,
+  });
+}
+
+/** Add members (`POST /chats/:chatId/members`, admin only, group total <= 100). */
+export function addMembers(
+  chatId: string,
+  userIds: IAddMembersRequest['userIds'],
+  { token, signal }: Auth = {},
+): Promise<IConversationDetail> {
+  return coreApi<IConversationDetail>(`/chats/${chatId}/members`, {
+    method: 'POST',
+    token,
+    signal,
+    body: { userIds } satisfies IAddMembersRequest,
+  });
+}
+
+/** Remove another member (`DELETE /chats/:chatId/members/:userId`, 204, admin only). */
+export function removeMember(
+  chatId: string,
+  userId: string,
+  { token, signal }: Auth = {},
+): Promise<void> {
+  return coreApi<void>(`/chats/${chatId}/members/${userId}`, {
+    method: 'DELETE',
+    token,
+    signal,
+  });
+}
+
+/** Make a member an admin (`POST /chats/:chatId/members/:userId/promote`, admin only). */
+export function promoteMember(
+  chatId: string,
+  userId: string,
+  { token, signal }: Auth = {},
+): Promise<IConversationDetail> {
+  return coreApi<IConversationDetail>(
+    `/chats/${chatId}/members/${userId}/promote`,
+    { method: 'POST', token, signal },
+  );
+}
+
+/** Leave a group (`POST /chats/:chatId/leave`, 204). */
+export function leaveChat(
+  chatId: string,
+  { token, signal }: Auth = {},
+): Promise<void> {
+  return coreApi<void>(`/chats/${chatId}/leave`, {
+    method: 'POST',
+    token,
+    signal,
   });
 }

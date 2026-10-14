@@ -2,13 +2,14 @@
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
-import { useEffect, useRef } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { useEffect, useRef, useState } from 'react';
 
 import {
   ErrorState,
   LoadingState,
 } from '../../../components/common/async-state';
+import { GroupMembersPanel } from '../../../components/chat/group-members-panel';
 import {
   MessageComposer,
   useSendMessage,
@@ -35,6 +36,8 @@ export default function ChatPage() {
   const chatId = params.chatId;
   const { accessToken, isHydrated, user } = useAuth();
   const queryClient = useQueryClient();
+  const router = useRouter();
+  const [membersOpen, setMembersOpen] = useState(false);
   const userId = user?.id;
 
   const detail = useQuery({
@@ -143,11 +146,33 @@ export default function ChatPage() {
           Back
         </Link>
         <h1 className={styles.title}>{title}</h1>
+        {chat.type === 'GROUP' && (
+          <button
+            type="button"
+            className={`button button--ghost ${styles.members}`}
+            aria-expanded={membersOpen}
+            onClick={() => setMembersOpen((open) => !open)}
+          >
+            Members ({chat.participants.length})
+          </button>
+        )}
       </div>
+
+      {chat.type === 'GROUP' && membersOpen && (
+        <GroupMembersPanel
+          chat={chat}
+          currentUserId={userId}
+          onLeft={() => {
+            queryClient.removeQueries({ queryKey: chatKeys.detail(chatId) });
+            router.replace('/messages');
+          }}
+        />
+      )}
 
       <MessageList
         messages={messages.data.items}
         currentUserId={userId}
+        participants={chat.participants}
         hasMore={messages.data.hasMore}
         onLoadOlder={() => loadOlderMessages(queryClient, chatId)}
         onRetry={retry}

@@ -8,14 +8,76 @@ import type { IChatUser, IFollowResponse } from '@repo/contracts';
 
 import { chatKeys, createDirectChat } from '../../lib/api/chats';
 import { coreApi } from '../../lib/api/client';
-import { searchProfiles } from '../../lib/api/profile';
+import { getUsersByIds, searchProfiles } from '../../lib/api/profile';
 import { useAuth } from '../../lib/auth/auth-context';
 
 import styles from './new-direct-chat-dialog.module.css';
 
-interface Suggestion {
+export interface Suggestion {
   userId: string;
   relation: string;
+  /** Resolved display name; undefined while loading or for unknown users. */
+  displayName?: string;
+  username?: string;
+}
+
+/**
+ * Followers/following of the caller (ids only from the follows API), with names
+ * resolved through one batched `getUsersByIds` call.
+ */
+export function useFollowSuggestions(enabled: boolean) {
+  const { accessToken, user } = useAuth();
+  const me = user?.id;
+
+  const base = useQuery({
+    queryKey: ['chats', 'suggestions', me],
+    queryFn: async ({ signal }): Promise<Suggestion[]> => {
+      const [following, followers] = await Promise.all([
+        coreApi<IFollowResponse[]>(`/follows/${me}/following`, {
+          token: accessToken,
+          signal,
+        }),
+        coreApi<IFollowResponse[]>(`/follows/${me}/followers`, {
+          token: accessToken,
+          signal,
+        }),
+      ]);
+      const seen = new Set<string>();
+      const out: Suggestion[] = [];
+      const add = (userId: string, relation: string) => {
+        if (userId !== me && !seen.has(userId)) {
+          seen.add(userId);
+          out.push({ userId, relation });
+        }
+      };
+      following.forEach((f) => add(f.followingId, 'Following'));
+      followers.forEach((f) => add(f.followerId, 'Follower'));
+      return out;
+    },
+    enabled: enabled && Boolean(accessToken) && Boolean(me),
+  });
+
+  const ids = base.data?.map((s) => s.userId) ?? [];
+  const names = useQuery({
+    queryKey: ['chats', 'suggestion-names', ...ids],
+    queryFn: ({ signal }) => getUsersByIds(ids, accessToken, signal),
+    enabled: ids.length > 0 && Boolean(accessToken),
+    staleTime: 60_000,
+  });
+
+  const byId = new Map((names.data ?? []).map((u) => [u.userId, u]));
+  const data = base.data?.map((s) => ({
+    ...s,
+    displayName: byId.get(s.userId)?.displayName,
+    username: byId.get(s.userId)?.username,
+  }));
+
+  return {
+    data,
+    isPending: base.isPending,
+    isError: base.isError,
+    isSuccess: base.isSuccess,
+  };
 }
 
 interface NewDirectChatDialogProps {
@@ -57,33 +119,7 @@ export function NewDirectChatDialog({ onClose }: NewDirectChatDialogProps) {
     enabled: searching && Boolean(accessToken),
   });
 
-  const suggestions = useQuery({
-    queryKey: ['chats', 'suggestions', me],
-    queryFn: async ({ signal }): Promise<Suggestion[]> => {
-      const [following, followers] = await Promise.all([
-        coreApi<IFollowResponse[]>(`/follows/${me}/following`, {
-          token: accessToken,
-          signal,
-        }),
-        coreApi<IFollowResponse[]>(`/follows/${me}/followers`, {
-          token: accessToken,
-          signal,
-        }),
-      ]);
-      const seen = new Set<string>();
-      const out: Suggestion[] = [];
-      const add = (userId: string, relation: string) => {
-        if (userId !== me && !seen.has(userId)) {
-          seen.add(userId);
-          out.push({ userId, relation });
-        }
-      };
-      following.forEach((f) => add(f.followingId, 'Following'));
-      followers.forEach((f) => add(f.followerId, 'Follower'));
-      return out;
-    },
-    enabled: !searching && Boolean(accessToken) && Boolean(me),
-  });
+  const suggestions = useFollowSuggestions(!searching);
 
   const open = async (userId: string) => {
     setOpening(true);
@@ -181,7 +217,7 @@ export function NewDirectChatDialog({ onClose }: NewDirectChatDialogProps) {
             {suggestions.isError && (
               <span className="muted">Could not load suggestions.</span>
             )}
-            {suggestions.isSuccess && suggestions.data.length === 0 && (
+            {suggestions.isSuccess && (suggestions.data?.length ?? 0) === 0 && (
               <span className="muted">
                 Follow someone, or search above to find anyone.
               </span>
@@ -196,9 +232,12 @@ export function NewDirectChatDialog({ onClose }: NewDirectChatDialogProps) {
                     onClick={() => void open(s.userId)}
                   >
                     <span className={styles.optionName}>
-                      User {s.userId.slice(0, 8)}
+                      {s.displayName ?? `User ${s.userId.slice(0, 8)}`}
                     </span>
-                    <span className={styles.optionMeta}>{s.relation}</span>
+                    <span className={styles.optionMeta}>
+                      {s.username ? `@${s.username} · ` : ''}
+                      {s.relation}
+                    </span>
                   </button>
                 </li>
               ))}

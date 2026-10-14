@@ -12,7 +12,10 @@ import {
   isTypeOrmError,
 } from '@repo/shared';
 import { Chat, ChatType } from '../../domain/entities/chat.entity';
-import { ChatParticipant } from '../../domain/entities/chat-participant.entity';
+import {
+  ChatParticipant,
+  ParticipantRole,
+} from '../../domain/entities/chat-participant.entity';
 import { Message } from '../../domain/entities/message.entity';
 import { ChatNotFoundError } from '../../domain/errors/chat.errors';
 import type {
@@ -252,6 +255,76 @@ export class ChatRepository
       where: { userId, leftAt: IsNull() },
     });
     return rows.map((row) => row.chatId);
+  }
+
+  public async findByIdForUpdate(
+    chatId: string,
+    tx: ChatTransaction,
+  ): Promise<Chat | null> {
+    // Lock first: FOR UPDATE can't apply to the outer-joined participants.
+    const locked = await tx.query<Array<{ id: string }>>(
+      `SELECT id FROM chats WHERE id = $1 AND "deletedAt" IS NULL FOR UPDATE`,
+      [chatId],
+    );
+    if (locked.length === 0) return null;
+    return tx.getRepository(Chat).findOne({
+      where: { id: chatId },
+      relations: { participants: true },
+    });
+  }
+
+  public async upsertActiveMember(
+    chatId: string,
+    userId: string,
+    joinedSeq: number,
+    tx: ChatTransaction,
+  ): Promise<void> {
+    await tx.query(
+      `INSERT INTO chat_participants ("chatId", "userId", role, "joinedAt", "joinedSeq", "lastReadSeq", "leftAt")
+       VALUES ($1, $2, $3, now(), $4, $4, NULL)
+       ON CONFLICT ("chatId", "userId") DO UPDATE SET
+         role = EXCLUDED.role,
+         "joinedAt" = EXCLUDED."joinedAt",
+         "joinedSeq" = EXCLUDED."joinedSeq",
+         "lastReadSeq" = GREATEST(chat_participants."lastReadSeq", EXCLUDED."joinedSeq"),
+         "leftAt" = NULL,
+         "updatedAt" = now()`,
+      [chatId, userId, ParticipantRole.MEMBER, joinedSeq],
+    );
+  }
+
+  public async markParticipantLeft(
+    chatId: string,
+    userId: string,
+    tx: ChatTransaction,
+  ): Promise<void> {
+    await tx.query(
+      `UPDATE chat_participants SET "leftAt" = now(), "updatedAt" = now() WHERE "chatId" = $1 AND "userId" = $2 AND "leftAt" IS NULL`,
+      [chatId, userId],
+    );
+  }
+
+  public async setParticipantRole(
+    chatId: string,
+    userId: string,
+    role: ParticipantRole,
+    tx: ChatTransaction,
+  ): Promise<void> {
+    await tx.query(
+      `UPDATE chat_participants SET role = $3, "updatedAt" = now() WHERE "chatId" = $1 AND "userId" = $2 AND "leftAt" IS NULL`,
+      [chatId, userId, role],
+    );
+  }
+
+  public async setTitle(
+    chatId: string,
+    title: string,
+    tx: ChatTransaction,
+  ): Promise<void> {
+    await tx.query(
+      `UPDATE chats SET title = $2, "updatedAt" = now() WHERE id = $1`,
+      [chatId, title],
+    );
   }
 
   public override async save(chat: Chat, tx?: ChatTransaction): Promise<Chat> {

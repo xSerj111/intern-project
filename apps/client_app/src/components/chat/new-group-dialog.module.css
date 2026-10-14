@@ -1,0 +1,130 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 4rem 1rem 1rem;
+  background: rgb(0 0 0 / 0.4);
+}
+
+.dialog {
+  width: 100%;
+  max-width: 28rem;
+  max-height: 80vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1.25rem;
+  background: var(--innogram-surface);
+  border-radius: var(--innogram-radius);
+  box-shadow: var(--innogram-shadow);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.heading {
+  font-size: 1.25rem;
+}
+
+.subheading {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--innogram-muted);
+}
+
+.chips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.3rem 0.2rem 0.6rem;
+  background: var(--innogram-bg);
+  border: 1px solid var(--innogram-border);
+  border-radius: 999px;
+  font-size: 0.85rem;
+}
+
+.chipRemove {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--innogram-muted);
+  font: inherit;
+  line-height: 1;
+  padding: 0 0.3rem;
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.6rem 0.5rem;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+
+.option:hover:not(:disabled) {
+  background: var(--innogram-bg);
+}
+
+.optionText {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.optionName {
+  font-weight: 600;
+}
+
+.optionMeta {
+  font-size: 0.85rem;
+  color: var(--innogram-muted);
+}
+
+.check {
+  color: var(--innogram-primary);
+  font-weight: 700;
+}
+
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.error {
+  margin: 0;
+  color: var(--innogram-danger);
+}

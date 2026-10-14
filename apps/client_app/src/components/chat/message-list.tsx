@@ -1,11 +1,13 @@
 'use client';
 
+import type { IChatParticipant } from '@repo/contracts';
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 
 import type { ChatMessage } from '../../lib/realtime/chat-cache';
 import { isPendingMessage } from '../../lib/realtime/chat-cache';
 
 import styles from './message-list.module.css';
+import { SystemMessage } from './system-message';
 
 const NEAR_BOTTOM_PX = 120;
 const NEAR_TOP_PX = 80;
@@ -24,6 +26,8 @@ function formatTime(iso: string): string {
 interface MessageListProps {
   messages: ChatMessage[];
   currentUserId: string | undefined;
+  /** Active participants, used to name the people in system lines. */
+  participants?: readonly Pick<IChatParticipant, 'userId' | 'displayName'>[];
   hasMore: boolean;
   /** Load the page before the loaded window (`beforeSeq`). */
   onLoadOlder: () => Promise<void>;
@@ -36,6 +40,7 @@ interface MessageListProps {
 export function MessageList({
   messages,
   currentUserId,
+  participants,
   hasMore,
   onLoadOlder,
   onRetry,
@@ -46,6 +51,15 @@ export function MessageList({
   const prevHeightRef = useRef<number | null>(null);
   const lastIdRef = useRef<string | null>(null);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  // Names stay known after a member leaves, for the session's system lines.
+  const namesRef = useRef(new Map<string, string>());
+  for (const p of participants ?? []) {
+    namesRef.current.set(p.userId, p.displayName);
+  }
+  const nameOf = useCallback(
+    (userId: string) => namesRef.current.get(userId),
+    [],
+  );
 
   const loadOlder = useCallback(async () => {
     const el = scrollerRef.current;
@@ -119,9 +133,12 @@ export function MessageList({
       {messages.map((message) => {
         if (message.kind === 'SYSTEM') {
           return (
-            <p key={message.id} className={styles.system}>
-              Group update
-            </p>
+            <SystemMessage
+              key={message.id}
+              message={message}
+              currentUserId={currentUserId}
+              nameOf={nameOf}
+            />
           );
         }
         const own = message.authorId === currentUserId;

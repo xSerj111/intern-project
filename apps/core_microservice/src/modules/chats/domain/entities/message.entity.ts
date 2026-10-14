@@ -135,6 +135,29 @@ export class Message extends TypeormEntityBase {
     return message;
   }
 
+  /**
+   * Factory for a membership/system message. The actor is stored as the
+   * author and in the event payload.
+   */
+  static system(
+    chatId: string,
+    actorId: string,
+    event: Omit<SystemEvent, 'actorId'> & { actorId?: string },
+    seq: number,
+  ): Message {
+    const message = new Message();
+    message.chatId = chatId;
+    message.authorId = actorId;
+    message.kind = 'SYSTEM';
+    message.content = null;
+    message.seq = seq;
+    message.changeSeq = seq;
+    message.clientMessageId = null;
+    message.editedAt = null;
+    message.systemEvent = { ...event, actorId };
+    return message;
+  }
+
   /** A message is visible while the viewer is a member and it postdates their join. */
   isVisibleTo(participant: MessageViewer): boolean {
     return participant.leftAt == null && this.seq > participant.joinedSeq;

@@ -1,6 +1,9 @@
 import type { EntityManager } from 'typeorm';
 import type { Chat } from '../entities/chat.entity';
-import type { ChatParticipant } from '../entities/chat-participant.entity';
+import type {
+  ChatParticipant,
+  ParticipantRole,
+} from '../entities/chat-participant.entity';
 import type { Message } from '../entities/message.entity';
 
 /** Opaque transaction handle passed between the chat and message ports. */
@@ -56,6 +59,34 @@ export interface IChatRepository {
     tx?: ChatTransaction,
   ): Promise<number>;
   findActiveChatIdsForUser(userId: string): Promise<string[]>;
+  /**
+   * Takes the chat row lock (the one `allocateSeq` takes) and loads the chat
+   * with all participant rows inside `tx`; null when missing or deleted.
+   */
+  findByIdForUpdate(chatId: string, tx: ChatTransaction): Promise<Chat | null>;
+  /**
+   * Inserts the user's row or reactivates their departed one as an active
+   * MEMBER that sees messages after `joinedSeq` (`lastReadSeq` never lowered).
+   */
+  upsertActiveMember(
+    chatId: string,
+    userId: string,
+    joinedSeq: number,
+    tx: ChatTransaction,
+  ): Promise<void>;
+  /** Sets `leftAt = now()` on the user's active row. */
+  markParticipantLeft(
+    chatId: string,
+    userId: string,
+    tx: ChatTransaction,
+  ): Promise<void>;
+  setParticipantRole(
+    chatId: string,
+    userId: string,
+    role: ParticipantRole,
+    tx: ChatTransaction,
+  ): Promise<void>;
+  setTitle(chatId: string, title: string, tx: ChatTransaction): Promise<void>;
   save(chat: Chat, tx?: ChatTransaction): Promise<Chat>;
   runInTransaction<T>(work: (tx: ChatTransaction) => Promise<T>): Promise<T>;
 }

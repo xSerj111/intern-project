@@ -138,3 +138,8 @@ export async function waitFor(
   }
   return predicate();
 }
+
+/** Payloads of every `name` event a socket received, in arrival order. */
+export function eventsNamed(ts: TestSocket, name: string): any[] {
+  return ts.events.filter(([n]) => n === name).map(([, payload]) => payload);
+}

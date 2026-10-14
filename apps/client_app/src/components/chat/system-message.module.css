@@ -1,0 +1,15 @@
+.system {
+  align-self: center;
+  max-width: 90%;
+  margin: 0.25rem 0;
+  font-size: 0.8rem;
+  text-align: center;
+  color: var(--innogram-muted);
+  overflow-wrap: anywhere;
+}
+
+.time {
+  margin-left: 0.5rem;
+  font-size: 0.7rem;
+  opacity: 0.8;
+}
