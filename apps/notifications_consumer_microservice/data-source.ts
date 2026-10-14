@@ -16,6 +16,7 @@ export const AppDataSource = new DataSource({
 
   synchronize: false,
   logging: true,
+  // Entities live under src/modules/<m>/domain/entities (`*.entity.ts`).
   entities: [join(__dirname, 'src/**/*.entity{.ts,.js}')],
   migrations: [join(__dirname, 'src/migrations/*{.ts,.js}')],
 });

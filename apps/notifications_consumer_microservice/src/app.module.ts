@@ -1,41 +1,30 @@
 import { Module } from '@nestjs/common';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
-import { ConfigModule, ConfigService } from '@nestjs/config';
-import * as path from 'path';
-
-import { Notification } from './entities/notification.entity';
+import { CommonAuthModule } from './common/auth/common-auth.module';
+import { MessagingModule } from './common/messaging/messaging.module';
+import { RedisModule } from './common/redis/redis.module';
+import { AppConfigModule } from './config/app-config.module';
+import { AppConfigService } from './config/app-config.service';
+import { NotificationsModule } from './modules/notifications/notifications.module';
+import { PreferencesModule } from './modules/preferences/preferences.module';
 
 @Module({
   imports: [
-    ConfigModule.forRoot({
-      isGlobal: true,
-      envFilePath: [
-        path.resolve(process.cwd(), '.env'),
-        path.resolve(process.cwd(), '../../.env'),
-      ],
-    }),
-
+    AppConfigModule,
     TypeOrmModule.forRootAsync({
-      imports: [ConfigModule],
-      inject: [ConfigService],
-      useFactory: (config: ConfigService) => ({
-        type: 'postgres',
-        host: config.get<string>('POSTGRES_HOST', 'localhost'),
-        port: config.get<number>('POSTGRES_PORT', 5432),
-        username: config.get<string>('POSTGRES_USER', 'postgres'),
-        password: config.get<string>('POSTGRES_PASSWORD', 'postgres'),
-        database: config.get<string>(
-          'DB_NAME_NOTIFICATIONS',
-          'innogram_notifications',
-        ),
-        entities: [Notification],
+      inject: [AppConfigService],
+      useFactory: (config: AppConfigService) => ({
+        ...config.postgres,
+        // innogram_notifications; schema changes go through migrations only.
         synchronize: false,
+        autoLoadEntities: true,
       }),
     }),
+    RedisModule,
+    CommonAuthModule,
+    MessagingModule,
+    PreferencesModule,
+    NotificationsModule,
   ],
-  controllers: [AppController],
-  providers: [AppService],
 })
 export class AppModule {}
