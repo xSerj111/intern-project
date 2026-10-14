@@ -21,7 +21,7 @@ export interface IOutboxPort {
   onPending(listener: () => void): () => void;
 
   /**
-   * Relay: claims up to `limit` pending rows (oldest first) with
+   * Relay: claims up to `limit` pending rows (not published, not dead; oldest first) with
    * `FOR UPDATE SKIP LOCKED`. Locks last until `tx` ends, so call it inside the
    * transaction that also marks the rows.
    */
@@ -30,8 +30,23 @@ export interface IOutboxPort {
   /** Relay: sets `publishedAt = now()` and bumps `attempts` for the row. */
   markPublished(id: string, tx: EntityManager): Promise<void>;
 
-  /** Relay: bumps `attempts` and records `lastError` (row stays pending). */
+  /**
+   * Relay: bumps `attempts` and records `lastError` (row stays pending).
+   * `attempts` only counts failures attributable to the row itself.
+   */
   markFailed(id: string, error: string, tx: EntityManager): Promise<void>;
+
+  /**
+   * Relay: records `lastError` only (row stays pending, `attempts` unchanged).
+   * For broker-side failures, which must never count toward dead-lettering.
+   */
+  recordError(id: string, error: string, tx: EntityManager): Promise<void>;
+
+  /**
+   * Relay: gives up on the row. Bumps `attempts`, records `lastError` and sets
+   * `deadLetteredAt = now()`, so `claimPending` no longer returns it.
+   */
+  markDead(id: string, error: string, tx: EntityManager): Promise<void>;
 
   /** Relay: deletes published rows older than `olderThan`; returns the count. */
   purgePublished(olderThan: Date): Promise<number>;

@@ -58,12 +58,12 @@ async function bootstrap() {
       process.exit(0);
     };
 
-    process.on('SIGINT', () => shutdown('SIGINT'));
-    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => void shutdown('SIGINT'));
+    process.on('SIGTERM', () => void shutdown('SIGTERM'));
   } catch (error) {
     logger.error('Failed to start Auth Microservice', { error });
     process.exit(1);
   }
 }
 
-bootstrap();
+void bootstrap();

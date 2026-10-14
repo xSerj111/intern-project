@@ -17,7 +17,6 @@ npm run build -w core_microservice                             # nest build
 
 ## Gotchas
 
-- **`notifications_consumer_microservice` is a stub.** Its controller is empty and nothing publishes to it. Don't assume a working notification pipeline exists.
 - **`prisma` and `@prisma/*` are in the root `package.json` but unused.** Persistence is TypeORM everywhere.
 - **`auth_microservice` imports `src/...` paths in some files** (e.g. `infrastructure/events/http-event-publisher.ts`), so keep the path resolution in mind when moving files.
 
@@ -25,7 +24,8 @@ npm run build -w core_microservice                             # nest build
 
 1. **`auth_microservice`** (Express, manual DI in `src/app.ts` `createApp()`) owns credentials, JWTs, Redis-backed sessions and Google OAuth. Its own DB is `innogram_auth`.
 2. **`core_microservice`** (NestJS) owns the social graph and content: profiles, posts, comments, chats, follows, assets. Its own DB is `innogram_core`.
-3. **Auth → Core is HTTP fire-and-forget.** When a user is created, `UsersService` calls `HttpEventPublisher`, which POSTs `UserCreatedEvent` to `core` at `/internal/events/user-created` without awaiting. `core`'s `InternalEventsController` forwards it to `ProfilesService.createProfile`. Failures are logged, not retried. Profile creation also has a lazy-init fallback in `core`, so a lost event does not leave a user without a profile.
+3. **`notifications_consumer_microservice`** (NestJS, port 3003) owns notifications and email preferences in its own DB `innogram_notifications`. It consumes `notifications.events` and `notifications.email` from RabbitMQ, sends mail through SMTP (Mailpit locally), and calls auth's internal `GET /internal/users/:id/contact` for recipient addresses. Core's relay pushes its notifications live to clients over the `/realtime` Socket.IO namespace.
+4. **Auth → Core is HTTP fire-and-forget.** When a user is created, `UsersService` calls `HttpEventPublisher`, which POSTs `UserCreatedEvent` to `core` at `/internal/events/user-created` without awaiting. `core`'s `InternalEventsController` forwards it to `ProfilesService.createProfile`. Failures are logged, not retried. Profile creation also has a lazy-init fallback in `core`, so a lost event does not leave a user without a profile.
 
 Inside `core_microservice`, the DDD layering is the same in every module (`profiles` is the reference), and the flow of a request is:
 

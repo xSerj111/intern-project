@@ -1,31 +1,34 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { LoggerKey, RoutingKeys } from '@repo/shared';
-import { DataSource } from 'typeorm';
 import { OUTBOX_PORT } from '../../common/messaging/outbox.port';
 import { USER_DIRECTORY_PORT } from '../profiles/domain/interfaces/user-directory.port';
 import { Follow } from './domain/entities/follow.entity';
 import { FollowsService } from './follows.service';
-import { FollowRepository } from './infrastructure/repository/follow.repository';
+import { FollowRepositoryKey } from './domain/interfaces/follow-repository.port';
 
 const FOLLOWER = '11111111-1111-1111-1111-111111111111';
 const FOLLOWED = '22222222-2222-2222-2222-222222222222';
 
 describe('FollowsService', () => {
   let service: FollowsService;
-  let repo: { findByFollowerAndFollowing: jest.Mock };
-  let tx: { getRepository: jest.Mock };
+  let repo: {
+    findByFollowerAndFollowing: jest.Mock;
+    save: jest.Mock;
+    runInTransaction: jest.Mock;
+  };
+  const tx = { tx: true };
   let txSave: jest.Mock;
   let outbox: { add: jest.Mock };
   let directory: { getUsers: jest.Mock };
 
   beforeEach(async () => {
-    repo = { findByFollowerAndFollowing: jest.fn(() => Promise.resolve(null)) };
     txSave = jest.fn((f: Follow) =>
       Promise.resolve(Object.assign(f, { id: 'f-1' })),
     );
-    tx = { getRepository: jest.fn(() => ({ save: txSave })) };
-    const dataSource = {
-      transaction: jest.fn((work: (m: typeof tx) => Promise<unknown>) =>
+    repo = {
+      findByFollowerAndFollowing: jest.fn(() => Promise.resolve(null)),
+      save: txSave,
+      runInTransaction: jest.fn((work: (m: typeof tx) => Promise<unknown>) =>
         work(tx),
       ),
     };
@@ -55,8 +58,7 @@ describe('FollowsService', () => {
           provide: LoggerKey,
           useValue: { debug: jest.fn(), warn: jest.fn(), error: jest.fn() },
         },
-        { provide: FollowRepository, useValue: repo },
-        { provide: DataSource, useValue: dataSource },
+        { provide: FollowRepositoryKey, useValue: repo },
         { provide: OUTBOX_PORT, useValue: outbox },
         { provide: USER_DIRECTORY_PORT, useValue: directory },
       ],
@@ -68,7 +70,7 @@ describe('FollowsService', () => {
   it('writes social.user.followed in the follow transaction for a new follow', async () => {
     await service.follow(FOLLOWER, FOLLOWED);
 
-    expect(txSave).toHaveBeenCalledTimes(1);
+    expect(txSave).toHaveBeenCalledWith(expect.any(Follow), tx);
     expect(outbox.add).toHaveBeenCalledTimes(1);
     const [key, payload, manager] = outbox.add.mock.calls[0] as [
       string,

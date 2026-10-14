@@ -173,12 +173,14 @@ export class ChatsGateway
     return false;
   }
 
-  emitTypingStopped(chatId: string, userId: string): void {
-    this.relayTyping(chatId, userId, false).catch((err: unknown) =>
+  emitTypingStopped(chatId: string, user: IChatUser): void {
+    try {
+      this.broadcastTyping(chatId, user, false);
+    } catch (err: unknown) {
       this.logger.warn(
         `Failed to emit typing stop for chat ${chatId}: ${String(err)}`,
-      ),
-    );
+      );
+    }
   }
 
   // ---- Client to server ----
@@ -335,9 +337,17 @@ export class ChatsGateway
       if (!user) return;
       if (socket) socket.data.typingUser = user;
     }
+    this.broadcastTyping(chatId, user, isTyping);
+  }
+
+  private broadcastTyping(
+    chatId: string,
+    user: IChatUser,
+    isTyping: boolean,
+  ): void {
     this.server
       .to(chatRoom(chatId))
-      .except(userRoom(userId))
+      .except(userRoom(user.userId))
       .emit('typing', { chatId, user, isTyping });
   }
 

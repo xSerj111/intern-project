@@ -133,9 +133,7 @@ export class EmailWorker implements EmailJobHandler, OnModuleInit {
 
   /** Closes the delivery as FAILED (attempts = MAX), logs at error, acks. */
   private async fail(delivery: EmailDelivery, error: unknown): Promise<void> {
-    while (delivery.isPending()) {
-      delivery.recordFailure(error);
-    }
+    delivery.markFailed(error);
     await this.deliveries.save(delivery);
     this.logFailed(delivery);
   }

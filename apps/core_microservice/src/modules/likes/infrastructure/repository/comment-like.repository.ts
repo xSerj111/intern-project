@@ -54,4 +54,10 @@ export class CommentLikeRepository implements ICommentLikeRepository {
       where: { commentId, userId, deletedAt: IsNull() },
     });
   }
+
+  async runInTransaction<T>(
+    work: (tx: EntityManager) => Promise<T>,
+  ): Promise<T> {
+    return this.repository.manager.transaction(work);
+  }
 }

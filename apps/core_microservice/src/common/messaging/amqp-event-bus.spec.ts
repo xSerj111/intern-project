@@ -3,6 +3,7 @@ import { Logger } from '@nestjs/common';
 import type { ConfirmChannel } from 'amqplib';
 import { EXCHANGE_NAME, EventEnvelope, RoutingKeys } from '@repo/shared';
 import { AmqpEventBus } from './amqp-event-bus';
+import { EventRejectedError } from './event-bus.port';
 
 describe('AmqpEventBus', () => {
   let channel: { publish: jest.Mock; close: jest.Mock };
@@ -70,6 +71,16 @@ describe('AmqpEventBus', () => {
     channel.publish.mockRejectedValueOnce(new Error('message nacked'));
 
     await expect(bus.publish(envelope)).rejects.toThrow('message nacked');
+  });
+
+  it('rejects with EventRejectedError when the envelope cannot be serialized', async () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+
+    await expect(
+      bus.publish({ ...envelope, payload: circular as never }),
+    ).rejects.toBeInstanceOf(EventRejectedError);
+    expect(channel.publish).not.toHaveBeenCalled();
   });
 
   it('closes its channel on module destroy', async () => {

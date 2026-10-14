@@ -88,10 +88,25 @@ export class EmailDelivery {
   recordFailure(error: unknown): void {
     this.assertPending();
     this.attempts += 1;
-    this.lastError = error instanceof Error ? error.message : String(error);
+    this.lastError = EmailDelivery.reasonOf(error);
     if (this.attempts >= MAX_EMAIL_ATTEMPTS) {
       this.status = 'FAILED';
     }
+  }
+
+  /**
+   * Closes the delivery as `FAILED` now, for failures a retry cannot fix or
+   * the queue's last attempt. Attempts are raised to {@link MAX_EMAIL_ATTEMPTS}.
+   */
+  markFailed(reason: unknown): void {
+    this.assertPending();
+    this.attempts = Math.max(this.attempts, MAX_EMAIL_ATTEMPTS);
+    this.status = 'FAILED';
+    this.lastError = EmailDelivery.reasonOf(reason);
+  }
+
+  private static reasonOf(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
   }
 
   private assertPending(): void {

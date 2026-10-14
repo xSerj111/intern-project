@@ -1,10 +1,14 @@
 import type { IChatUser } from '@repo/contracts';
 import { Chat, ChatType } from '../domain/entities/chat.entity';
 import { ChatParticipant } from '../domain/entities/chat-participant.entity';
-import { Message } from '../domain/entities/message.entity';
+import {
+  Message,
+  type MessageAttachmentFile,
+} from '../domain/entities/message.entity';
 import type { ChatSummary } from '../domain/interfaces/chat-repository.port';
 import {
   attachmentKind,
+  type IAttachmentStoragePort,
   type PresignedAttachmentUrl,
 } from '../domain/interfaces/attachment-storage.port';
 import {
@@ -34,8 +38,33 @@ function toUser(userId: string, users: UserMap): ChatUserDto {
 export type AttachmentUrls = ReadonlyMap<string, PresignedAttachmentUrl>;
 
 /**
+ * Presigns every attachment of the live messages in parallel (local signing,
+ * no network). A failed signature only drops that attachment; `onFail` is told
+ * which one.
+ */
+export async function presignAttachments(
+  messages: Message[],
+  storage: IAttachmentStoragePort,
+  onFail: (assetId: string, reason: string) => void,
+): Promise<Map<string, PresignedAttachmentUrl>> {
+  const files: MessageAttachmentFile[] = messages
+    .filter((m) => m.deletedAt == null)
+    .flatMap((m) => m.attachments);
+  const signed = await Promise.allSettled(files.map((f) => storage.presign(f)));
+  const urls = new Map<string, PresignedAttachmentUrl>();
+  signed.forEach((result, i) => {
+    if (result.status === 'fulfilled') {
+      urls.set(files[i].assetId, result.value);
+    } else {
+      onFail(files[i].assetId, String(result.reason));
+    }
+  });
+  return urls;
+}
+
+/**
  * Attachments in display order; one without a presigned URL in `urls` is left
- * out (e.g. previews mapped without presigning).
+ * out (e.g. a message mapped without presigning).
  */
 function toAttachments(
   message: Message,
@@ -91,6 +120,7 @@ function toSummary(
     'unreadCount' | 'lastMessage' | 'memberCount' | 'counterpart' | 'myRole'
   >,
   users: UserMap,
+  urls?: AttachmentUrls,
 ): ConversationSummaryDto {
   return {
     id: chat.id,
@@ -101,7 +131,7 @@ function toSummary(
         ? toUser(s.counterpart.userId, users)
         : null,
     memberCount: s.memberCount,
-    lastMessage: s.lastMessage ? toMessageResponse(s.lastMessage) : null,
+    lastMessage: s.lastMessage ? toMessageResponse(s.lastMessage, urls) : null,
     lastActivityAt: chat.lastActivityAt.toISOString(),
     lastChangeSeq: Number(chat.lastSeq),
     unreadCount: s.unreadCount,
@@ -112,8 +142,9 @@ function toSummary(
 export function toConversationSummary(
   summary: ChatSummary,
   users: UserMap,
+  urls?: AttachmentUrls,
 ): ConversationSummaryDto {
-  return toSummary(summary.chat, summary, users);
+  return toSummary(summary.chat, summary, users, urls);
 }
 
 function toParticipant(p: ChatParticipant, users: UserMap): ChatParticipantDto {
@@ -127,9 +158,10 @@ function toParticipant(p: ChatParticipant, users: UserMap): ChatParticipantDto {
 export function toConversationDetail(
   summary: ChatSummary,
   users: UserMap,
+  urls?: AttachmentUrls,
 ): ConversationDetailDto {
   return {
-    ...toSummary(summary.chat, summary, users),
+    ...toSummary(summary.chat, summary, users, urls),
     participants: summary.chat
       .activeParticipants()
       .map((p) => toParticipant(p, users)),

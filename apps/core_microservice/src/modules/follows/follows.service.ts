@@ -11,7 +11,7 @@ import {
   type UserFollowedPayload,
   isTypeOrmError,
 } from '@repo/shared';
-import { DataSource, type EntityManager } from 'typeorm';
+import type { EntityManager } from 'typeorm';
 import {
   OUTBOX_PORT,
   type IOutboxPort,
@@ -20,7 +20,10 @@ import {
   USER_DIRECTORY_PORT,
   type IUserDirectoryPort,
 } from '../profiles/domain/interfaces/user-directory.port';
-import { FollowRepository } from './infrastructure/repository/follow.repository';
+import {
+  FollowRepositoryKey,
+  type IFollowRepository,
+} from './domain/interfaces/follow-repository.port';
 import { Follow } from './domain/entities/follow.entity';
 
 @Injectable()
@@ -28,8 +31,8 @@ export class FollowsService {
   // injecting our adapter, not a standard TypeORM repo!!
   constructor(
     @Inject(LoggerKey) private readonly logger: Logger,
-    private readonly followRepository: FollowRepository,
-    private readonly dataSource: DataSource,
+    @Inject(FollowRepositoryKey)
+    private readonly followRepository: IFollowRepository,
     @Inject(OUTBOX_PORT) private readonly outbox: IOutboxPort,
     @Inject(USER_DIRECTORY_PORT)
     private readonly userDirectory: IUserDirectoryPort,
@@ -51,7 +54,7 @@ export class FollowsService {
 
     // The outbox row shares the follow's transaction: both commit or neither.
     const savedFollow = await this.runInTransaction(async (tx) => {
-      const saved = await tx.getRepository(Follow).save(follow);
+      const saved = await this.followRepository.save(follow, tx);
       if (actor) {
         const payload: UserFollowedPayload = {
           actor,
@@ -111,7 +114,7 @@ export class FollowsService {
     work: (tx: EntityManager) => Promise<T>,
   ): Promise<T> {
     try {
-      return await this.dataSource.transaction(work);
+      return await this.followRepository.runInTransaction(work);
     } catch (err: unknown) {
       if (err instanceof DomainError) throw err;
       if (

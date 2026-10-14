@@ -1,4 +1,4 @@
-import type { ServerToClientEvents } from '@repo/contracts';
+import type { IChatUser, ServerToClientEvents } from '@repo/contracts';
 
 export const CHAT_REALTIME_PORT = Symbol.for('IChatRealtimePort');
 
@@ -40,8 +40,9 @@ export interface IChatRealtimePort {
 
   /**
    * Emits `typing { isTyping: false }` for the user to the `chat:{chatId}`
-   * room, excluding the user's own sockets. Called when a message is sent.
+   * room, excluding the user's own sockets. Called when a message is sent;
+   * the caller passes the sender's profile, so no lookup happens here.
    * Best effort: never throws.
    */
-  emitTypingStopped(chatId: string, userId: string): void;
+  emitTypingStopped(chatId: string, user: IChatUser): void;
 }

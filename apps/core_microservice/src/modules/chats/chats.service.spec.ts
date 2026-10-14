@@ -8,6 +8,8 @@ import {
 } from './domain/errors/chat.errors';
 import { CHAT_REALTIME_PORT } from './domain/interfaces/chat-realtime.port';
 import { CHAT_REPOSITORY } from './domain/interfaces/chat-repository.port';
+import { ATTACHMENT_STORAGE_PORT } from './domain/interfaces/attachment-storage.port';
+import { Message } from './domain/entities/message.entity';
 import { USER_DIRECTORY_PORT } from '../profiles/domain/interfaces/user-directory.port';
 import { UserNotFoundError } from '../profiles/domain/errors/user-profile.errors';
 
@@ -39,6 +41,7 @@ describe('ChatsService', () => {
     runInTransaction: jest.fn(),
   };
   const directory = { getUsers: jest.fn(), assertUsersExist: jest.fn() };
+  const storage = { presign: jest.fn() };
   const realtime = {
     emitToChat: jest.fn(),
     emitToUser: jest.fn(),
@@ -82,6 +85,7 @@ describe('ChatsService', () => {
         { provide: CHAT_REPOSITORY, useValue: chats },
         { provide: USER_DIRECTORY_PORT, useValue: directory },
         { provide: CHAT_REALTIME_PORT, useValue: realtime },
+        { provide: ATTACHMENT_STORAGE_PORT, useValue: storage },
         {
           provide: LoggerKey,
           useValue: {
@@ -181,6 +185,58 @@ describe('ChatsService', () => {
         before: undefined,
         limit: 3,
       });
+    });
+
+    it('presigns the previews attachments in one batch', async () => {
+      const expiresAt = new Date('2030-01-01T00:00:00.000Z');
+      storage.presign.mockImplementation((a: { storageKey: string }) =>
+        Promise.resolve({ url: `https://signed/${a.storageKey}`, expiresAt }),
+      );
+      const withFile = (assetId: string) => {
+        const message = Message.create({
+          chatId: 'chat-1',
+          authorId: OTHER,
+          content: 'look',
+          clientMessageId: '33333333-3333-4333-8333-333333333333',
+          seq: 1,
+        });
+        message.createdAt = new Date();
+        message.attachments = [
+          {
+            assetId,
+            displayOrder: 0,
+            storageKey: `k/${assetId}`,
+            mimeType: 'image/png',
+            size: 5,
+            originalName: 'a.png',
+          },
+        ];
+        return message;
+      };
+      chats.listForUser.mockResolvedValue(
+        ['a1', 'a2'].map((id) => ({
+          chat: persisted(),
+          unreadCount: 0,
+          lastMessage: withFile(id),
+          memberCount: 2,
+          counterpart: persisted().participants[1],
+          myRole: 'MEMBER',
+        })),
+      );
+
+      const page = await service.list(ME, { limit: 5 });
+
+      expect(storage.presign).toHaveBeenCalledTimes(2);
+      expect(page.items.map((i) => i.lastMessage?.attachments)).toEqual([
+        [
+          expect.objectContaining({
+            id: 'a1',
+            url: 'https://signed/k/a1',
+            kind: 'image',
+          }),
+        ],
+        [expect.objectContaining({ id: 'a2', url: 'https://signed/k/a2' })],
+      ]);
     });
   });
 

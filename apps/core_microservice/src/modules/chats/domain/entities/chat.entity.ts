@@ -1,12 +1,6 @@
-import {
-  Column,
-  Entity,
-  Index,
-  OneToMany,
-  Unique,
-  ValueTransformer,
-} from 'typeorm';
+import { Column, Entity, Index, OneToMany, Unique } from 'typeorm';
 import { TypeormEntityBase } from '@repo/shared';
+import { bigintNumberTransformer } from '../../../../common/typeorm/bigint-number.transformer';
 import { ChatParticipant, ParticipantRole } from './chat-participant.entity';
 import type { SystemEvent } from './message.entity';
 import {
@@ -29,13 +23,6 @@ export const GROUP_TITLE_MAX_LENGTH = 100;
 export const GROUP_MIN_INVITEES = 2;
 export const GROUP_MAX_INVITEES = 99;
 export const GROUP_MAX_MEMBERS = 100;
-
-// Postgres returns bigint as string; counters stay well below 2^53.
-const bigintTransformer: ValueTransformer = {
-  to: (value?: number | null) => value,
-  from: (value?: string | number | null) =>
-    value === null || value === undefined ? value : Number(value),
-};
 
 @Entity('chats')
 @Index('IDX_chats_lastActivityAt', ['lastActivityAt'])
@@ -60,7 +47,7 @@ export class Chat extends TypeormEntityBase {
   @Column({
     type: 'bigint',
     default: 0,
-    transformer: bigintTransformer,
+    transformer: bigintNumberTransformer,
   })
   lastSeq!: number;
 

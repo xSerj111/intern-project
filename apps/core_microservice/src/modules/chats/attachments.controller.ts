@@ -19,18 +19,21 @@ import {
   ApiBody,
   ApiConsumes,
   ApiOperation,
+  ApiResponse,
   ApiTags,
 } from '@nestjs/swagger';
 import 'multer';
+import { ATTACHMENT_MAX_BYTES } from '@repo/contracts';
 import { MessagesService } from './messages.service';
-import type {
+import {
   AttachmentUrlDto,
   UploadedAttachmentDto,
 } from './dto/message-response.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
-export const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
+// Single source of truth in @repo/contracts; re-exported for the spec.
+export { ATTACHMENT_MAX_BYTES };
 
 /**
  * Allowed attachment types (FR-025). Anchored, so a parameter or suffix
@@ -70,6 +73,19 @@ export class AttachmentsController {
   @Post('attachments')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Upload a private chat attachment' })
+  @ApiResponse({
+    status: HttpStatus.CREATED,
+    description: 'Attachment stored; returns the asset reference',
+    type: UploadedAttachmentDto,
+  })
+  @ApiResponse({
+    status: HttpStatus.PAYLOAD_TOO_LARGE,
+    description: 'File exceeds the 10 MB limit',
+  })
+  @ApiResponse({
+    status: HttpStatus.BAD_REQUEST,
+    description: 'File type not allowed',
+  })
   @UseInterceptors(
     // Multer stops reading past the limit (413) instead of buffering it all.
     FileInterceptor('file', { limits: { fileSize: ATTACHMENT_MAX_BYTES } }),
@@ -90,6 +106,11 @@ export class AttachmentsController {
 
   @Get(':chatId/messages/:messageId/attachments/:assetId')
   @ApiOperation({ summary: 'Fresh presigned URL for a message attachment' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Short-lived presigned download URL',
+    type: AttachmentUrlDto,
+  })
   url(
     @CurrentUser('sub') userId: string,
     @Param('chatId', ParseUUIDPipe) chatId: string,

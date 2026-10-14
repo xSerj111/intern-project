@@ -99,6 +99,7 @@ describe('TypeOrmOutboxAdapter', () => {
   it('claims pending rows with FOR UPDATE SKIP LOCKED', async () => {
     const qb = {
       where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
       limit: jest.fn().mockReturnThis(),
       setLock: jest.fn().mockReturnThis(),
@@ -112,9 +113,49 @@ describe('TypeOrmOutboxAdapter', () => {
     const rows = await adapter.claimPending(10, tx);
 
     expect(rows).toEqual([{ id: 'a' }]);
+    expect(qb.where).toHaveBeenCalledWith('outbox."publishedAt" IS NULL');
+    expect(qb.andWhere).toHaveBeenCalledWith('outbox."deadLetteredAt" IS NULL');
     expect(qb.limit).toHaveBeenCalledWith(10);
     expect(qb.setLock).toHaveBeenCalledWith('pessimistic_write');
     expect(qb.setOnLocked).toHaveBeenCalledWith('skip_locked');
+  });
+
+  it('records an error without touching attempts', async () => {
+    const qb = {
+      update: jest.fn().mockReturnThis(),
+      set: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      execute: jest.fn().mockResolvedValue(undefined),
+    };
+    const tx = {
+      createQueryBuilder: jest.fn().mockReturnValue(qb),
+    } as unknown as EntityManager;
+
+    await adapter.recordError('a', 'broker down', tx);
+
+    expect(qb.set).toHaveBeenCalledWith({ lastError: 'broker down' });
+    expect(qb.where).toHaveBeenCalledWith('id = :id', { id: 'a' });
+  });
+
+  it('marks a row dead: bumps attempts, stores the error, sets deadLetteredAt', async () => {
+    const qb = {
+      update: jest.fn().mockReturnThis(),
+      set: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      execute: jest.fn().mockResolvedValue(undefined),
+    };
+    const tx = {
+      createQueryBuilder: jest.fn().mockReturnValue(qb),
+    } as unknown as EntityManager;
+
+    await adapter.markDead('a', 'boom', tx);
+
+    const [set] = qb.set.mock.calls[0] as [Record<string, unknown>];
+    expect(set.lastError).toBe('boom');
+    expect((set.attempts as () => string)()).toBe('"attempts" + 1');
+    expect((set.deadLetteredAt as () => string)()).toBe('now()');
+    expect(qb.where).toHaveBeenCalledWith('id = :id', { id: 'a' });
+    expect(qb.execute).toHaveBeenCalledTimes(1);
   });
 
   it('purges published rows older than the cutoff', async () => {

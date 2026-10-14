@@ -10,6 +10,7 @@ import {
   ATTACHMENT_STORAGE_PORT,
   type IAttachmentStoragePort,
 } from './../src/modules/chats/domain/interfaces/attachment-storage.port';
+import { cleanupE2eData } from './helpers/cleanup.helpers';
 import {
   EXE_BYTES,
   PDF_BYTES,
@@ -153,8 +154,8 @@ describe('Chat attachments, US5 (e2e)', () => {
 
   afterAll(async () => {
     sockets.forEach((s) => s.socket.close());
-    // Best-effort cleanup of what this suite created (chats, messages,
-    // attachments and their objects). Auth users and profiles stay.
+    // Best-effort cleanup of what this suite created: attachments (rows and
+    // storage objects), then everything else via cleanupE2eData.
     try {
       const userIds = [a, b, c, d, e].map((s) => s.userId);
       const assets = await rows<{ id: string; storageKey: string | null }>(
@@ -185,6 +186,7 @@ describe('Chat attachments, US5 (e2e)', () => {
       /* leftovers are harmless test data */
     }
     await Promise.all([a, b, c, d, e].map((s) => logout(s).catch(() => 0)));
+    if (db) await cleanupE2eData(db);
     await app?.close();
   });
 

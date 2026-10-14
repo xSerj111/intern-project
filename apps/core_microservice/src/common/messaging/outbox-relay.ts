@@ -8,7 +8,8 @@ import {
 import { InjectDataSource } from '@nestjs/typeorm';
 import type { DataSource } from 'typeorm';
 import type { EventEnvelope } from '@repo/shared';
-import { EVENT_BUS } from './event-bus.port';
+import { AppConfigService } from '../../config/app-config.service';
+import { EVENT_BUS, EventRejectedError } from './event-bus.port';
 import type { EventBusPort } from './event-bus.port';
 import type { OutboxEvent } from './outbox-event.entity';
 import { OUTBOX_PORT } from './outbox.port';
@@ -27,7 +28,13 @@ const LAST_ERROR_MAX_LENGTH = 1_000;
  * Publishes pending outbox rows to the broker (at-least-once). Runs on a 500 ms
  * poll plus the outbox's post-commit wake signal; wakes during a drain are
  * coalesced into one re-drain. A failed publish leaves the row pending, ends
- * the drain (so the row is retried first, keeping order) and backs off.
+ * the drain (so the row is retried first, keeping order) and backs off. After
+ * `OUTBOX_MAX_ATTEMPTS` failed attempts the row is dead-lettered instead: it is
+ * marked dead, logged at error level and skipped, and the drain moves on.
+ * Only row-attributable failures (`EventRejectedError`) count toward that
+ * limit. Broker-side failures (broker down, nack, confirm timeout, closed
+ * channel) only record `lastError` and back off, so an outage of any length
+ * never dead-letters healthy rows.
  */
 @Injectable()
 export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
@@ -40,12 +47,16 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
   private stopped = false;
   private consecutiveFailures = 0;
   private retryAt = 0;
+  private readonly maxAttempts: number;
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     @Inject(OUTBOX_PORT) private readonly outbox: IOutboxPort,
     @Inject(EVENT_BUS) private readonly eventBus: EventBusPort,
-  ) {}
+    config: AppConfigService,
+  ) {
+    this.maxAttempts = config.outbox.maxAttempts;
+  }
 
   onModuleInit(): void {
     this.stopped = false;
@@ -123,7 +134,18 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
           await this.eventBus.publish(toEnvelope(row));
         } catch (err) {
           const message = errorMessage(err).slice(0, LAST_ERROR_MAX_LENGTH);
-          await this.outbox.markFailed(row.id, message, tx);
+          if (!(err instanceof EventRejectedError)) {
+            // Broker-side: transient, never counts toward dead-lettering.
+            await this.outbox.recordError(row.id, message, tx);
+          } else if (row.attempts + 1 >= this.maxAttempts) {
+            await this.outbox.markDead(row.id, message, tx);
+            this.logger.error(
+              `Outbox event ${row.routingKey} ${row.id} dead-lettered after ${row.attempts + 1} failed attempts: ${message}`,
+            );
+            continue; // skip the poison row; healthy rows behind it go on
+          } else {
+            await this.outbox.markFailed(row.id, message, tx);
+          }
           this.backOff(
             `Outbox publish of ${row.routingKey} ${row.id} failed: ${message}`,
           );

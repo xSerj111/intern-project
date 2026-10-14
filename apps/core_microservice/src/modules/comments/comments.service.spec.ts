@@ -1,12 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { EntityByIdNotFoundError, LoggerKey, RoutingKeys } from '@repo/shared';
-import { DataSource } from 'typeorm';
 import { OUTBOX_PORT } from '../../common/messaging/outbox.port';
 import { USER_DIRECTORY_PORT } from '../profiles/domain/interfaces/user-directory.port';
 import { fakePost } from '../posts/__tests__/fakers';
 import { Comment } from './domain/entities/comment.entity';
 import { CommentsService } from './comments.service';
-import { CommentRepository } from './infrastructure/repository/comment.repository';
+import { COMMENT_REPOSITORY } from './domain/interfaces/comment-repository.port';
+import { POST_REPOSITORY } from '../posts/domain/interfaces/post-repository.port';
 
 const POST_AUTHOR = '11111111-1111-1111-1111-111111111111';
 const COMMENTER = '22222222-2222-2222-2222-222222222222';
@@ -14,26 +14,27 @@ const POST_ID = '00000000-0000-0000-0000-000000000010';
 
 describe('CommentsService', () => {
   let service: CommentsService;
-  let tx: { getRepository: jest.Mock };
-  let txSave: jest.Mock;
-  let postFindOne: jest.Mock;
+  const tx = { tx: true };
+  let commentSave: jest.Mock;
+  let postFindById: jest.Mock;
   let outbox: { add: jest.Mock };
   let directory: { getUsers: jest.Mock };
 
   beforeEach(async () => {
-    txSave = jest.fn((c: Comment) =>
+    commentSave = jest.fn((c: Comment) =>
       Promise.resolve(Object.assign(c, { id: 'c-1' })),
     );
-    tx = { getRepository: jest.fn(() => ({ save: txSave })) };
-    postFindOne = jest.fn(() =>
-      Promise.resolve(fakePost({ id: POST_ID, authorId: POST_AUTHOR })),
-    );
-    const dataSource = {
-      getRepository: jest.fn(() => ({ findOne: postFindOne })),
-      transaction: jest.fn((work: (m: typeof tx) => Promise<unknown>) =>
+    const commentRepository = {
+      save: commentSave,
+      runInTransaction: jest.fn((work: (m: typeof tx) => Promise<unknown>) =>
         work(tx),
       ),
+      getLikeStats: jest.fn(),
     };
+    postFindById = jest.fn(() =>
+      Promise.resolve(fakePost({ id: POST_ID, authorId: POST_AUTHOR })),
+    );
+    const postRepository = { findById: postFindById };
     outbox = { add: jest.fn(() => Promise.resolve({})) };
     directory = {
       getUsers: jest.fn((ids: string[]) =>
@@ -60,8 +61,8 @@ describe('CommentsService', () => {
           provide: LoggerKey,
           useValue: { debug: jest.fn(), warn: jest.fn(), error: jest.fn() },
         },
-        { provide: CommentRepository, useValue: {} },
-        { provide: DataSource, useValue: dataSource },
+        { provide: COMMENT_REPOSITORY, useValue: commentRepository },
+        { provide: POST_REPOSITORY, useValue: postRepository },
         { provide: OUTBOX_PORT, useValue: outbox },
         { provide: USER_DIRECTORY_PORT, useValue: directory },
       ],
@@ -83,7 +84,7 @@ describe('CommentsService', () => {
         content: long,
       });
 
-      expect(txSave).toHaveBeenCalledTimes(1);
+      expect(commentSave).toHaveBeenCalledWith(expect.any(Comment), tx);
       expect(outbox.add).toHaveBeenCalledTimes(1);
       const [key, payload, manager] = outbox.add.mock.calls[0] as [
         string,
@@ -107,7 +108,7 @@ describe('CommentsService', () => {
         content: 'mine',
       });
 
-      expect(txSave).toHaveBeenCalledTimes(1);
+      expect(commentSave).toHaveBeenCalledWith(expect.any(Comment), tx);
       expect(outbox.add).not.toHaveBeenCalled();
     });
 
@@ -118,7 +119,7 @@ describe('CommentsService', () => {
         content: 'reply',
       });
 
-      expect(txSave).toHaveBeenCalledTimes(1);
+      expect(commentSave).toHaveBeenCalledWith(expect.any(Comment), tx);
       expect(outbox.add).not.toHaveBeenCalled();
     });
 
@@ -130,17 +131,17 @@ describe('CommentsService', () => {
         content: 'hi',
       });
 
-      expect(txSave).toHaveBeenCalledTimes(1);
+      expect(commentSave).toHaveBeenCalledWith(expect.any(Comment), tx);
       expect(outbox.add).not.toHaveBeenCalled();
     });
 
     it('throws not-found and writes nothing when the post does not exist', async () => {
-      postFindOne.mockResolvedValueOnce(null);
+      postFindById.mockResolvedValueOnce(null);
 
       await expect(
         service.createComment(COMMENTER, { postId: POST_ID, content: 'hi' }),
       ).rejects.toThrow(EntityByIdNotFoundError);
-      expect(txSave).not.toHaveBeenCalled();
+      expect(commentSave).not.toHaveBeenCalled();
       expect(outbox.add).not.toHaveBeenCalled();
     });
   });

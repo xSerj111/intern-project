@@ -26,10 +26,16 @@ const ok = (
   },
 });
 
+type FakeSocket = RealtimeSocket & {
+  mocks: { emit: jest.Mock; disconnect: jest.Mock };
+};
+
 function fakeSocket(
   data: Partial<RealtimeSocket['data']> = {},
   auth: Record<string, unknown> = {},
 ) {
+  const emit = jest.fn();
+  const disconnect = jest.fn();
   return {
     id: 'sock-1',
     handshake: { auth, query: { token: 'from-query' } },
@@ -43,9 +49,10 @@ function fakeSocket(
     },
     join: jest.fn(),
     rooms: new Set<string>(),
-    emit: jest.fn(),
-    disconnect: jest.fn(),
-  } as unknown as RealtimeSocket & { emit: jest.Mock; disconnect: jest.Mock };
+    emit,
+    disconnect,
+    mocks: { emit, disconnect },
+  } as unknown as FakeSocket;
 }
 
 describe('createSocketAuthMiddleware', () => {
@@ -134,7 +141,7 @@ describe('ChatsGateway auth:renew', () => {
     await gateway.handleAuthRenew(socket, { token: 'new' }, ack);
 
     expect(ack).toHaveBeenCalledWith(expect.objectContaining({ ok: false }));
-    expect(socket.disconnect).toHaveBeenCalledWith(true);
+    expect(socket.mocks.disconnect).toHaveBeenCalledWith(true);
   });
 
   it('re-checks the blacklist first and closes a revoked socket', async () => {
@@ -144,10 +151,10 @@ describe('ChatsGateway auth:renew', () => {
     await gateway.handleAuthRenew(socket, { token: 'new' }, jest.fn());
 
     expect(verify).not.toHaveBeenCalled();
-    expect(socket.emit).toHaveBeenCalledWith('session:expired', {
+    expect(socket.mocks.emit).toHaveBeenCalledWith('session:expired', {
       reason: 'revoked',
     });
-    expect(socket.disconnect).toHaveBeenCalledWith(true);
+    expect(socket.mocks.disconnect).toHaveBeenCalledWith(true);
   });
 
   it('expires the socket at exp and clears the timer on disconnect', async () => {
@@ -155,7 +162,7 @@ describe('ChatsGateway auth:renew', () => {
     await gateway.handleConnection(socket);
 
     jest.advanceTimersByTime(6000);
-    expect(socket.emit).toHaveBeenCalledWith('session:expired', {
+    expect(socket.mocks.emit).toHaveBeenCalledWith('session:expired', {
       reason: 'expired',
     });
 
@@ -163,7 +170,7 @@ describe('ChatsGateway auth:renew', () => {
     await gateway.handleConnection(other);
     gateway.handleDisconnect(other);
     jest.advanceTimersByTime(6000);
-    expect(other.emit).not.toHaveBeenCalled();
+    expect(other.mocks.emit).not.toHaveBeenCalled();
   });
 });
 
@@ -232,11 +239,12 @@ describe('SessionRevocationListener', () => {
   });
 
   it('ignores invalid payloads', async () => {
-    const gateway = { server: { in: jest.fn() } } as unknown as ChatsGateway;
+    const serverIn = jest.fn();
+    const gateway = { server: { in: serverIn } } as unknown as ChatsGateway;
     const listener = new SessionRevocationListener({} as never, gateway);
     await listener.handleMessage('{"userId":"not-a-uuid"}');
     await listener.handleMessage('garbage');
-    expect(gateway.server.in).not.toHaveBeenCalled();
+    expect(serverIn).not.toHaveBeenCalled();
   });
 });
 
@@ -283,7 +291,7 @@ describe('ChatsGateway handleConnection', () => {
 
 describe('ChatsGateway typing and chat:view', () => {
   const CHAT = '22222222-2222-4222-8222-222222222222';
-  const typer = { id: USER, displayName: 'Anna' } as never;
+  const typer = { userId: USER, displayName: 'Anna' } as never;
   let redis: { exists: jest.Mock };
   let getUsers: jest.Mock;
   let emit: jest.Mock;
@@ -372,9 +380,9 @@ describe('ChatsGateway typing and chat:view', () => {
     expect(disconnect).toHaveBeenCalledWith(true);
   });
 
-  it('emitTypingStopped broadcasts isTyping false except the user', async () => {
-    gateway.emitTypingStopped(CHAT, USER);
-    await jest.advanceTimersByTimeAsync(0);
+  it('emitTypingStopped broadcasts isTyping false except the user, without a directory lookup', () => {
+    gateway.emitTypingStopped(CHAT, typer);
+    expect(getUsers).not.toHaveBeenCalled();
     expect(except).toHaveBeenCalledWith(`user:${USER}`);
     expect(emit).toHaveBeenCalledWith('typing', {
       chatId: CHAT,

@@ -19,6 +19,8 @@ export interface ICommentLikeRepository {
   ): Promise<boolean>;
   /** Active likes (`deletedAt IS NULL`). */
   count(commentId: string): Promise<number>;
+  /** Runs `work` in one transaction; pass its handle to `like` and the outbox. */
+  runInTransaction<T>(work: (tx: EntityManager) => Promise<T>): Promise<T>;
   likedBy(commentId: string, userId: string): Promise<boolean>;
 }
 

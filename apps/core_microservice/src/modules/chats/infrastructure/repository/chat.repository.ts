@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, IsNull } from 'typeorm';
-import type { Repository } from 'typeorm';
+import type { EntityManager, Repository } from 'typeorm';
 
 import {
   DatabaseQueryError,
@@ -17,6 +17,7 @@ import {
   ParticipantRole,
 } from '../../domain/entities/chat-participant.entity';
 import { Message } from '../../domain/entities/message.entity';
+import { MessageAttachment } from '../../domain/entities/message-attachment.entity';
 import { ChatNotFoundError } from '../../domain/errors/chat.errors';
 import type {
   ChatSummary,
@@ -45,6 +46,50 @@ export function clampLimit(
 export function asTombstone(message: Message): Message {
   if (message.deletedAt != null) message.content = null;
   return message;
+}
+
+/**
+ * Fills `attachmentIds` and `attachments` of the live messages with one query
+ * (joined with the asset rows), in display order. Deleted messages have no
+ * links left.
+ */
+export async function loadAttachments(
+  messages: Message[],
+  manager: EntityManager,
+): Promise<void> {
+  const live = messages.filter((m) => m.deletedAt == null);
+  if (live.length === 0) return;
+
+  const rows = await manager.getRepository(MessageAttachment).find({
+    where: { messageId: In(live.map((m) => m.id)) },
+    relations: { asset: true },
+    order: { displayOrder: 'ASC' },
+  });
+  const byMessage = new Map<string, MessageAttachment[]>();
+  for (const row of rows) {
+    const list = byMessage.get(row.messageId) ?? [];
+    list.push(row);
+    byMessage.set(row.messageId, list);
+  }
+
+  for (const message of live) {
+    const links = byMessage.get(message.id) ?? [];
+    message.attachmentIds = links.map((l) => l.assetId);
+    message.attachments = links.flatMap((l) =>
+      l.asset?.storageKey
+        ? [
+            {
+              assetId: l.assetId,
+              displayOrder: l.displayOrder,
+              storageKey: l.asset.storageKey,
+              mimeType: l.asset.mimeType,
+              size: l.asset.size,
+              originalName: l.asset.originalName,
+            },
+          ]
+        : [],
+    );
+  }
 }
 
 /** Maps a TypeORM write failure to the shared database errors. */
@@ -204,6 +249,8 @@ export class ChatRepository
       .orderBy('m.chatId')
       .addOrderBy('m.seq', 'DESC')
       .getMany();
+    // One query for every preview's attachments (not one per chat).
+    await loadAttachments(latest, manager);
     const latestByChat = new Map(
       latest.map((message) => [message.chatId, asTombstone(message)]),
     );

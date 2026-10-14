@@ -69,6 +69,7 @@ export interface IConversationSummary {
   title: string | null; // group name; null for DIRECT
   counterpart: IChatUser | null; // DIRECT only
   memberCount: number;
+  /** Latest visible message; attachments are included (presigned). */
   lastMessage: IMessage | null;
   lastActivityAt: string;
   lastChangeSeq: number;

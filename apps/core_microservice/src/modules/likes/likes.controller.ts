@@ -8,7 +8,12 @@ import {
   Put,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import type { ILikeState } from '@repo/contracts';
 
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -25,6 +30,10 @@ export class LikesController {
   @Put('posts/:postId/like')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Like a post (idempotent)' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Like state for the post after the call',
+  })
   likePost(
     @CurrentUser('sub') userId: string,
     @Param('postId', ParseUUIDPipe) postId: string,
@@ -34,6 +43,10 @@ export class LikesController {
 
   @Delete('posts/:postId/like')
   @ApiOperation({ summary: 'Remove your like from a post (idempotent)' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Like state for the post after the call',
+  })
   unlikePost(
     @CurrentUser('sub') userId: string,
     @Param('postId', ParseUUIDPipe) postId: string,
@@ -44,6 +57,10 @@ export class LikesController {
   @Put('comments/:commentId/like')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Like a comment (idempotent)' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Like state for the comment after the call',
+  })
   likeComment(
     @CurrentUser('sub') userId: string,
     @Param('commentId', ParseUUIDPipe) commentId: string,
@@ -53,6 +70,10 @@ export class LikesController {
 
   @Delete('comments/:commentId/like')
   @ApiOperation({ summary: 'Remove your like from a comment (idempotent)' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Like state for the comment after the call',
+  })
   unlikeComment(
     @CurrentUser('sub') userId: string,
     @Param('commentId', ParseUUIDPipe) commentId: string,

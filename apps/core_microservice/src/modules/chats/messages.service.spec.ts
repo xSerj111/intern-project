@@ -258,8 +258,17 @@ describe('MessagesService', () => {
 
       await service.send(ME, CHAT_ID, dto);
 
-      expect(realtime.emitTypingStopped).toHaveBeenCalledWith(CHAT_ID, ME);
+      expect(realtime.emitTypingStopped).toHaveBeenCalledWith(CHAT_ID, SENDER);
       expect(committedAtEmit).toEqual([true, true]);
+    });
+
+    it('looks the sender up once and skips typing stopped without a profile', async () => {
+      directory.getUsers.mockResolvedValue(new Map());
+
+      await service.send(ME, CHAT_ID, dto);
+
+      expect(directory.getUsers).toHaveBeenCalledTimes(1);
+      expect(realtime.emitTypingStopped).not.toHaveBeenCalled();
     });
 
     it('does not emit typing stopped for a replay', async () => {
@@ -793,7 +802,12 @@ describe('MessagesService', () => {
         expect(realtime.emitToChat).toHaveBeenCalledWith(
           CHAT_ID,
           'message:deleted',
-          { chatId: CHAT_ID, messageId: MESSAGE_ID, changeSeq: 6 },
+          {
+            chatId: CHAT_ID,
+            messageId: MESSAGE_ID,
+            changeSeq: 6,
+            deletedAt: stored.deletedAt.toISOString(),
+          },
         );
       });
 

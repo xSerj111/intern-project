@@ -24,6 +24,7 @@ import {
   sleep,
   waitFor,
 } from './helpers/realtime.helpers';
+import { cleanupE2eData } from './helpers/cleanup.helpers';
 
 jest.setTimeout(90000);
 
@@ -163,7 +164,7 @@ describe('Notifications relay and chat alerts, US6 (e2e)', () => {
 
   afterAll(async () => {
     sockets.forEach((s) => s.socket.close());
-    // Best-effort cleanup; auth users and profiles stay (no helper yet).
+    // Best-effort cleanup of chats, posts and outbox rows, then users and profiles.
     try {
       if (chatIds.length) {
         await rows(
@@ -191,6 +192,7 @@ describe('Notifications relay and chat alerts, US6 (e2e)', () => {
       console.warn('relay e2e cleanup failed', err);
     }
     await Promise.all(sessions.map((s) => logout(s).catch(() => 0)));
+    if (db) await cleanupE2eData(db);
     await publishChannel?.close().catch(() => undefined);
     await app?.close();
     if (previousRelayQueue === undefined) {

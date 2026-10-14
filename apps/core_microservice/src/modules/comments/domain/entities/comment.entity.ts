@@ -39,7 +39,11 @@ export class Comment extends TypeormEntityBase {
   authorId!: string;
 
   @ManyToOne('UserProfile')
-  @JoinColumn({ name: 'authorId', referencedColumnName: 'authUserId' })
+  @JoinColumn({
+    name: 'authorId',
+    referencedColumnName: 'authUserId',
+    foreignKeyConstraintName: 'FK_comments_authorId_authUserId',
+  })
   author!: UserProfile;
 
   @Column({ type: 'text' })

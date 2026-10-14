@@ -6,9 +6,16 @@ import { TypeormRepositoryBase } from '@repo/shared';
 import { Post, PostStatus } from '../../domain/entities/post.entity';
 import { PostLike } from '../../domain/entities/post-like.entity';
 import type { PostProps } from '../../domain/interfaces/post.props';
+import type {
+  IPostRepository,
+  LikeStats,
+} from '../../domain/interfaces/post-repository.port';
 
 @Injectable()
-export class PostRepository extends TypeormRepositoryBase<Post, PostProps> {
+export class PostRepository
+  extends TypeormRepositoryBase<Post, PostProps>
+  implements IPostRepository
+{
   public static readonly entity = Post;
   // Joined by default so reads include the post's author profile.
   protected relations: string[] = ['author', 'assets'];
@@ -18,6 +25,10 @@ export class PostRepository extends TypeormRepositoryBase<Post, PostProps> {
     repository: Repository<Post>,
   ) {
     super(repository);
+  }
+
+  async findById(id: string): Promise<Post | null> {
+    return this.repository.findOne({ where: { id } });
   }
 
   async getFeedForAuthors(
@@ -70,8 +81,8 @@ export class PostRepository extends TypeormRepositoryBase<Post, PostProps> {
   async getLikeStats(
     postIds: string[],
     viewerId?: string,
-  ): Promise<Map<string, { likeCount: number; likedByMe: boolean }>> {
-    const stats = new Map<string, { likeCount: number; likedByMe: boolean }>(
+  ): Promise<Map<string, LikeStats>> {
+    const stats = new Map<string, LikeStats>(
       postIds.map((id) => [id, { likeCount: 0, likedByMe: false }]),
     );
     if (postIds.length === 0) return stats;

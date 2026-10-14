@@ -17,22 +17,18 @@ import { CommentResponseDto } from './dto/comment-response.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../../common/auth/optional-jwt-auth.guard';
 import { Comment } from './domain/entities/comment.entity';
-import { CommentRepository } from './infrastructure/repository/comment.repository';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @Controller('comments')
 export class CommentsController {
-  constructor(
-    private readonly commentsService: CommentsService,
-    private readonly commentRepository: CommentRepository,
-  ) {}
+  constructor(private readonly commentsService: CommentsService) {}
 
   /** Wraps comments with like counts and the viewer's own like (one query). */
   private async toResponses(
     comments: Comment[],
     viewerId?: string,
   ): Promise<CommentResponseDto[]> {
-    const stats = await this.commentRepository.getLikeStats(
+    const stats = await this.commentsService.getLikeStats(
       comments.map((comment) => comment.id),
       viewerId,
     );

@@ -18,17 +18,18 @@ import { env } from '../config/env';
 class FakeCache implements ICacheService {
   readonly store = new Map<string, { value: string; ttl: number }>();
 
-  async get(key: string) {
-    return this.store.get(key)?.value ?? null;
+  get(key: string) {
+    return Promise.resolve(this.store.get(key)?.value ?? null);
   }
-  async setWithExpiry(key: string, value: string, ttlSeconds: number) {
+  setWithExpiry(key: string, value: string, ttlSeconds: number) {
     this.store.set(key, { value, ttl: ttlSeconds });
+    return Promise.resolve();
   }
-  async delete(key: string) {
-    return this.store.delete(key) ? 1 : 0;
+  delete(key: string) {
+    return Promise.resolve(this.store.delete(key) ? 1 : 0);
   }
-  async has(key: string) {
-    return this.store.has(key);
+  has(key: string) {
+    return Promise.resolve(this.store.has(key));
   }
   async getOrSet(key: string, factory: () => Promise<string>, ttl: number) {
     const cached = await this.get(key);
@@ -37,6 +38,12 @@ class FakeCache implements ICacheService {
     await this.setWithExpiry(key, value, ttl);
     return value;
   }
+}
+
+interface SessionJson {
+  userId: string;
+  sid: string;
+  expiresAt: string;
 }
 
 describe('AuthService', () => {
@@ -88,13 +95,13 @@ describe('AuthService', () => {
 
     expect(entry).toBeDefined();
     expect(entry!.ttl).toBeGreaterThan(0);
-    const session = JSON.parse(entry!.value);
+    const session = JSON.parse(entry!.value) as SessionJson;
     expect(session).toEqual({
       userId: user.id,
-      sid: expect.any(String),
+      sid: expect.any(String) as string,
       ipAddress: ctx.ipAddress,
       userAgent: ctx.userAgent,
-      expiresAt: expect.any(String),
+      expiresAt: expect.any(String) as string,
     });
     expect(new Date(session.expiresAt).getTime()).toBeGreaterThan(Date.now());
   });
@@ -161,7 +168,7 @@ describe('AuthService', () => {
     expect(sidOf(refreshToken)).toBe(sid);
     const session = JSON.parse(
       cache.store.get(RedisKeys.refreshSession(jtiOf(refreshToken)))!.value,
-    );
+    ) as SessionJson;
     expect(session.sid).toBe(sid);
   });
 
@@ -173,7 +180,7 @@ describe('AuthService', () => {
     expect(sidOf(second.refreshToken)).toBe(sidOf(first.accessToken));
     const session = JSON.parse(
       cache.store.get(RedisKeys.refreshSession(jtiOf(second.refreshToken)))!.value,
-    );
+    ) as SessionJson;
     expect(session.sid).toBe(sidOf(first.accessToken));
   });
 
@@ -183,9 +190,10 @@ describe('AuthService', () => {
       'password',
       ctx,
     );
-    publisher.publish.mockImplementation(async () => {
+    publisher.publish.mockImplementation(() => {
       expect(cache.store.has(RedisKeys.accessBlacklist(jtiOf(accessToken)))).toBe(true);
       expect(cache.store.has(RedisKeys.refreshBlacklist(jtiOf(refreshToken)))).toBe(true);
+      return Promise.resolve();
     });
 
     await service.logout(refreshToken, accessToken);
@@ -195,7 +203,7 @@ describe('AuthService', () => {
       userId: user.id,
       sid: sidOf(accessToken),
       jti: jtiOf(accessToken),
-      revokedAt: expect.any(String),
+      revokedAt: expect.any(String) as string,
     });
   });
 

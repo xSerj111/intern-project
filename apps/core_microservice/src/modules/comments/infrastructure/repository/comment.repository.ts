@@ -1,17 +1,19 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import type { Repository } from 'typeorm';
+import type { EntityManager, Repository } from 'typeorm';
 
 import { TypeormRepositoryBase } from '@repo/shared';
 import { Comment } from '../../domain/entities/comment.entity';
 import { CommentLike } from '../../domain/entities/comment-like.entity';
 import type { CommentProps } from '../../domain/interfaces/comment.props';
+import type { ICommentRepository } from '../../domain/interfaces/comment-repository.port';
+import type { LikeStats } from '../../../posts/domain/interfaces/post-repository.port';
 
 @Injectable()
-export class CommentRepository extends TypeormRepositoryBase<
-  Comment,
-  CommentProps
-> {
+export class CommentRepository
+  extends TypeormRepositoryBase<Comment, CommentProps>
+  implements ICommentRepository
+{
   public static readonly entity = Comment;
   protected relations: string[] = ['author'];
 
@@ -20,6 +22,21 @@ export class CommentRepository extends TypeormRepositoryBase<
     repository: Repository<Comment>,
   ) {
     super(repository);
+  }
+
+  /**
+   * Inside a transaction the raw TypeORM error propagates so the caller's
+   * transaction wrapper maps it; outside, the base `save` maps it.
+   */
+  override async save(comment: Comment, tx?: EntityManager): Promise<Comment> {
+    if (!tx) return super.save(comment);
+    return tx.getRepository(Comment).save(comment);
+  }
+
+  async runInTransaction<T>(
+    work: (tx: EntityManager) => Promise<T>,
+  ): Promise<T> {
+    return this.repository.manager.transaction(work);
   }
 
   /** Comments for a post, newest first, with the author profile joined. */
@@ -39,8 +56,8 @@ export class CommentRepository extends TypeormRepositoryBase<
   async getLikeStats(
     commentIds: string[],
     viewerId?: string,
-  ): Promise<Map<string, { likeCount: number; likedByMe: boolean }>> {
-    const stats = new Map<string, { likeCount: number; likedByMe: boolean }>(
+  ): Promise<Map<string, LikeStats>> {
+    const stats = new Map<string, LikeStats>(
       commentIds.map((id) => [id, { likeCount: 0, likedByMe: false }]),
     );
     if (commentIds.length === 0) return stats;

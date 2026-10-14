@@ -173,7 +173,7 @@ describe('EmailWorker', () => {
       RECIPIENT_ID,
       'NEW_MESSAGE',
     );
-    for (let i = 0; i < 3; i++) failed.recordFailure(new Error('x'));
+    failed.markFailed(new Error('x'));
     const { worker, mailer } = setup(failed);
 
     await expect(worker.handle(JOB, ctx(1))).resolves.toBeUndefined();

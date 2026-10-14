@@ -22,21 +22,17 @@ import { SearchQueryDto } from './dto/search-query.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../../common/auth/optional-jwt-auth.guard';
 import { Post } from './domain/entities/post.entity';
-import { PostRepository } from './infrastructure/repository/post.repository';
 
 @Controller('posts')
 export class PostsController {
-  constructor(
-    private readonly postsService: PostsService,
-    private readonly postRepository: PostRepository,
-  ) {}
+  constructor(private readonly postsService: PostsService) {}
 
   /** Wraps posts with like counts and the viewer's own like (one query). */
   private async toResponses(
     posts: Post[],
     viewerId?: string,
   ): Promise<PostResponseDto[]> {
-    const stats = await this.postRepository.getLikeStats(
+    const stats = await this.postsService.getLikeStats(
       posts.map((post) => post.id),
       viewerId,
     );

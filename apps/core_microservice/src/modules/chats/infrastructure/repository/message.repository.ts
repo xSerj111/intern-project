@@ -14,7 +14,12 @@ import type {
   HistoryPageOptions,
   IMessageRepository,
 } from '../../domain/interfaces/message-repository.port';
-import { asTombstone, clampLimit, toPersistenceError } from './chat.repository';
+import {
+  asTombstone,
+  clampLimit,
+  loadAttachments,
+  toPersistenceError,
+} from './chat.repository';
 
 export const HISTORY_DEFAULT_LIMIT = 50;
 export const HISTORY_MAX_LIMIT = 100;
@@ -200,47 +205,11 @@ export class MessageRepository
     return message ? asTombstone(message) : null;
   }
 
-  /**
-   * Fills `attachmentIds` and `attachments` of the live messages with one
-   * query (joined with the asset rows), in display order. Deleted messages
-   * have no links left.
-   */
+  /** Fills the live messages' attachments with one query (see `loadAttachments`). */
   private async withAttachments(
     messages: Message[],
     manager: EntityManager = this.repository.manager,
   ): Promise<void> {
-    const live = messages.filter((m) => m.deletedAt == null);
-    if (live.length === 0) return;
-
-    const rows = await manager.getRepository(MessageAttachment).find({
-      where: { messageId: In(live.map((m) => m.id)) },
-      relations: { asset: true },
-      order: { displayOrder: 'ASC' },
-    });
-    const byMessage = new Map<string, MessageAttachment[]>();
-    for (const row of rows) {
-      const list = byMessage.get(row.messageId) ?? [];
-      list.push(row);
-      byMessage.set(row.messageId, list);
-    }
-
-    for (const message of live) {
-      const links = byMessage.get(message.id) ?? [];
-      message.attachmentIds = links.map((l) => l.assetId);
-      message.attachments = links.flatMap((l) =>
-        l.asset?.storageKey
-          ? [
-              {
-                assetId: l.assetId,
-                displayOrder: l.displayOrder,
-                storageKey: l.asset.storageKey,
-                mimeType: l.asset.mimeType,
-                size: l.asset.size,
-                originalName: l.asset.originalName,
-              },
-            ]
-          : [],
-      );
-    }
+    await loadAttachments(messages, manager);
   }
 }

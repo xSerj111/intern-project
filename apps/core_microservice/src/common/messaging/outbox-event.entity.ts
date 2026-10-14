@@ -7,7 +7,7 @@ import { Column, Entity, Index, PrimaryGeneratedColumn } from 'typeorm';
  */
 @Entity('outbox_events')
 @Index('IDX_outbox_events_pending', ['occurredAt'], {
-  where: '"publishedAt" IS NULL',
+  where: '"publishedAt" IS NULL AND "deadLetteredAt" IS NULL',
 })
 export class OutboxEvent {
   @PrimaryGeneratedColumn('uuid', {
@@ -26,9 +26,17 @@ export class OutboxEvent {
   @Column({ type: 'timestamptz', default: () => 'now()' })
   occurredAt!: Date;
 
-  /** null = pending. */
+  /** null and not dead-lettered = pending. */
   @Column({ type: 'timestamptz', nullable: true })
   publishedAt!: Date | null;
+
+  /**
+   * Set when the relay gave up after the configured number of failed publish
+   * attempts. Dead rows are skipped (and never purged); `lastError` says why.
+   * Re-queue by hand with `SET "deadLetteredAt" = NULL, "attempts" = 0`.
+   */
+  @Column({ type: 'timestamptz', nullable: true })
+  deadLetteredAt!: Date | null;
 
   @Column({ type: 'int', default: 0 })
   attempts!: number;

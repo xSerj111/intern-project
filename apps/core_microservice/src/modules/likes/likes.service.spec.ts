@@ -1,9 +1,8 @@
 import { Test } from '@nestjs/testing';
-import { getDataSourceToken } from '@nestjs/typeorm';
 import { EntityByIdNotFoundError, LoggerKey, RoutingKeys } from '@repo/shared';
 import { OUTBOX_PORT } from '../../common/messaging/outbox.port';
-import { CommentRepository } from '../comments/infrastructure/repository/comment.repository';
-import { PostRepository } from '../posts/infrastructure/repository/post.repository';
+import { COMMENT_REPOSITORY } from '../comments/domain/interfaces/comment-repository.port';
+import { POST_REPOSITORY } from '../posts/domain/interfaces/post-repository.port';
 import { USER_DIRECTORY_PORT } from '../profiles/domain/interfaces/user-directory.port';
 import { COMMENT_LIKE_REPOSITORY } from './domain/interfaces/comment-like-repository.port';
 import { POST_LIKE_REPOSITORY } from './domain/interfaces/post-like-repository.port';
@@ -39,25 +38,25 @@ describe('LikesService', () => {
 
   const postRepo = { findOneByIdOrThrow: jest.fn() };
   const commentRepo = { findOneByIdOrThrow: jest.fn() };
+  const runInTransaction = jest.fn(
+    async (work: (m: unknown) => Promise<unknown>) => work(tx),
+  );
   const postLikes = {
     like: jest.fn(),
     unlike: jest.fn(),
     count: jest.fn(),
     likedBy: jest.fn(),
+    runInTransaction,
   };
   const commentLikes = {
     like: jest.fn(),
     unlike: jest.fn(),
     count: jest.fn(),
     likedBy: jest.fn(),
+    runInTransaction,
   };
   const directory = { getUsers: jest.fn(), assertUsersExist: jest.fn() };
   const outbox = { add: jest.fn() };
-  const dataSource = {
-    transaction: jest.fn(async (work: (m: unknown) => Promise<unknown>) =>
-      work(tx),
-    ),
-  };
 
   beforeEach(async () => {
     jest.clearAllMocks();
@@ -102,9 +101,8 @@ describe('LikesService', () => {
     const module = await Test.createTestingModule({
       providers: [
         LikesService,
-        { provide: getDataSourceToken(), useValue: dataSource },
-        { provide: PostRepository, useValue: postRepo },
-        { provide: CommentRepository, useValue: commentRepo },
+        { provide: POST_REPOSITORY, useValue: postRepo },
+        { provide: COMMENT_REPOSITORY, useValue: commentRepo },
         { provide: POST_LIKE_REPOSITORY, useValue: postLikes },
         { provide: COMMENT_LIKE_REPOSITORY, useValue: commentLikes },
         { provide: USER_DIRECTORY_PORT, useValue: directory },

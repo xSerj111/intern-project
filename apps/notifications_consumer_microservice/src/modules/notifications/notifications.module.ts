@@ -3,6 +3,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { PreferencesModule } from '../preferences/preferences.module';
 import { MessageAlertHandler } from './application/message-alert.handler';
 import { EmailWorker } from './application/email.worker';
+import { ProcessedEventPurgeScheduler } from './application/processed-event-purge.scheduler';
 import { SocialEventHandler } from './application/social-event.handler';
 import { EmailDelivery } from './domain/entities/email-delivery.entity';
 import { Notification } from './domain/entities/notification.entity';
@@ -54,6 +55,7 @@ import { NotificationsService } from './notifications.service';
     SocialEventHandler,
     MessageAlertHandler,
     EmailWorker,
+    ProcessedEventPurgeScheduler,
   ],
 })
 export class NotificationsModule {}

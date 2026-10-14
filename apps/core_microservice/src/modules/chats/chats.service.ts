@@ -10,6 +10,10 @@ import {
   type Logger,
 } from '@repo/shared';
 import { Chat } from './domain/entities/chat.entity';
+import {
+  ATTACHMENT_STORAGE_PORT,
+  type IAttachmentStoragePort,
+} from './domain/interfaces/attachment-storage.port';
 import { ChatNotFoundError } from './domain/errors/chat.errors';
 import {
   CHAT_REALTIME_PORT,
@@ -21,6 +25,7 @@ import {
   type IChatRepository,
 } from './domain/interfaces/chat-repository.port';
 import {
+  presignAttachments,
   collectUserIds,
   toConversationDetail,
   toConversationSummary,
@@ -46,6 +51,8 @@ export class ChatsService {
     @Inject(USER_DIRECTORY_PORT)
     private readonly userDirectory: IUserDirectoryPort,
     @Inject(CHAT_REALTIME_PORT) private readonly realtime: IChatRealtimePort,
+    @Inject(ATTACHMENT_STORAGE_PORT)
+    private readonly storage: IAttachmentStoragePort,
   ) {}
 
   async createDirect(
@@ -78,9 +85,11 @@ export class ChatsService {
     const users = await this.userDirectory.getUsers([me, targetUserId]);
     for (const userId of [me, targetUserId]) {
       this.realtime.joinUserToChat(userId, saved.id);
+      const summary = await this.requireSummary(saved.id, userId);
       const conversation: IConversationSummary = toConversationSummary(
-        await this.requireSummary(saved.id, userId),
+        summary,
         users,
+        await this.urlsFor([summary]),
       );
       this.realtime.emitToUser(userId, 'chat:upsert', { conversation });
     }
@@ -101,8 +110,9 @@ export class ChatsService {
     const hasMore = rows.length > limit;
     const page = rows.slice(0, limit);
     const users = await this.userDirectory.getUsers(collectUserIds(page));
+    const urls = await this.urlsFor(page);
     return {
-      items: page.map((s) => toConversationSummary(s, users)),
+      items: page.map((s) => toConversationSummary(s, users, urls)),
       hasMore,
     };
   }
@@ -153,6 +163,18 @@ export class ChatsService {
   ): Promise<ConversationDetailDto> {
     const summary = await this.requireSummary(chat.id, userId);
     const users = await this.userDirectory.getUsers(collectUserIds([summary]));
-    return toConversationDetail(summary, users);
+    return toConversationDetail(summary, users, await this.urlsFor([summary]));
+  }
+
+  /** Presigned URLs for the previews' attachments, signed as one batch. */
+  private urlsFor(summaries: ChatSummary[]) {
+    return presignAttachments(
+      summaries.flatMap((s) => (s.lastMessage ? [s.lastMessage] : [])),
+      this.storage,
+      (assetId, reason) =>
+        this.logger.warn('Attachment presign failed', {
+          props: { assetId, error: reason },
+        }),
+    );
   }
 }

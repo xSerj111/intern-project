@@ -14,6 +14,7 @@ import {
   registerAndLogin,
   sleep,
 } from './helpers/realtime.helpers';
+import { cleanupE2eData } from './helpers/cleanup.helpers';
 
 jest.setTimeout(90000);
 
@@ -126,7 +127,7 @@ describe('Social: likes, events, outbox (e2e)', () => {
   });
 
   afterAll(async () => {
-    // Best-effort cleanup; auth users and profiles stay (no helper yet).
+    // Best-effort cleanup of posts, comments and likes, then users and profiles.
     try {
       if (commentIds.length) {
         await rows('DELETE FROM comment_likes WHERE "commentId" = ANY($1)', [
@@ -156,6 +157,7 @@ describe('Social: likes, events, outbox (e2e)', () => {
       console.warn('social e2e cleanup failed', err);
     }
     await Promise.all([a, b].filter(Boolean).map((s) => logout(s)));
+    if (db) await cleanupE2eData(db);
     await app.close();
   });
 

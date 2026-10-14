@@ -2,13 +2,10 @@ import { Module } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { LoggerModule } from '@repo/shared';
 
-import { Comment } from '../comments/domain/entities/comment.entity';
+import { CommentsModule } from '../comments/comments.module';
 import { CommentLike } from '../comments/domain/entities/comment-like.entity';
-import { CommentRepository } from '../comments/infrastructure/repository/comment.repository';
-import { Post } from '../posts/domain/entities/post.entity';
+import { PostsModule } from '../posts/posts.module';
 import { PostLike } from '../posts/domain/entities/post-like.entity';
-import { PostAsset } from '../posts/domain/entities/post-asset.entity';
-import { PostRepository } from '../posts/infrastructure/repository/post.repository';
 import { ProfilesModule } from '../profiles/profiles.module';
 import { COMMENT_LIKE_REPOSITORY } from './domain/interfaces/comment-like-repository.port';
 import { POST_LIKE_REPOSITORY } from './domain/interfaces/post-like-repository.port';
@@ -17,19 +14,19 @@ import { PostLikeRepository } from './infrastructure/repository/post-like.reposi
 import { LikesController } from './likes.controller';
 import { LikesService } from './likes.service';
 
-// OUTBOX_PORT comes from the global MessagingModule.
+// OUTBOX_PORT comes from the global MessagingModule; POST_REPOSITORY and
+// COMMENT_REPOSITORY are exported by the posts and comments modules.
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Post, PostAsset, PostLike, Comment, CommentLike]),
+    TypeOrmModule.forFeature([PostLike, CommentLike]),
     LoggerModule.forFeature('LikesService'),
     ProfilesModule,
+    PostsModule,
+    CommentsModule,
   ],
   controllers: [LikesController],
   providers: [
     LikesService,
-    // Own instances of the finders: avoids editing the posts/comments modules.
-    PostRepository,
-    CommentRepository,
     { provide: POST_LIKE_REPOSITORY, useClass: PostLikeRepository },
     { provide: COMMENT_LIKE_REPOSITORY, useClass: CommentLikeRepository },
   ],

@@ -1,5 +1,4 @@
 import { Inject, Injectable } from '@nestjs/common';
-import { InjectDataSource } from '@nestjs/typeorm';
 import type { ILikeState } from '@repo/contracts';
 import {
   type ActorSnapshot,
@@ -9,14 +8,19 @@ import {
   type PostLikedPayload,
   RoutingKeys,
 } from '@repo/shared';
-import type { DataSource } from 'typeorm';
 
 import {
   OUTBOX_PORT,
   type IOutboxPort,
 } from '../../common/messaging/outbox.port';
-import { CommentRepository } from '../comments/infrastructure/repository/comment.repository';
-import { PostRepository } from '../posts/infrastructure/repository/post.repository';
+import {
+  COMMENT_REPOSITORY,
+  type ICommentRepository,
+} from '../comments/domain/interfaces/comment-repository.port';
+import {
+  POST_REPOSITORY,
+  type IPostRepository,
+} from '../posts/domain/interfaces/post-repository.port';
 import {
   USER_DIRECTORY_PORT,
   type IUserDirectoryPort,
@@ -39,9 +43,10 @@ import {
 export class LikesService {
   constructor(
     @Inject(LoggerKey) private readonly logger: Logger,
-    @InjectDataSource() private readonly dataSource: DataSource,
-    private readonly postRepository: PostRepository,
-    private readonly commentRepository: CommentRepository,
+    @Inject(POST_REPOSITORY)
+    private readonly postRepository: IPostRepository,
+    @Inject(COMMENT_REPOSITORY)
+    private readonly commentRepository: ICommentRepository,
     @Inject(POST_LIKE_REPOSITORY)
     private readonly postLikes: IPostLikeRepository,
     @Inject(COMMENT_LIKE_REPOSITORY)
@@ -55,7 +60,7 @@ export class LikesService {
     const post = await this.postRepository.findOneByIdOrThrow(postId);
     post.assertLikeableBy(userId);
 
-    await this.dataSource.transaction(async (tx) => {
+    await this.postLikes.runInTransaction(async (tx) => {
       const { inserted } = await this.postLikes.like(postId, userId, tx);
       // Only a genuinely new like notifies: a restore or repeat never does.
       if (inserted && post.notifiesAuthorOfLikeBy(userId)) {
@@ -87,7 +92,7 @@ export class LikesService {
     const post = await this.postRepository.findOneByIdOrThrow(comment.postId);
     comment.assertLikeableBy(userId, post);
 
-    await this.dataSource.transaction(async (tx) => {
+    await this.commentLikes.runInTransaction(async (tx) => {
       const { inserted } = await this.commentLikes.like(commentId, userId, tx);
       if (inserted && comment.notifiesAuthorOfLikeBy(userId)) {
         const payload: CommentLikedPayload = {

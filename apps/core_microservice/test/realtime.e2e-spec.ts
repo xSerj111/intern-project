@@ -4,7 +4,13 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { DomainExceptionFilter } from '@repo/shared';
 import request from 'supertest';
+import { DataSource } from 'typeorm';
 import { AppModule } from './../src/app.module';
+import {
+  CHAT_REALTIME_PORT,
+  type IChatRealtimePort,
+} from './../src/modules/chats/domain/interfaces/chat-realtime.port';
+import { cleanupE2eData } from './helpers/cleanup.helpers';
 import {
   type ConnectResult,
   type Session,
@@ -13,6 +19,7 @@ import {
   login,
   logout,
   registerAndLogin,
+  registerMany,
   sleep,
   waitFor,
 } from './helpers/realtime.helpers';
@@ -23,6 +30,7 @@ describe('Realtime chat, US1 (e2e)', () => {
   let app: INestApplication;
   let baseUrl: string;
   let http: ReturnType<typeof request>;
+  let db: DataSource;
   const sockets: ConnectResult[] = [];
 
   let a: Session;
@@ -59,6 +67,7 @@ describe('Realtime chat, US1 (e2e)', () => {
     baseUrl = await app.getUrl();
     baseUrl = baseUrl.replace('[::1]', 'localhost');
     http = request(app.getHttpServer());
+    db = app.get(DataSource);
 
     [a, b, c] = await Promise.all([
       registerAndLogin('a'),
@@ -74,6 +83,8 @@ describe('Realtime chat, US1 (e2e)', () => {
 
   afterAll(async () => {
     sockets.forEach((s) => s.socket.close());
+    // Removes the users, profiles and chats this file created.
+    if (db) await cleanupE2eData(db);
     await app?.close();
   });
 
@@ -255,6 +266,92 @@ describe('Realtime chat, US1 (e2e)', () => {
       expect(toEnd.body.lastReadSeq).toBe(last);
       expect(toEnd.body.unreadCount).toBe(0);
       expect((await summaryFor(b)).unreadCount).toBe(0);
+    });
+  });
+
+  describe('typing and chat:view', () => {
+    let sA1: ConnectResult;
+    let sA2: ConnectResult;
+    let sB: ConnectResult;
+    let sC: ConnectResult;
+    const typingOf = (s: ConnectResult) => eventsNamed(s, 'typing');
+    const emitView = (s: ConnectResult, body: unknown) =>
+      s.socket.emitWithAck('chat:view', body);
+
+    beforeAll(async () => {
+      [sA1, sA2, sB, sC] = await Promise.all([
+        track(a.accessToken),
+        track(a.accessToken),
+        track(b.accessToken),
+        track(c.accessToken),
+      ]);
+      expect([sA1.ok, sA2.ok, sB.ok, sC.ok]).toEqual([true, true, true, true]);
+    });
+
+    it('relays typing:start to the other participant, never to the sender or an outsider', async () => {
+      sA1.socket.emit('typing:start', { chatId });
+      expect(await waitFor(() => typingOf(sB).length === 1)).toBe(true);
+      expect(typingOf(sB)[0]).toMatchObject({
+        chatId,
+        isTyping: true,
+        user: { userId: a.userId },
+      });
+      expect(typingOf(sB)[0].user.displayName).toEqual(expect.any(String));
+      await sleep(300);
+      // Neither the typing socket nor another socket of the same user hears it.
+      expect(typingOf(sA1)).toHaveLength(0);
+      expect(typingOf(sA2)).toHaveLength(0);
+      expect(typingOf(sC)).toHaveLength(0);
+    });
+
+    it('relays typing:stop, and throttles a start repeated within the window', async () => {
+      sA1.socket.emit('typing:start', { chatId });
+      await sleep(300);
+      expect(typingOf(sB)).toHaveLength(1);
+
+      sA1.socket.emit('typing:stop', { chatId });
+      expect(await waitFor(() => typingOf(sB).length === 2)).toBe(true);
+      expect(typingOf(sB)[1]).toMatchObject({ chatId, isTyping: false });
+
+      // A stop resets the throttle, so the next start is relayed at once.
+      sA1.socket.emit('typing:start', { chatId });
+      expect(await waitFor(() => typingOf(sB).length === 3)).toBe(true);
+      expect(typingOf(sB)[2]).toMatchObject({ chatId, isTyping: true });
+      sA1.socket.emit('typing:stop', { chatId });
+      expect(await waitFor(() => typingOf(sB).length === 4)).toBe(true);
+    });
+
+    it('ignores typing for a chat the socket is not in', async () => {
+      const before = typingOf(sB).length;
+      sC.socket.emit('typing:start', { chatId });
+      sC.socket.emit('typing:stop', { chatId });
+      sC.socket.emit('typing:start', { chatId: randomUUID() });
+      await sleep(400);
+      expect(typingOf(sB)).toHaveLength(before);
+      expect(typingOf(sA1)).toHaveLength(0);
+    });
+
+    it('chat:view marks the user as viewing a chat they belong to, and clears it', async () => {
+      const gateway = app.get<IChatRealtimePort>(CHAT_REALTIME_PORT, {
+        strict: false,
+      });
+      expect(gateway.isUserViewingChat(a.userId, chatId)).toBe(false);
+      expect(await emitView(sA1, { chatId })).toEqual({ ok: true });
+      expect(gateway.isUserViewingChat(a.userId, chatId)).toBe(true);
+      expect(gateway.isUserViewingChat(b.userId, chatId)).toBe(false);
+
+      expect(await emitView(sA1, { chatId: null })).toEqual({ ok: true });
+      expect(gateway.isUserViewingChat(a.userId, chatId)).toBe(false);
+    });
+
+    it('chat:view for a chat the socket is not in acks ok but records nothing', async () => {
+      const gateway = app.get<IChatRealtimePort>(CHAT_REALTIME_PORT, {
+        strict: false,
+      });
+      expect(await emitView(sC, { chatId })).toEqual({ ok: true });
+      expect(gateway.isUserViewingChat(c.userId, chatId)).toBe(false);
+      expect(await emitView(sC, undefined)).toEqual({ ok: true });
+      expect(gateway.isUserViewingChat(c.userId, chatId)).toBe(false);
     });
   });
 
@@ -627,6 +724,93 @@ describe('Realtime chat, US1 (e2e)', () => {
       expect(promotions()[1].message.systemEvent.targetUserIds).toEqual([
         c.userId,
       ]);
+    });
+  });
+
+  describe('group size bounds (GROUP_MAX_MEMBERS = 100)', () => {
+    let others: Session[];
+    let gid: string;
+    const membersOf = async (s: Session) =>
+      (await http.get(`/chats/${gid}`).set(authed(s)).expect(200)).body;
+    const systemCount = async (s: Session) => {
+      const res = await http
+        .get(`/chats/${gid}/messages`)
+        .query({ limit: 100 })
+        .set(authed(s))
+        .expect(200);
+      return (res.body.items as Array<{ kind: string }>).filter(
+        (m) => m.kind === 'SYSTEM',
+      ).length;
+    };
+
+    beforeAll(async () => {
+      // 100 other users: 99 fill the group with A, the last one is the 101st.
+      others = await registerMany('cap', 100);
+      for (let i = 0; i < others.length; i += 10) {
+        await Promise.all(
+          others
+            .slice(i, i + 10)
+            .map((s) => http.get('/profiles/me').set(authed(s)).expect(200)),
+        );
+      }
+    }, 180000);
+
+    it('rejects a group created with 100 invitees (101 members)', async () => {
+      await http
+        .post('/chats/groups')
+        .set(authed(a))
+        .send({ title: 'Too big', memberIds: others.map((s) => s.userId) })
+        .expect(400);
+    });
+
+    it('creates a group of exactly 100 members (creator + 99 invitees)', async () => {
+      const res = await http
+        .post('/chats/groups')
+        .set(authed(a))
+        .send({
+          title: 'Full house',
+          memberIds: others.slice(0, 99).map((s) => s.userId),
+        })
+        .expect(201);
+      gid = res.body.id;
+      expect(res.body.memberCount).toBe(100);
+      expect(res.body.participants).toHaveLength(100);
+      expect((await membersOf(others[0])).memberCount).toBe(100);
+    });
+
+    it('rejects adding a 101st member and leaves the group unchanged', async () => {
+      const before = await systemCount(a);
+      await http
+        .post(`/chats/${gid}/members`)
+        .set(authed(a))
+        .send({ userIds: [others[99].userId] })
+        .expect(400);
+      expect((await membersOf(a)).memberCount).toBe(100);
+      expect(await systemCount(a)).toBe(before);
+      await http.get(`/chats/${gid}`).set(authed(others[99])).expect(404);
+    });
+
+    it('treats re-adding an active member as a no-op, even in a full group', async () => {
+      const before = await systemCount(a);
+      const res = await http
+        .post(`/chats/${gid}/members`)
+        .set(authed(a))
+        .send({ userIds: [others[0].userId] })
+        .expect(200);
+      expect(res.body.memberCount).toBe(100);
+      await sleep(300);
+      expect(await systemCount(a)).toBe(before);
+    });
+
+    it('frees a slot when a member leaves, and the 101st can then join', async () => {
+      await http.post(`/chats/${gid}/leave`).set(authed(others[1])).expect(204);
+      const res = await http
+        .post(`/chats/${gid}/members`)
+        .set(authed(a))
+        .send({ userIds: [others[99].userId] })
+        .expect(200);
+      expect(res.body.memberCount).toBe(100);
+      await http.get(`/chats/${gid}`).set(authed(others[99])).expect(200);
     });
   });
 

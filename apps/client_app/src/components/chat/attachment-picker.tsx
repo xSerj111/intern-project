@@ -1,6 +1,10 @@
 'use client';
 
-import type { IUploadedAttachment } from '@repo/contracts';
+import {
+  ATTACHMENT_MAX_BYTES,
+  MESSAGE_MAX_ATTACHMENTS,
+  type IUploadedAttachment,
+} from '@repo/contracts';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { ApiError } from '../../lib/api/client';
@@ -9,9 +13,6 @@ import { getAccessToken } from '../../lib/auth/refresh';
 
 import styles from './attachment-picker.module.css';
 import { formatFileSize } from './message-attachments';
-
-export const MESSAGE_MAX_ATTACHMENTS = 10;
-export const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 
 export interface AttachmentUpload {
   key: string;

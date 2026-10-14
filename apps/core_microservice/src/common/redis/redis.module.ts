@@ -1,4 +1,10 @@
-import { Global, Inject, Logger, Module, OnModuleDestroy } from '@nestjs/common';
+import {
+  Global,
+  Inject,
+  Logger,
+  Module,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import Redis from 'ioredis';
 import { AppConfigService } from '../../config/app-config.service';
 
@@ -22,7 +28,9 @@ export const REDIS_CLIENT = Symbol.for('REDIS_CLIENT');
           maxRetriesPerRequest: 1,
         });
         const logger = new Logger('Redis');
-        client.on('error', (err: Error) => logger.error(`Redis error: ${err.message}`));
+        client.on('error', (err: Error) =>
+          logger.error(`Redis error: ${err.message}`),
+        );
         return client;
       },
     },

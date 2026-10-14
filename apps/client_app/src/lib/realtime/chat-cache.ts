@@ -396,12 +396,16 @@ export function handleMessageNew(
 }
 
 /** The tombstone a deleted message turns into (no text, no attachments). */
-function toTombstone(message: ChatMessage, changeSeq: number): ChatMessage {
+function toTombstone(
+  message: ChatMessage,
+  changeSeq: number,
+  deletedAt?: string,
+): ChatMessage {
   return {
     ...message,
     content: null,
     attachments: [],
-    deletedAt: message.deletedAt ?? new Date().toISOString(),
+    deletedAt: message.deletedAt ?? deletedAt ?? new Date().toISOString(),
     changeSeq,
   };
 }
@@ -455,7 +459,13 @@ export function handleMessageDeleted(
     chatId,
     messageId,
     changeSeq,
-  }: { chatId: string; messageId: string; changeSeq: number },
+    deletedAt,
+  }: {
+    chatId: string;
+    messageId: string;
+    changeSeq: number;
+    deletedAt?: string;
+  },
 ): void {
   const key = chatKeys.messages(chatId);
   const data = client.getQueryData<ChatMessagesData>(key);
@@ -464,7 +474,7 @@ export function handleMessageDeleted(
       ...data,
       items: data.items.map((m) =>
         m.id === messageId && m.changeSeq < changeSeq
-          ? toTombstone(m, changeSeq)
+          ? toTombstone(m, changeSeq, deletedAt)
           : m,
       ),
       cursor: Math.max(data.cursor, changeSeq),
@@ -473,7 +483,7 @@ export function handleMessageDeleted(
     stateOf(client).missedWhileLoading.add(chatId);
   }
   refreshPreview(client, chatId, messageId, changeSeq, (m) =>
-    toTombstone(m, changeSeq),
+    toTombstone(m, changeSeq, deletedAt),
   );
 }
 
@@ -686,6 +696,7 @@ export function registerChatCacheHandlers(
     chatId: string;
     messageId: string;
     changeSeq: number;
+    deletedAt: string;
   }) => handleMessageDeleted(client, payload);
   const onChatUpsert = (payload: { conversation: IConversationSummary }) =>
     handleChatUpsert(client, payload);

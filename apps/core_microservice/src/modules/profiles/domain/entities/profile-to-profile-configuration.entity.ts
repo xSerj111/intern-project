@@ -21,7 +21,11 @@ export class ProfileToProfileConfiguration {
   actorId!: string;
 
   @ManyToOne(() => UserProfile, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'actorId', referencedColumnName: 'authUserId' })
+  @JoinColumn({
+    name: 'actorId',
+    referencedColumnName: 'authUserId',
+    foreignKeyConstraintName: 'FK_profile_configurations_actorId_authUserId',
+  })
   actor!: UserProfile;
 
   // The profile being targeted/configured
@@ -29,7 +33,11 @@ export class ProfileToProfileConfiguration {
   targetId!: string;
 
   @ManyToOne(() => UserProfile, { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'targetId', referencedColumnName: 'authUserId' })
+  @JoinColumn({
+    name: 'targetId',
+    referencedColumnName: 'authUserId',
+    foreignKeyConstraintName: 'FK_profile_configurations_targetId_authUserId',
+  })
   target!: UserProfile;
 
   // --- Configuration Toggles ---

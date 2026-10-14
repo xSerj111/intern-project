@@ -1,5 +1,7 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
 import { TypeormEntityBase } from '@repo/shared';
+import { MESSAGE_MAX_ATTACHMENTS } from '@repo/contracts';
+import { bigintNumberTransformer } from '../../../../common/typeorm/bigint-number.transformer';
 import type { Chat } from './chat.entity';
 // Type-only import: relation target resolved by entity name (string) to avoid a
 // runtime dependency on the profiles module.
@@ -15,7 +17,7 @@ import {
 } from '../errors/chat.errors';
 
 export const MESSAGE_CONTENT_MAX_LENGTH = 2000;
-export const MESSAGE_MAX_ATTACHMENTS = 10;
+export { MESSAGE_MAX_ATTACHMENTS };
 
 export type MessageKind = 'USER' | 'SYSTEM';
 
@@ -72,13 +74,6 @@ export interface MessageViewer {
   joinedSeq: number;
 }
 
-// Postgres returns bigint as string; sequences stay far below 2^53.
-const bigintTransformer = {
-  to: (value?: number | null): number | null | undefined => value,
-  from: (value: string | null): number | null =>
-    value === null || value === undefined ? null : Number(value),
-};
-
 @Entity('messages')
 @Index('IDX_messages_chatId_seq', ['chatId', 'seq'], { unique: true })
 @Index('IDX_messages_chatId_changeSeq', ['chatId', 'changeSeq'])
@@ -102,7 +97,11 @@ export class Message extends TypeormEntityBase {
   authorId!: string;
 
   @ManyToOne('UserProfile', { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'authorId', referencedColumnName: 'authUserId' })
+  @JoinColumn({
+    name: 'authorId',
+    referencedColumnName: 'authUserId',
+    foreignKeyConstraintName: 'FK_messages_authorId_authUserId',
+  })
   author!: UserProfile;
 
   @Column({ type: 'varchar', length: 10, default: 'USER' })
@@ -112,11 +111,11 @@ export class Message extends TypeormEntityBase {
   @Column({ type: 'text', nullable: true })
   content!: string | null;
 
-  @Column({ type: 'bigint', transformer: bigintTransformer })
+  @Column({ type: 'bigint', transformer: bigintNumberTransformer })
   seq!: number;
 
   // Equals seq at creation; bumped on edit/delete. Catch-up cursor.
-  @Column({ type: 'bigint', transformer: bigintTransformer })
+  @Column({ type: 'bigint', transformer: bigintNumberTransformer })
   changeSeq!: number;
 
   @Column({ type: 'uuid', nullable: true })

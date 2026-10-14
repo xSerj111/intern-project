@@ -44,7 +44,7 @@ export function createAuthRouter(authService: AuthService): Router {
    */
   router.post('/login', validateBody(LoginDto), async (req, res, next) => {
     try {
-      const { email, password } = req.body;
+      const { email, password } = req.body as LoginDto;
       const result = await authService.login(email, password, sessionContext(req));
       res.status(200).json(result);
     } catch (error) {
@@ -79,7 +79,7 @@ export function createAuthRouter(authService: AuthService): Router {
    */
   router.post('/google', validateBody(GoogleLoginDto), async (req, res, next) => {
     try {
-      const { idToken } = req.body;
+      const { idToken } = req.body as GoogleLoginDto;
       const result = await authService.loginWithGoogle(idToken, sessionContext(req));
       res.status(200).json(result);
     } catch (error) {
@@ -134,7 +134,7 @@ export function createAuthRouter(authService: AuthService): Router {
    */
   router.post('/refresh', validateBody(RefreshTokenDto), async (req, res, next) => {
     try {
-      const { refreshToken } = req.body;
+      const { refreshToken } = req.body as RefreshTokenDto;
       const result = await authService.refreshToken(refreshToken, sessionContext(req));
       res.status(200).json(result);
     } catch (error) {
@@ -166,7 +166,7 @@ export function createAuthRouter(authService: AuthService): Router {
    */
   router.post('/logout', validateBody(RefreshTokenDto), async (req, res, next) => {
     try {
-      const { refreshToken } = req.body;
+      const { refreshToken } = req.body as RefreshTokenDto;
       // Optional: logout must still work when the access token has already expired.
       const [type, accessToken] = req.headers.authorization?.split(' ') ?? [];
       await authService.logout(refreshToken, type === 'Bearer' ? accessToken : undefined);

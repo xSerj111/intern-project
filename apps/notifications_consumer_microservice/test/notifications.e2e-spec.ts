@@ -8,10 +8,12 @@ import {
   type EventEnvelope,
   type RoutingKey,
 } from '@repo/shared';
+import { connect } from 'amqplib';
 import * as jwt from 'jsonwebtoken';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { AppModule } from './../src/app.module';
+import { EVENTS_QUEUE } from './../src/common/messaging/amqp-topology';
 import { AppConfigService } from './../src/config/app-config.service';
 import { MessageAlertHandler } from './../src/modules/notifications/application/message-alert.handler';
 import { SocialEventHandler } from './../src/modules/notifications/application/social-event.handler';
@@ -57,6 +59,7 @@ describe('Notifications service (e2e)', () => {
   let http: ReturnType<typeof request>;
   let db: DataSource;
   let jwtSecret: string;
+  let amqpUrl: string;
 
   let notifications: INotificationRepository;
   let processedEvents: IProcessedEventRepository;
@@ -198,6 +201,44 @@ describe('Notifications service (e2e)', () => {
     return last;
   };
 
+  /**
+   * Removes the dead-lettered copy of one event from the DLQ, so a run leaves
+   * nothing behind. Other messages are put back untouched. Returns whether the
+   * event's message was found before the timeout.
+   */
+  const removeFromDlq = async (
+    eventId: string,
+    timeoutMs = 5000,
+  ): Promise<boolean> => {
+    const conn = await connect(amqpUrl);
+    try {
+      const channel = await conn.createChannel();
+      const others: Awaited<ReturnType<typeof channel.get>>[] = [];
+      let found = false;
+      const deadline = Date.now() + timeoutMs;
+      while (!found && Date.now() < deadline) {
+        const msg = await channel.get(EVENTS_QUEUE.deadLetterQueue!);
+        if (msg === false) {
+          await sleep(100);
+          continue;
+        }
+        if (msg.content.toString().includes(eventId)) {
+          channel.ack(msg);
+          found = true;
+        } else {
+          others.push(msg);
+        }
+      }
+      for (const msg of others) {
+        if (msg !== false) channel.nack(msg, false, true);
+      }
+      await channel.close();
+      return found;
+    } finally {
+      await conn.close();
+    }
+  };
+
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
       imports: [AppModule],
@@ -212,6 +253,7 @@ describe('Notifications service (e2e)', () => {
     http = request(app.getHttpServer());
     db = app.get(DataSource);
     jwtSecret = app.get(AppConfigService).jwtSecret;
+    amqpUrl = app.get(AppConfigService).rabbitmq.url;
 
     notifications = app.get<INotificationRepository>(NOTIFICATION_REPOSITORY);
     processedEvents = app.get<IProcessedEventRepository>(
@@ -810,8 +852,11 @@ describe('Notifications service (e2e)', () => {
       });
 
       await bus.publish(RoutingKeys.USER_FOLLOWED, env);
-      await sleep(1500);
+      // Waits for the poison message to reach the DLQ and removes it again.
+      const deadLettered = await removeFromDlq(env.eventId);
+      await sleep(500);
 
+      expect(deadLettered).toBe(true);
       expect(await notifications.findBySourceEventId(env.eventId)).toBeNull();
       expect(await processedEvents.findById(env.eventId)).toBeNull();
       expect(await countFor(recipient)).toBe(0);

@@ -1,30 +1,28 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { CommentsController } from './comments.controller';
 import { CommentsService } from './comments.service';
-import { CommentRepository } from './infrastructure/repository/comment.repository';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../../common/auth/optional-jwt-auth.guard';
 import { fakeComment } from './__tests__/fakers/comment.faker';
 
 describe('CommentsController', () => {
   let controller: CommentsController;
-  const commentsService = { getCommentsByPost: jest.fn() };
-  const commentRepository = { getLikeStats: jest.fn() };
+  const commentsService = {
+    getCommentsByPost: jest.fn(),
+    getLikeStats: jest.fn(),
+  };
   const comment = fakeComment();
 
   beforeEach(async () => {
     jest.clearAllMocks();
     commentsService.getCommentsByPost.mockResolvedValue([comment]);
-    commentRepository.getLikeStats.mockResolvedValue(
+    commentsService.getLikeStats.mockResolvedValue(
       new Map([[comment.id, { likeCount: 2, likedByMe: true }]]),
     );
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [CommentsController],
-      providers: [
-        { provide: CommentsService, useValue: commentsService },
-        { provide: CommentRepository, useValue: commentRepository },
-      ],
+      providers: [{ provide: CommentsService, useValue: commentsService }],
     })
       .overrideGuard(JwtAuthGuard)
       .useValue({ canActivate: () => true })
@@ -46,7 +44,7 @@ describe('CommentsController', () => {
         comment.postId,
       );
 
-      expect(commentRepository.getLikeStats).toHaveBeenCalledWith(
+      expect(commentsService.getLikeStats).toHaveBeenCalledWith(
         [comment.id],
         'viewer-1',
       );
@@ -54,7 +52,7 @@ describe('CommentsController', () => {
     });
 
     it('works for an anonymous viewer (no user id)', async () => {
-      commentRepository.getLikeStats.mockResolvedValue(
+      commentsService.getLikeStats.mockResolvedValue(
         new Map([[comment.id, { likeCount: 2, likedByMe: false }]]),
       );
 
@@ -63,7 +61,7 @@ describe('CommentsController', () => {
         comment.postId,
       );
 
-      expect(commentRepository.getLikeStats).toHaveBeenCalledWith(
+      expect(commentsService.getLikeStats).toHaveBeenCalledWith(
         [comment.id],
         undefined,
       );

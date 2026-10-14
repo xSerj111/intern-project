@@ -42,7 +42,11 @@ export class Post extends TypeormEntityBase {
   authorId!: string;
 
   @ManyToOne('UserProfile')
-  @JoinColumn({ name: 'authorId', referencedColumnName: 'authUserId' })
+  @JoinColumn({
+    name: 'authorId',
+    referencedColumnName: 'authUserId',
+    foreignKeyConstraintName: 'FK_posts_authorId_authUserId',
+  })
   author!: UserProfile;
 
   @Column({ type: 'text' })

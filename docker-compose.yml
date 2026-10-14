@@ -78,6 +78,7 @@ services:
       mc mb myminio/innogram-assets || true;
       mc anonymous set download myminio/innogram-assets;
       mc mb myminio/innogram-private || true;
+      mc anonymous set none myminio/innogram-private;
       echo 'MinIO setup complete!';
       exit 0;
       "

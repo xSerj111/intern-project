@@ -53,7 +53,9 @@ describe('AccessTokenVerifier', () => {
   });
 
   it('returns invalid for a token without jti', async () => {
-    await expect(verifier.verify(sign(undefined, { expiresIn: 60 }))).resolves.toEqual({
+    await expect(
+      verifier.verify(sign(undefined, { expiresIn: 60 })),
+    ).resolves.toEqual({
       ok: false,
       reason: 'invalid',
     });

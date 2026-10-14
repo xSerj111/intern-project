@@ -49,6 +49,20 @@ export class AppConfigService {
     };
   }
 
+  /** Outbox relay settings. */
+  get outbox() {
+    const maxAttempts = Number(
+      this.config.get<string>('OUTBOX_MAX_ATTEMPTS', '10'),
+    );
+
+    if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
+      throw new Error('OUTBOX_MAX_ATTEMPTS must be a positive integer');
+    }
+
+    // Failed publishes after which the relay dead-letters a row (skips it).
+    return { maxAttempts };
+  }
+
   get s3() {
     const port = Number(this.config.get<string>('S3_PORT', '9000'));
 

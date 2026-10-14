@@ -34,6 +34,19 @@ describe('AuthDirectoryAdapter', () => {
 
   afterEach(() => jest.restoreAllMocks());
 
+  it('reads the internal secrets at construction so a bad config fails at startup', () => {
+    const config = {
+      authInternalUrl: 'http://auth.internal:3012',
+      get internalApiToken(): string {
+        throw new Error('INTERNAL_API_TOKEN missing');
+      },
+    } as AppConfigService;
+
+    expect(() => new AuthDirectoryAdapter(config, contacts)).toThrow(
+      'INTERNAL_API_TOKEN missing',
+    );
+  });
+
   it('returns the cached email without calling auth when fresh', async () => {
     findByUserId.mockResolvedValue(
       RecipientContact.create(USER_ID, 'cached@x.io', new Date()),

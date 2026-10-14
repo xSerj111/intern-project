@@ -16,11 +16,18 @@ export const AUTH_LOOKUP_TIMEOUT_MS = 3000;
  */
 @Injectable()
 export class AuthDirectoryAdapter implements IRecipientDirectory {
+  private readonly baseUrl: string;
+  private readonly internalToken: string;
+
   constructor(
-    private readonly config: AppConfigService,
+    config: AppConfigService,
     @Inject(RECIPIENT_CONTACT_REPOSITORY)
     private readonly contacts: IRecipientContactRepository,
-  ) {}
+  ) {
+    // Read at construction so a missing/weak secret fails at startup, not on the first email.
+    this.baseUrl = config.authInternalUrl.replace(/\/+$/, '');
+    this.internalToken = config.internalApiToken;
+  }
 
   async getEmail(userId: string): Promise<string | null> {
     const now = new Date();
@@ -43,11 +50,10 @@ export class AuthDirectoryAdapter implements IRecipientDirectory {
   }
 
   private async fetchEmail(userId: string): Promise<string | null> {
-    const baseUrl = this.config.authInternalUrl.replace(/\/+$/, '');
     const response = await fetch(
-      `${baseUrl}/internal/users/${encodeURIComponent(userId)}/contact`,
+      `${this.baseUrl}/internal/users/${encodeURIComponent(userId)}/contact`,
       {
-        headers: { 'X-Internal-Token': this.config.internalApiToken },
+        headers: { 'X-Internal-Token': this.internalToken },
         signal: AbortSignal.timeout(AUTH_LOOKUP_TIMEOUT_MS),
       },
     );

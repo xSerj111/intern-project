@@ -6,9 +6,11 @@ import type { IOutboxPort } from './outbox.port';
 
 /**
  * Delay before waking the relay for a row written inside a transaction.
- * TypeORM has no after-commit hook, so the signal is deferred a little; if the
- * relay still wins the race it simply finds nothing and its poll picks the row
- * up on the next tick.
+ * TypeORM has no after-commit hook, so the signal is a fixed timer rather than
+ * a true post-commit signal. Trade-off: a transaction that outlasts the delay
+ * is not visible yet, so the relay finds nothing and the row waits for its
+ * 500 ms poll (a latency cost, never a lost event); a rolled-back transaction
+ * costs one empty drain.
  */
 const POST_COMMIT_WAKE_DELAY_MS = 25;
 
@@ -44,6 +46,7 @@ export class TypeOrmOutboxAdapter implements IOutboxPort {
     return tx
       .createQueryBuilder(OutboxEvent, 'outbox')
       .where('outbox."publishedAt" IS NULL')
+      .andWhere('outbox."deadLetteredAt" IS NULL')
       .orderBy('outbox."occurredAt"', 'ASC')
       .limit(limit)
       .setLock('pessimistic_write')
@@ -73,6 +76,32 @@ export class TypeOrmOutboxAdapter implements IOutboxPort {
       .createQueryBuilder()
       .update(OutboxEvent)
       .set({ attempts: () => '"attempts" + 1', lastError: error })
+      .where('id = :id', { id })
+      .execute();
+  }
+
+  async recordError(
+    id: string,
+    error: string,
+    tx: EntityManager,
+  ): Promise<void> {
+    await tx
+      .createQueryBuilder()
+      .update(OutboxEvent)
+      .set({ lastError: error })
+      .where('id = :id', { id })
+      .execute();
+  }
+
+  async markDead(id: string, error: string, tx: EntityManager): Promise<void> {
+    await tx
+      .createQueryBuilder()
+      .update(OutboxEvent)
+      .set({
+        attempts: () => '"attempts" + 1',
+        lastError: error,
+        deadLetteredAt: () => 'now()',
+      })
       .where('id = :id', { id })
       .execute();
   }

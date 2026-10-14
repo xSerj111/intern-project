@@ -15,6 +15,7 @@ export interface ServerToClientEvents {
     chatId: string;
     messageId: string;
     changeSeq: number;
+    deletedAt: string; // ISO, the tombstone's deletion time
   }) => void;
   'chat:upsert': (payload: { conversation: IConversationSummary }) => void;
   'chat:removed': (payload: {

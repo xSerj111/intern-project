@@ -2,6 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import 'multer';
 import type {
   IAttachmentUrl,
+  IChatUser,
   ICursorPage,
   IUploadedAttachment,
 } from '@repo/contracts';
@@ -27,7 +28,6 @@ import type { ChatParticipant } from './domain/entities/chat-participant.entity'
 import {
   Message,
   type AttachmentCandidate,
-  type MessageAttachmentFile,
 } from './domain/entities/message.entity';
 import {
   ChatNotFoundError,
@@ -52,10 +52,12 @@ import {
 import {
   ATTACHMENT_STORAGE_PORT,
   type IAttachmentStoragePort,
-  type PresignedAttachmentUrl,
   type StoredAttachment,
 } from './domain/interfaces/attachment-storage.port';
-import { toMessageResponse } from './dto/chat-response.mapper';
+import {
+  presignAttachments,
+  toMessageResponse,
+} from './dto/chat-response.mapper';
 import type { EditMessageDto } from './dto/edit-message.dto';
 import type { ListMessagesQueryDto } from './dto/list-messages-query.dto';
 import type { MessageChangesQueryDto } from './dto/message-changes-query.dto';
@@ -107,7 +109,8 @@ export class MessagesService {
 
     const attachmentIds = dto.attachmentIds ?? [];
     // One profile lookup per send, outside the tx. Null: no alerts (the send still succeeds).
-    const actor = await this.loadActor(me);
+    const sender = await this.loadSender(me);
+    const actor = sender ? { ...sender } : null;
     let message: Message;
     let alerts: ChatMessageAlertedPayload[] = [];
     try {
@@ -158,7 +161,7 @@ export class MessagesService {
       props: { chatId, messageId: message.id, seq: response.seq },
     });
     this.emitToChat(chatId, 'message:new', { message: response });
-    this.emitTypingStopped(chatId, me);
+    if (sender) this.emitTypingStopped(chatId, sender);
     // Same set as the outbox rows: a viewer gets neither the socket alert nor the email.
     for (const alert of alerts) this.emitChatAlert(alert);
     return { message: response, created: true };
@@ -194,8 +197,8 @@ export class MessagesService {
    * fresh `changeSeq`; `message:deleted` goes out after the commit.
    */
   async delete(me: string, chatId: string, messageId: string): Promise<void> {
-    const { changeSeq, storageKeys } = await this.chats.runInTransaction(
-      async (tx) => {
+    const { changeSeq, deletedAt, storageKeys } =
+      await this.chats.runInTransaction(async (tx) => {
         const found = await this.loadOwnVisible(me, chatId, messageId, tx);
         const assetIds = [...found.attachmentIds];
         const seq = await this.messages.allocateSeq(chatId, tx);
@@ -207,9 +210,12 @@ export class MessagesService {
           assetIds,
           tx,
         );
-        return { changeSeq: seq, storageKeys: keys };
-      },
-    );
+        return {
+          changeSeq: seq,
+          deletedAt: found.deletedAt,
+          storageKeys: keys,
+        };
+      });
 
     this.logger.debug('Message deleted', {
       props: { chatId, messageId, changeSeq },
@@ -218,6 +224,7 @@ export class MessagesService {
       chatId,
       messageId,
       changeSeq,
+      deletedAt: deletedAt.toISOString(),
     });
     await this.deleteStoredObjects(chatId, messageId, storageKeys);
   }
@@ -463,25 +470,14 @@ export class MessagesService {
   private async toResponses(
     messages: Message[],
   ): Promise<MessageResponseDto[]> {
-    const files: MessageAttachmentFile[] = messages
-      .filter((m) => m.deletedAt == null)
-      .flatMap((m) => m.attachments);
-    const signed = await Promise.allSettled(
-      files.map((f) => this.storage.presign(f)),
-    );
-    const urls = new Map<string, PresignedAttachmentUrl>();
-    signed.forEach((result, i) => {
-      if (result.status === 'fulfilled') {
-        urls.set(files[i].assetId, result.value);
-      } else {
+    const urls = await presignAttachments(
+      messages,
+      this.storage,
+      (assetId, reason) =>
         this.logger.warn('Attachment presign failed', {
-          props: {
-            assetId: files[i].assetId,
-            error: String(result.reason),
-          },
-        });
-      }
-    });
+          props: { assetId, error: reason },
+        }),
+    );
     return messages.map((m) => toMessageResponse(m, urls));
   }
 
@@ -544,7 +540,7 @@ export class MessagesService {
     return text.slice(0, end);
   }
 
-  private async loadActor(userId: string): Promise<ActorSnapshot | null> {
+  private async loadSender(userId: string): Promise<IChatUser | null> {
     const user = (await this.directory.getUsers([userId])).get(userId);
     if (!user) {
       this.logger.warn('Skipping chat alerts: sender has no profile', {
@@ -552,7 +548,7 @@ export class MessagesService {
       });
       return null;
     }
-    return { ...user };
+    return user;
   }
 
   // Post-commit, best-effort: the outbox row still drives the email.
@@ -575,9 +571,9 @@ export class MessagesService {
     }
   }
 
-  private emitTypingStopped(chatId: string, userId: string): void {
+  private emitTypingStopped(chatId: string, user: IChatUser): void {
     try {
-      this.realtime.emitTypingStopped(chatId, userId);
+      this.realtime.emitTypingStopped(chatId, user);
     } catch (err: unknown) {
       this.logger.warn('typing stop emit failed', {
         props: {

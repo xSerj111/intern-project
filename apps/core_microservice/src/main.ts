@@ -21,7 +21,6 @@ async function bootstrap() {
 
   // 3. CORS - Konfiguracja pozwalająca frontendowi na dostęp
   app.enableCors({
-
     origin: process.env.CLIENT_URL || 'http://localhost:3000',
 
     // Pozwala na przesyłanie ciasteczek między domenami
@@ -57,4 +56,4 @@ async function bootstrap() {
   await app.listen(appConfig.port);
   console.log(`Core microservice runs on ${appConfig.port}`);
 }
-bootstrap();
+void bootstrap();

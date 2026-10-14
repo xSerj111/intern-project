@@ -6,6 +6,8 @@ import { ConfigService } from '@nestjs/config';
  * The single place the running app reads environment-derived settings. Required
  * settings use `getOrThrow`, so a missing variable fails fast at first read.
  */
+const INTERNAL_API_TOKEN_MIN_LENGTH = 32;
+
 @Injectable()
 export class AppConfigService {
   constructor(private readonly config: ConfigService) {}
@@ -59,7 +61,14 @@ export class AppConfigService {
 
   /** Shared secret for service-to-service calls to auth's internal API. */
   get internalApiToken(): string {
-    return this.config.getOrThrow<string>('INTERNAL_API_TOKEN');
+    const token = this.config.getOrThrow<string>('INTERNAL_API_TOKEN');
+    // Same floor as auth's own check, so a weak token fails here too.
+    if (token.length < INTERNAL_API_TOKEN_MIN_LENGTH) {
+      throw new Error(
+        `INTERNAL_API_TOKEN must be at least ${INTERNAL_API_TOKEN_MIN_LENGTH} characters long`,
+      );
+    }
+    return token;
   }
 
   /** Base URL of auth's internal (non-public) HTTP API. */

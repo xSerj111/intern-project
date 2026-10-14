@@ -3,7 +3,7 @@ import {
   JwtPayload,
   RefreshTokenPayload,
 } from '../../domain/interfaces/jwt.service.interface';
-import jwt from 'jsonwebtoken';
+import jwt, { SignOptions } from 'jsonwebtoken';
 import { env } from '../../config/env';
 import { randomUUID } from 'crypto';
 
@@ -12,8 +12,11 @@ export class JwtService implements IJwtService {
     return jwt.sign(
       payload,
       env.jwt.accessTokenSecret,
-      // Używamy "as any", aby uniknąć problemu z typowaniem wartości literowych (StringValue), z którym mierzyliśmy się wcześniej
-      { expiresIn: env.jwt.accessTokenExpiry as any, jwtid: randomUUID() },
+      // Env value is a plain string; the typings expect the narrower StringValue literal type
+      {
+        expiresIn: env.jwt.accessTokenExpiry as SignOptions['expiresIn'],
+        jwtid: randomUUID(),
+      },
     );
   }
 

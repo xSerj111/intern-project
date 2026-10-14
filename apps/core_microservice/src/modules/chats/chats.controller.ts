@@ -13,7 +13,12 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import type { Response } from 'express';
 import type {
   ICursorPage,
@@ -28,7 +33,7 @@ import { RenameGroupDto } from './dto/rename-group.dto';
 import { CreateDirectChatDto } from './dto/create-direct-chat.dto';
 import { ListChatsQueryDto } from './dto/list-chats-query.dto';
 import { MarkReadDto } from './dto/mark-read.dto';
-import type { ConversationDetailDto } from './dto/message-response.dto';
+import { ConversationDetailDto } from './dto/message-response.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
@@ -44,6 +49,17 @@ export class ChatsController {
 
   /** 201 when the conversation was created, 200 when the pair already had one. */
   @Post('direct')
+  @ApiOperation({ summary: 'Open or create a direct conversation' })
+  @ApiResponse({
+    status: HttpStatus.CREATED,
+    description: 'Direct conversation created',
+    type: ConversationDetailDto,
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Existing direct conversation for this pair',
+    type: ConversationDetailDto,
+  })
   async createDirect(
     @CurrentUser('sub') userId: string,
     @Body() dto: CreateDirectChatDto,
@@ -58,6 +74,12 @@ export class ChatsController {
   }
 
   @Post('groups')
+  @ApiOperation({ summary: 'Create a group conversation' })
+  @ApiResponse({
+    status: HttpStatus.CREATED,
+    description: 'Group conversation created; caller is ADMIN',
+    type: ConversationDetailDto,
+  })
   createGroup(
     @CurrentUser('sub') userId: string,
     @Body() dto: CreateGroupChatDto,
@@ -66,6 +88,11 @@ export class ChatsController {
   }
 
   @Get()
+  @ApiOperation({ summary: 'List your conversations (cursor page)' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Cursor page of conversation summaries',
+  })
   list(
     @CurrentUser('sub') userId: string,
     @Query() query: ListChatsQueryDto,
@@ -74,6 +101,12 @@ export class ChatsController {
   }
 
   @Get(':chatId')
+  @ApiOperation({ summary: 'Get one conversation with its participants' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Conversation detail',
+    type: ConversationDetailDto,
+  })
   getDetail(
     @CurrentUser('sub') userId: string,
     @Param('chatId', ParseUUIDPipe) chatId: string,
@@ -83,6 +116,11 @@ export class ChatsController {
 
   @Post(':chatId/read')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Mark a conversation read up to a sequence number' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Updated read state',
+  })
   markRead(
     @CurrentUser('sub') userId: string,
     @Param('chatId', ParseUUIDPipe) chatId: string,
@@ -92,6 +130,12 @@ export class ChatsController {
   }
 
   @Patch(':chatId')
+  @ApiOperation({ summary: 'Rename a group conversation (admins only)' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Conversation after rename',
+    type: ConversationDetailDto,
+  })
   rename(
     @CurrentUser('sub') userId: string,
     @Param('chatId', ParseUUIDPipe) chatId: string,
@@ -102,6 +146,12 @@ export class ChatsController {
 
   @Post(':chatId/members')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Add members to a group (admins only)' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Conversation after adding members',
+    type: ConversationDetailDto,
+  })
   addMembers(
     @CurrentUser('sub') userId: string,
     @Param('chatId', ParseUUIDPipe) chatId: string,
@@ -112,6 +162,11 @@ export class ChatsController {
 
   @Delete(':chatId/members/:userId')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Remove a member from a group (admins only)' })
+  @ApiResponse({
+    status: HttpStatus.NO_CONTENT,
+    description: 'Member removed',
+  })
   removeMember(
     @CurrentUser('sub') userId: string,
     @Param('chatId', ParseUUIDPipe) chatId: string,
@@ -122,6 +177,12 @@ export class ChatsController {
 
   @Post(':chatId/members/:userId/promote')
   @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Promote a group member to admin (admins only)' })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'Conversation after promotion',
+    type: ConversationDetailDto,
+  })
   promote(
     @CurrentUser('sub') userId: string,
     @Param('chatId', ParseUUIDPipe) chatId: string,
@@ -132,6 +193,11 @@ export class ChatsController {
 
   @Post(':chatId/leave')
   @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Leave a conversation' })
+  @ApiResponse({
+    status: HttpStatus.NO_CONTENT,
+    description: 'Left the conversation',
+  })
   leave(
     @CurrentUser('sub') userId: string,
     @Param('chatId', ParseUUIDPipe) chatId: string,

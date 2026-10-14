@@ -80,7 +80,7 @@ export class AuthService {
     let payload: JwtPayload;
     try {
       payload = this.jwtService.verifyAccessToken(token);
-    } catch (error) {
+    } catch {
       throw new UnauthorizedError('Invalid or expired access token');
     }
 
@@ -101,7 +101,7 @@ export class AuthService {
     let payload: RefreshTokenPayload;
     try {
       payload = this.jwtService.verifyRefreshToken(oldRefreshToken);
-    } catch (error) {
+    } catch {
       this.logger.debug('Refresh token failed: invalid or expired refresh token');
       throw new UnauthorizedError('Invalid or expired refresh token');
     }
@@ -123,7 +123,7 @@ export class AuthService {
 
     let session: { userId?: string; sid?: string };
     try {
-      session = JSON.parse(rawSession);
+      session = JSON.parse(rawSession) as { userId?: string; sid?: string };
     } catch {
       throw new UnauthorizedError('Invalid or expired refresh token');
     }
@@ -231,7 +231,8 @@ export class AuthService {
       secondsUntil(Math.floor(expiresAt.getTime() / 1000)),
     );
 
-    const { passwordHash: _, ...safeUser } = user;
+    const { passwordHash: omittedHash, ...safeUser } = user;
+    void omittedHash;
     return { accessToken, refreshToken, user: safeUser };
   }
 }

@@ -60,6 +60,12 @@ export async function login(email: string): Promise<Session> {
   return { email, userId: subOf(accessToken), accessToken, refreshToken };
 }
 
+/**
+ * Auth ids of every user `registerAndLogin` created in this test file (jest
+ * gives each file its own module registry), for `cleanupE2eData`.
+ */
+export const registeredUserIds: string[] = [];
+
 /** Registers a throwaway user through auth, then signs in. */
 export async function registerAndLogin(label: string): Promise<Session> {
   const email = `e2e-${label}+${Date.now()}-${Math.random().toString(36).slice(2, 8)}@test.local`;
@@ -72,7 +78,29 @@ export async function registerAndLogin(label: string): Promise<Session> {
       `register failed: ${reg.status} ${JSON.stringify(reg.json)}`,
     );
   }
-  return login(email);
+  const session = await login(email);
+  registeredUserIds.push(session.userId);
+  return session;
+}
+
+/** Registers `count` users, at most `concurrency` at a time (auth hashes passwords). */
+export async function registerMany(
+  label: string,
+  count: number,
+  concurrency = 8,
+): Promise<Session[]> {
+  const sessions: Session[] = new Array(count);
+  let next = 0;
+  const worker = async () => {
+    while (next < count) {
+      const i = next++;
+      sessions[i] = await registerAndLogin(`${label}${i}`);
+    }
+  };
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, count) }, worker),
+  );
+  return sessions;
 }
 
 export async function logout(session: Session): Promise<number> {

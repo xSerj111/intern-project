@@ -6,7 +6,7 @@ import type {
 import type { ConfirmChannel } from 'amqplib';
 import { EXCHANGE_NAME, EventEnvelope } from '@repo/shared';
 import { AMQP_CONNECTION } from './amqp-connection.provider';
-import { EventBusPort } from './event-bus.port';
+import { EventBusPort, EventRejectedError } from './event-bus.port';
 
 /** Rejects a publish that the broker has not confirmed within this window. */
 const PUBLISH_TIMEOUT_MS = 10_000;
@@ -33,18 +33,23 @@ export class AmqpEventBus implements EventBusPort, OnModuleDestroy {
   }
 
   async publish<T>(envelope: EventEnvelope<T>): Promise<void> {
-    await this.channel.publish(
-      EXCHANGE_NAME,
-      envelope.type,
-      Buffer.from(JSON.stringify(envelope)),
-      {
-        persistent: true,
-        messageId: envelope.eventId,
-        contentType: 'application/json',
-        type: envelope.type,
-        timestamp: Date.parse(envelope.occurredAt),
-      },
-    );
+    let content: Buffer;
+    try {
+      content = Buffer.from(JSON.stringify(envelope));
+    } catch (err) {
+      // Row-specific: no retry can fix it, so the relay may dead-letter it.
+      throw new EventRejectedError(
+        `Event ${envelope.eventId} cannot be serialized: ${(err as Error).message}`,
+        { cause: err },
+      );
+    }
+    await this.channel.publish(EXCHANGE_NAME, envelope.type, content, {
+      persistent: true,
+      messageId: envelope.eventId,
+      contentType: 'application/json',
+      type: envelope.type,
+      timestamp: Date.parse(envelope.occurredAt),
+    });
   }
 
   async onModuleDestroy(): Promise<void> {
