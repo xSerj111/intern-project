@@ -5,6 +5,7 @@ import {
   type ClientToServerEvents,
   type ServerToClientEvents,
 } from '@repo/contracts';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   createContext,
   useEffect,
@@ -23,6 +24,7 @@ import {
   subscribeTokens,
 } from '../auth/refresh';
 import { config } from '../config';
+import { registerChatCacheHandlers } from './chat-cache';
 
 export type RealtimeSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -67,6 +69,7 @@ function isRefreshRejection(error: unknown): boolean {
 export function RealtimeProvider({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
   const userId = user?.id ?? null;
+  const queryClient = useQueryClient();
 
   const [socket, setSocket] = useState<RealtimeSocket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
@@ -99,6 +102,11 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
         reconnectionDelayMax: 10_000,
       },
     );
+
+    // Socket events keep the chat caches live; every (re)connect catches up.
+    const unregisterChatCache = registerChatCacheHandlers(next, queryClient, {
+      userId,
+    });
 
     const signOut = () => {
       if (!disposed) {
@@ -221,12 +229,13 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       clearTimeout(stableTimer);
       window.removeEventListener('online', handleOnline);
       unsubscribeTokens();
+      unregisterChatCache();
       next.removeAllListeners();
       next.disconnect();
       setSocket(null);
       setIsConnected(false);
     };
-  }, [userId]);
+  }, [userId, queryClient]);
 
   const value = useMemo<RealtimeContextValue>(
     () => ({ socket, isConnected }),

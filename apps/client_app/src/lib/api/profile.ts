@@ -1,4 +1,8 @@
-import type { IProfileResponse } from '@repo/contracts';
+import type {
+  IChatUser,
+  IProfileResponse,
+  ISearchProfilesQuery,
+} from '@repo/contracts';
 
 import { coreApi } from './client';
 
@@ -11,4 +15,17 @@ export function getMyProfile(
   signal?: AbortSignal,
 ): Promise<IProfileResponse> {
   return coreApi<IProfileResponse>('/profiles/me', { token, signal });
+}
+
+/** Search users by username prefix (`GET /profiles/search`), no follow needed. */
+export function searchProfiles(
+  { q, limit }: ISearchProfilesQuery,
+  token?: string | null,
+  signal?: AbortSignal,
+): Promise<IChatUser[]> {
+  return coreApi<IChatUser[]>('/profiles/search', {
+    token,
+    signal,
+    query: { q, limit },
+  });
 }

@@ -1,0 +1,28 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+
+.textarea {
+  flex: 1 1 auto;
+  resize: none;
+  min-height: 2.75rem;
+  max-height: 8rem;
+}
+
+.counter {
+  align-self: flex-end;
+  font-size: 0.75rem;
+  color: var(--innogram-muted);
+}
+
+.counterOver {
+  color: var(--innogram-danger);
+}
