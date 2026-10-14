@@ -6,7 +6,12 @@ import {
   ManyToOne,
   OneToMany,
 } from 'typeorm';
-import { DomainError, TypeormEntityBase } from '@repo/shared';
+import {
+  DomainError,
+  EntityByIdNotFoundError,
+  EXCERPT_MAX_LENGTH,
+  TypeormEntityBase,
+} from '@repo/shared';
 // Type-only, string-target relations: no runtime coupling to other modules.
 import type { Comment } from '../../../comments/domain/entities/comment.entity';
 import type { UserProfile } from '../../../profiles/domain/entities/user-profile.entity';
@@ -89,5 +94,26 @@ export class Post extends TypeormEntityBase {
       throw new PostArchiveError(this.status);
     }
     this.status = PostStatus.Archived;
+  }
+
+  /**
+   * Whether `viewerId` may like this post: it must be published, or the
+   * viewer's own. Hidden posts look missing rather than forbidden.
+   * @throws EntityByIdNotFoundError when the post is not visible to the viewer
+   */
+  assertLikeableBy(viewerId: string): void {
+    if (this.status !== PostStatus.Published && this.authorId !== viewerId) {
+      throw new EntityByIdNotFoundError('Post', this.id);
+    }
+  }
+
+  /** A like notifies the author unless they liked their own post. */
+  notifiesAuthorOfLikeBy(likerId: string): boolean {
+    return likerId !== this.authorId;
+  }
+
+  /** Short plain-text preview of the body for notifications. */
+  excerpt(): string {
+    return this.content.trim().slice(0, EXCERPT_MAX_LENGTH);
   }
 }

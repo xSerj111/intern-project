@@ -42,6 +42,13 @@ export class AppConfigService {
     };
   }
 
+  /** RabbitMQ (AMQP) connection settings for the realtime event bus. */
+  get rabbitmq() {
+    return {
+      url: this.config.getOrThrow<string>('RABBITMQ_URL'),
+    };
+  }
+
   get s3() {
     const port = Number(this.config.get<string>('S3_PORT', '9000'));
 

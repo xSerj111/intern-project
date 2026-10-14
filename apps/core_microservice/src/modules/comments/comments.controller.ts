@@ -15,11 +15,42 @@ import { CommentsService } from './comments.service';
 import { CreateCommentDto, UpdateCommentDto } from '@repo/shared';
 import { CommentResponseDto } from './dto/comment-response.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { OptionalJwtAuthGuard } from '../../common/auth/optional-jwt-auth.guard';
+import { Comment } from './domain/entities/comment.entity';
+import { CommentRepository } from './infrastructure/repository/comment.repository';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
 @Controller('comments')
 export class CommentsController {
-  constructor(private readonly commentsService: CommentsService) {}
+  constructor(
+    private readonly commentsService: CommentsService,
+    private readonly commentRepository: CommentRepository,
+  ) {}
+
+  /** Wraps comments with like counts and the viewer's own like (one query). */
+  private async toResponses(
+    comments: Comment[],
+    viewerId?: string,
+  ): Promise<CommentResponseDto[]> {
+    const stats = await this.commentRepository.getLikeStats(
+      comments.map((comment) => comment.id),
+      viewerId,
+    );
+    return comments.map(
+      (comment) =>
+        new CommentResponseDto(
+          comment,
+          stats.get(comment.id) ?? { likeCount: 0, likedByMe: false },
+        ),
+    );
+  }
+
+  private async toResponse(
+    comment: Comment,
+    viewerId?: string,
+  ): Promise<CommentResponseDto> {
+    return (await this.toResponses([comment], viewerId))[0];
+  }
 
   @HttpPost()
   @UseGuards(JwtAuthGuard)
@@ -27,18 +58,21 @@ export class CommentsController {
     @CurrentUser('sub') authorId: string,
     @Body() createCommentDto: CreateCommentDto,
   ): Promise<CommentResponseDto> {
-    return new CommentResponseDto(
+    return this.toResponse(
       await this.commentsService.createComment(authorId, createCommentDto),
+      authorId,
     );
   }
 
   // Example route: GET /comments/post/1234sd-123d-213132.....
   @Get('post/:postId')
+  @UseGuards(OptionalJwtAuthGuard)
   async getCommentsByPost(
+    @CurrentUser('sub') userId: string | undefined,
     @Param('postId', ParseUUIDPipe) postId: string,
   ): Promise<CommentResponseDto[]> {
     const comments = await this.commentsService.getCommentsByPost(postId);
-    return comments.map((comment) => new CommentResponseDto(comment));
+    return this.toResponses(comments, userId);
   }
 
   @Patch(':id')
@@ -48,8 +82,9 @@ export class CommentsController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() updateCommentDto: UpdateCommentDto,
   ): Promise<CommentResponseDto> {
-    return new CommentResponseDto(
+    return this.toResponse(
       await this.commentsService.updateComment(userId, id, updateCommentDto),
+      userId,
     );
   }
 

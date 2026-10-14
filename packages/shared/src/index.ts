@@ -10,6 +10,11 @@ export * from "./dtos/auth/refresh-token.dto";
 // Events
 export * from "./events/user-created.event";
 export * from "./events/session-revoked.event";
+export * from "./events/event-envelope";
+export * from "./events/social.events";
+export * from "./events/chat-message-alerted.event";
+export * from "./events/notification.events";
+export * from "./events/email-job";
 
 // NOTE: API contracts (request/response interfaces) live in the dependency-free
 // `@repo/contracts` package so the frontend can import them without pulling in

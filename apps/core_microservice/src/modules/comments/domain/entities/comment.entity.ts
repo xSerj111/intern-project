@@ -1,5 +1,10 @@
 import { Column, Entity, Index, JoinColumn, ManyToOne } from 'typeorm';
-import { DomainError, TypeormEntityBase } from '@repo/shared';
+import {
+  DomainError,
+  EntityByIdNotFoundError,
+  EXCERPT_MAX_LENGTH,
+  TypeormEntityBase,
+} from '@repo/shared';
 // Type-only, string-target relations: no runtime coupling to other modules.
 import type { Post } from '../../../posts/domain/entities/post.entity';
 import type { UserProfile } from '../../../profiles/domain/entities/user-profile.entity';
@@ -61,5 +66,33 @@ export class Comment extends TypeormEntityBase {
       throw new EmptyCommentError();
     }
     this.content = next;
+  }
+
+  /**
+   * Whether `viewerId` may like this comment: a deleted comment is gone, and a
+   * comment is only as visible as its post.
+   * @throws EntityByIdNotFoundError when the comment is deleted
+   * @throws whatever `Post.assertLikeableBy` throws when the post is not visible
+   */
+  assertLikeableBy(viewerId: string, post: Post): void {
+    if (this.deletedAt) {
+      throw new EntityByIdNotFoundError('Comment', this.id);
+    }
+    post.assertLikeableBy(viewerId);
+  }
+
+  /** A like notifies the comment author unless they liked their own comment. */
+  notifiesAuthorOfLikeBy(likerId: string): boolean {
+    return this.authorId !== likerId;
+  }
+
+  /** Only top-level comments by someone other than the post author notify (replies don't). */
+  notifiesPostAuthor(post: Post): boolean {
+    return !this.parentId && this.authorId !== post.authorId;
+  }
+
+  /** Short plain-text preview of the body for notifications. */
+  excerpt(): string {
+    return this.content.trim().slice(0, EXCERPT_MAX_LENGTH);
   }
 }

@@ -7,5 +7,6 @@ export * from './chats';
 export * from './auth';
 export * from './posts';
 export * from './notifications';
+export * from './comments';
 export * from './likes';
 export * from './realtime';

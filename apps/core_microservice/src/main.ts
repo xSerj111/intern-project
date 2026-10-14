@@ -53,6 +53,7 @@ async function bootstrap() {
   // This hosts the UI at http://localhost:3002/api
   SwaggerModule.setup('api', app, document);
 
+  app.enableShutdownHooks();
   await app.listen(appConfig.port);
   console.log(`Core microservice runs on ${appConfig.port}`);
 }

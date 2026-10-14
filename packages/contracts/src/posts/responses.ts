@@ -19,6 +19,10 @@ export interface IPostResponse {
   content: string;
   status: PostStatus;
   assets?: IPostAssetResponse[];
+  /** Likes with `deletedAt IS NULL`. */
+  likeCount: number;
+  /** `false` when the request is unauthenticated. */
+  likedByMe: boolean;
   createdAt: string;
   updatedAt: string;
 }
