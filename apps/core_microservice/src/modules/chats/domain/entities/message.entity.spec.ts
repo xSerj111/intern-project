@@ -1,6 +1,7 @@
-import { Message } from './message.entity';
+import { Message, type AttachmentCandidate } from './message.entity';
 import {
   EmptyMessageError,
+  InvalidAttachmentError,
   MessageAlreadyDeletedError,
   MessageTooLongError,
   NotMessageAuthorError,
@@ -15,7 +16,20 @@ const base = {
   seq: 5,
 };
 
-const ids = (n: number) => Array.from({ length: n }, (_, i) => `asset-${i}`);
+const candidate = (
+  assetId: string,
+  overrides: Partial<AttachmentCandidate> = {},
+): AttachmentCandidate => ({
+  assetId,
+  found: true,
+  uploaderId: 'user-1',
+  visibility: 'PRIVATE',
+  alreadyAttached: false,
+  ...overrides,
+});
+
+const ids = (n: number) =>
+  Array.from({ length: n }, (_, i) => candidate(`asset-${i}`));
 
 describe('Message.create', () => {
   it('trims content and defaults kind to USER', () => {
@@ -47,17 +61,49 @@ describe('Message.create', () => {
   });
 
   it('rejects 11 attachments and accepts 10', () => {
-    expect(() => Message.create({ ...base, attachmentIds: ids(11) })).toThrow(
+    expect(() => Message.create({ ...base, attachments: ids(11) })).toThrow(
       TooManyAttachmentsError,
     );
     expect(() =>
-      Message.create({ ...base, attachmentIds: ids(10) }),
+      Message.create({ ...base, attachments: ids(10) }),
     ).not.toThrow();
   });
 
   it('accepts attachments only, storing null content', () => {
-    const m = Message.create({ ...base, content: '  ', attachmentIds: ids(1) });
+    const m = Message.create({ ...base, content: '  ', attachments: ids(1) });
     expect(m.content).toBeNull();
+  });
+
+  it('keeps attachment ids in request order', () => {
+    const m = Message.create({
+      ...base,
+      attachments: [candidate('b'), candidate('a'), candidate('c')],
+    });
+    expect(m.attachmentIds).toEqual(['b', 'a', 'c']);
+  });
+
+  it.each<[string, Partial<AttachmentCandidate>]>([
+    ['missing', { found: false, uploaderId: null, visibility: null }],
+    ["not the author's", { uploaderId: 'user-2' }],
+    ['not PRIVATE', { visibility: 'PUBLIC' }],
+    ['already attached', { alreadyAttached: true }],
+  ])('rejects an attachment that is %s', (_label, overrides) => {
+    expect(() =>
+      Message.create({
+        ...base,
+        content: 'hi',
+        attachments: [candidate('ok'), candidate('bad', overrides)],
+      }),
+    ).toThrow(InvalidAttachmentError);
+  });
+
+  it('rejects the same attachment twice', () => {
+    expect(() =>
+      Message.create({
+        ...base,
+        attachments: [candidate('a'), candidate('a')],
+      }),
+    ).toThrow(InvalidAttachmentError);
   });
 });
 
@@ -78,12 +124,52 @@ describe('Message.isVisibleTo', () => {
   });
 });
 
+describe('Message.attachmentFor', () => {
+  const file = {
+    assetId: 'asset-0',
+    displayOrder: 0,
+    storageKey: 'chat/user-1/k',
+    mimeType: 'image/png',
+    size: 10,
+    originalName: 'a.png',
+  };
+  const make = () => {
+    const m = Message.create({ ...base, attachments: ids(1) });
+    m.attachments = [file];
+    return m;
+  };
+  const viewer = { leftAt: null, joinedSeq: 0 };
+
+  it('returns the attachment for a visible message', () => {
+    expect(make().attachmentFor(viewer, 'asset-0')).toBe(file);
+  });
+
+  it('returns null for an asset not on the message', () => {
+    expect(make().attachmentFor(viewer, 'asset-9')).toBeNull();
+  });
+
+  it('returns null when the message is not visible to the viewer', () => {
+    expect(
+      make().attachmentFor({ leftAt: null, joinedSeq: 5 }, 'asset-0'),
+    ).toBeNull();
+    expect(
+      make().attachmentFor({ leftAt: new Date(), joinedSeq: 0 }, 'asset-0'),
+    ).toBeNull();
+  });
+
+  it('returns null once the message is deleted', () => {
+    const m = make();
+    m.delete('user-1', 9);
+    expect(m.attachmentFor(viewer, 'asset-0')).toBeNull();
+  });
+});
+
 describe('Message.edit', () => {
   const make = (attachments = 0) =>
     Message.create({
       ...base,
       content: 'hi',
-      attachmentIds: ids(attachments),
+      attachments: ids(attachments),
     });
 
   it('sets content, editedAt and the new changeSeq', () => {
@@ -132,7 +218,7 @@ describe('Message.edit', () => {
 
 describe('Message.delete', () => {
   const make = () =>
-    Message.create({ ...base, content: 'hi', attachmentIds: ids(2) });
+    Message.create({ ...base, content: 'hi', attachments: ids(2) });
 
   it('clears content and attachments, sets deletedAt and changeSeq', () => {
     const m = make();

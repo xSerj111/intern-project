@@ -49,12 +49,17 @@ export class AppConfigService {
       throw new Error('S3_PORT must be a valid port number');
     }
 
+    const endpoint = this.config.getOrThrow<string>('S3_ENDPOINT');
+
     return {
-      endpoint: this.config.getOrThrow<string>('S3_ENDPOINT'),
+      endpoint,
       port,
       accessKey: this.config.getOrThrow<string>('S3_ACCESS_KEY'),
       secretKey: this.config.getOrThrow<string>('S3_SECRET_KEY'),
       bucketName: this.config.get<string>('S3_BUCKET_NAME', 'innogram-assets'),
+      privateBucket: this.config.getOrThrow<string>('S3_PRIVATE_BUCKET_NAME'),
+      // Host used to sign browser-facing URLs; empty counts as unset.
+      publicEndpoint: this.config.get<string>('S3_PUBLIC_ENDPOINT') || endpoint,
       region: this.config.get<string>('S3_REGION', 'us-east-1'),
       useSsl:
         this.config.get<string>('S3_USE_SSL', 'false').toLowerCase() === 'true',

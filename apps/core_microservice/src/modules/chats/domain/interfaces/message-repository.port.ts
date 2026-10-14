@@ -12,10 +12,33 @@ export interface ChangesPageOptions {
   limit: number;
 }
 
+export interface AttachmentLink {
+  assetId: string;
+  displayOrder: number;
+}
+
+/**
+ * Reads load `attachmentIds` and `attachments` (file metadata, display order)
+ * for non-deleted messages, one attachments query per call.
+ */
 export interface IMessageRepository {
   /** Atomically increments and returns the chat's next sequence number. */
   allocateSeq(chatId: string, tx: ChatTransaction): Promise<number>;
   insert(message: Message, tx: ChatTransaction): Promise<Message>;
+  /**
+   * Inserts `message_assets` rows. A unique violation (asset already linked)
+   * surfaces as `UniqueConstraintViolationError`.
+   */
+  insertAttachments(
+    messageId: string,
+    links: AttachmentLink[],
+    tx: ChatTransaction,
+  ): Promise<void>;
+  /** The subset of `assetIds` already linked to some message. */
+  findAttachedAssetIds(
+    assetIds: string[],
+    tx: ChatTransaction,
+  ): Promise<string[]>;
   findByClientMessageId(
     chatId: string,
     authorId: string,
@@ -24,14 +47,15 @@ export interface IMessageRepository {
   findById(messageId: string): Promise<Message | null>;
   /**
    * Loads a message of `chatId` with `seq > joinedSeq`, including soft-deleted
-   * tombstones, with `attachmentIds` filled from its `message_assets` rows.
-   * Null when missing, in another chat, or not visible to the caller.
+   * tombstones, with `attachmentIds`/`attachments` filled from its
+   * `message_assets` rows. Null when missing, in another chat, or not visible
+   * to the caller.
    */
   findVisibleById(
     chatId: string,
     messageId: string,
     joinedSeq: number,
-    tx: ChatTransaction,
+    tx?: ChatTransaction,
   ): Promise<Message | null>;
   /**
    * Narrow write of `content`, `editedAt`, `changeSeq` and `deletedAt` (never a

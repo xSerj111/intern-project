@@ -1,5 +1,6 @@
 import type {
   IAddMembersRequest,
+  IAttachmentUrl,
   ICreateGroupChatRequest,
   IConversationDetail,
   IConversationSummary,
@@ -13,9 +14,12 @@ import type {
   IRenameGroupRequest,
   IReadState,
   ISendMessageRequest,
+  IUploadedAttachment,
 } from '@repo/contracts';
 
-import { coreApi } from './client';
+import { getAccessToken, refreshTokens } from '../auth/refresh';
+import { config } from '../config';
+import { ApiError, coreApi } from './client';
 
 /** TanStack Query key factories for chat data. */
 export const chatKeys = {
@@ -221,4 +225,117 @@ export function leaveChat(
     token,
     signal,
   });
+}
+
+interface UploadOptions extends Auth {
+  /** Upload progress as a 0..1 fraction. Switches the request to XMLHttpRequest. */
+  onProgress?: (fraction: number) => void;
+}
+
+function xhrUpload(
+  form: FormData,
+  token: string | null | undefined,
+  { signal, onProgress }: UploadOptions,
+): Promise<IUploadedAttachment> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', new URL('/chats/attachments', config.coreServiceUrl).href);
+    xhr.setRequestHeader('Accept', 'application/json');
+    if (token) {
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    }
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) {
+        onProgress?.(event.loaded / event.total);
+      }
+    };
+    xhr.onerror = () =>
+      reject(new ApiError('Unable to reach the service', 0, null));
+    xhr.onabort = () =>
+      reject(new DOMException('The upload was aborted', 'AbortError'));
+    xhr.onload = () => {
+      let payload: unknown = null;
+      try {
+        payload = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+      } catch {
+        payload = xhr.responseText;
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(payload as IUploadedAttachment);
+        return;
+      }
+      const raw =
+        payload && typeof payload === 'object' && 'message' in payload
+          ? (payload as { message?: unknown }).message
+          : undefined;
+      const message = Array.isArray(raw)
+        ? raw.join(', ')
+        : typeof raw === 'string'
+          ? raw
+          : `Request failed with status ${xhr.status}`;
+      reject(new ApiError(message, xhr.status, payload));
+    };
+    if (signal) {
+      if (signal.aborted) {
+        xhr.abort();
+        return;
+      }
+      signal.addEventListener('abort', () => xhr.abort(), { once: true });
+    }
+    xhr.send(form);
+  });
+}
+
+/**
+ * Upload one attachment (`POST /chats/attachments`, multipart field `file`, 201).
+ * Server rejections (type not allowed, over 10 MB) surface in `ApiError.message`.
+ * With `onProgress` the upload runs over XMLHttpRequest (reporting a 0..1
+ * fraction) and keeps the single 401 refresh-and-retry; without it, plain `coreApi`.
+ */
+export async function uploadAttachment(
+  file: File,
+  { token, signal, onProgress }: UploadOptions = {},
+): Promise<IUploadedAttachment> {
+  const form = new FormData();
+  form.append('file', file);
+
+  if (!onProgress) {
+    return coreApi<IUploadedAttachment>('/chats/attachments', {
+      method: 'POST',
+      token,
+      signal,
+      body: form,
+    });
+  }
+
+  try {
+    return await xhrUpload(form, token, { signal, onProgress });
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 401 || !token) {
+      throw error;
+    }
+    const current = getAccessToken();
+    let next: string | null = current && current !== token ? current : null;
+    if (!next) {
+      try {
+        next = await refreshTokens();
+      } catch {
+        throw error;
+      }
+    }
+    return xhrUpload(form, next, { signal, onProgress });
+  }
+}
+
+/** Fresh presigned download URL for a message attachment (404 when not visible). */
+export function getAttachmentUrl(
+  chatId: string,
+  messageId: string,
+  assetId: string,
+  { token, signal }: Auth = {},
+): Promise<IAttachmentUrl> {
+  return coreApi<IAttachmentUrl>(
+    `/chats/${chatId}/messages/${messageId}/attachments/${assetId}`,
+    { token, signal },
+  );
 }

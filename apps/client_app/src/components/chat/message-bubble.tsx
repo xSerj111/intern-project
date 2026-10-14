@@ -6,6 +6,7 @@ import type { ChatMessage } from '../../lib/realtime/chat-cache';
 import { isPendingMessage } from '../../lib/realtime/chat-cache';
 
 import styles from './message-bubble.module.css';
+import { MessageAttachments } from './message-attachments';
 import { MESSAGE_MAX_LENGTH } from './message-composer';
 
 function formatTime(iso: string): string {
@@ -123,6 +124,16 @@ export function MessageBubble({
     }
   };
 
+  const attachments = !deleted && hasAttachments && (
+    <MessageAttachments
+      chatId={message.chatId}
+      messageId={message.id}
+      attachments={message.attachments}
+      pending={pending}
+    />
+  );
+  const text = deleted ? 'Message deleted' : message.content;
+
   const bubbleClass = [
     styles.bubble,
     own ? styles.bubbleOwn : '',
@@ -172,14 +183,14 @@ export function MessageBubble({
               Save
             </button>
           </div>
+          {attachments}
         </div>
       ) : (
         <div className={styles.bubbleLine}>
-          <p className={bubbleClass}>
-            {deleted
-              ? 'Message deleted'
-              : (message.content ?? (hasAttachments ? 'Attachment' : ''))}
-          </p>
+          <div className={styles.content}>
+            {(text || !attachments) && <p className={bubbleClass}>{text}</p>}
+            {attachments}
+          </div>
           {canAct && !confirming && (
             <div className={styles.actions} ref={actionsRef}>
               <button

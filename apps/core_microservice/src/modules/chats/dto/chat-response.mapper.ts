@@ -4,6 +4,11 @@ import { ChatParticipant } from '../domain/entities/chat-participant.entity';
 import { Message } from '../domain/entities/message.entity';
 import type { ChatSummary } from '../domain/interfaces/chat-repository.port';
 import {
+  attachmentKind,
+  type PresignedAttachmentUrl,
+} from '../domain/interfaces/attachment-storage.port';
+import {
+  AttachmentDto,
   ChatParticipantDto,
   ChatUserDto,
   ConversationDetailDto,
@@ -25,7 +30,42 @@ function toUser(userId: string, users: UserMap): ChatUserDto {
   };
 }
 
-export function toMessageResponse(message: Message): MessageResponseDto {
+/** Presigned URLs keyed by asset id (from `IAttachmentStoragePort.presign`). */
+export type AttachmentUrls = ReadonlyMap<string, PresignedAttachmentUrl>;
+
+/**
+ * Attachments in display order; one without a presigned URL in `urls` is left
+ * out (e.g. previews mapped without presigning).
+ */
+function toAttachments(
+  message: Message,
+  urls: AttachmentUrls,
+): AttachmentDto[] {
+  if (message.deletedAt != null) return [];
+  return [...message.attachments]
+    .sort((a, b) => a.displayOrder - b.displayOrder)
+    .flatMap((a) => {
+      const signed = urls.get(a.assetId);
+      if (!signed) return [];
+      return [
+        {
+          id: a.assetId,
+          mimeType: a.mimeType,
+          size: a.size,
+          originalName: a.originalName ?? 'attachment',
+          displayOrder: a.displayOrder,
+          url: signed.url,
+          urlExpiresAt: signed.expiresAt.toISOString(),
+          kind: attachmentKind(a.mimeType),
+        },
+      ];
+    });
+}
+
+export function toMessageResponse(
+  message: Message,
+  urls: AttachmentUrls = new Map(),
+): MessageResponseDto {
   const deleted = message.deletedAt != null;
   return {
     id: message.id,
@@ -36,7 +76,7 @@ export function toMessageResponse(message: Message): MessageResponseDto {
     changeSeq: Number(message.changeSeq),
     clientMessageId: message.clientMessageId ?? null,
     content: deleted ? null : (message.content ?? null),
-    attachments: [],
+    attachments: toAttachments(message, urls),
     systemEvent: message.systemEvent ?? null,
     createdAt: message.createdAt.toISOString(),
     editedAt: message.editedAt?.toISOString() ?? null,

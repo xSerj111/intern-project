@@ -2,11 +2,13 @@ import { ApiProperty } from '@nestjs/swagger';
 import type {
   ChatType,
   IAttachment,
+  IAttachmentUrl,
   IChatParticipant,
   IChatUser,
   IConversationDetail,
   IConversationSummary,
   IMessage,
+  IUploadedAttachment,
   ParticipantRole,
   SystemEventType,
 } from '@repo/contracts';
@@ -36,6 +38,18 @@ export class AttachmentDto implements IAttachment {
   @ApiProperty() urlExpiresAt!: string;
   @ApiProperty({ enum: ['image', 'video', 'file'] })
   kind!: 'image' | 'video' | 'file';
+}
+
+export class UploadedAttachmentDto implements IUploadedAttachment {
+  @ApiProperty() id!: string;
+  @ApiProperty() mimeType!: string;
+  @ApiProperty() size!: number;
+  @ApiProperty() originalName!: string;
+}
+
+export class AttachmentUrlDto implements IAttachmentUrl {
+  @ApiProperty() url!: string;
+  @ApiProperty() expiresAt!: string;
 }
 
 export class SystemEventDto {

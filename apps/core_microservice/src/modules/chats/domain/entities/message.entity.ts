@@ -6,6 +6,7 @@ import type { Chat } from './chat.entity';
 import type { UserProfile } from '../../../profiles/domain/entities/user-profile.entity';
 import {
   EmptyMessageError,
+  InvalidAttachmentError,
   MessageAlreadyDeletedError,
   MessageTooLongError,
   NotMessageAuthorError,
@@ -33,11 +34,34 @@ export interface SystemEvent {
   title?: string;
 }
 
+/**
+ * An asset the sender wants to attach, as loaded by the service. `found` is
+ * false (and the rest null) when no live asset has that id.
+ */
+export interface AttachmentCandidate {
+  assetId: string;
+  found: boolean;
+  uploaderId: string | null;
+  visibility: 'PUBLIC' | 'PRIVATE' | null;
+  alreadyAttached: boolean;
+}
+
+/** Stored-file metadata of an attachment, loaded for responses (not a column). */
+export interface MessageAttachmentFile {
+  assetId: string;
+  displayOrder: number;
+  storageKey: string;
+  mimeType: string;
+  size: number;
+  originalName: string | null;
+}
+
 export interface CreateMessageProps {
   chatId: string;
   authorId: string;
   content?: string | null;
-  attachmentIds?: string[];
+  /** In request (display) order. */
+  attachments?: AttachmentCandidate[];
   clientMessageId: string;
   seq: number;
 }
@@ -108,13 +132,20 @@ export class Message extends TypeormEntityBase {
   // service from `message_assets` so edit/delete rules can see them.
   attachmentIds: string[] = [];
 
+  // Not a column: file metadata of the attachments in display order, filled
+  // by the repository/service for responses.
+  attachments: MessageAttachmentFile[] = [];
+
   /**
    * Factory for a user message. Content is trimmed; it is either absent or
    * 1-2,000 chars; attachments are 0-10; at least one of the two is present.
+   * Each attachment must be a live PRIVATE asset uploaded by the author and not
+   * attached to any message yet.
    */
   static create(props: CreateMessageProps): Message {
     const content = props.content?.trim() || null;
-    const attachmentIds = props.attachmentIds ?? [];
+    const candidates = props.attachments ?? [];
+    const attachmentIds = candidates.map((c) => c.assetId);
 
     if (content !== null && content.length > MESSAGE_CONTENT_MAX_LENGTH) {
       throw new MessageTooLongError(content.length, MESSAGE_CONTENT_MAX_LENGTH);
@@ -128,6 +159,7 @@ export class Message extends TypeormEntityBase {
     if (content === null && attachmentIds.length === 0) {
       throw new EmptyMessageError();
     }
+    Message.assertAttachable(props.authorId, candidates);
 
     const message = new Message();
     message.chatId = props.chatId;
@@ -141,6 +173,29 @@ export class Message extends TypeormEntityBase {
     message.editedAt = null;
     message.systemEvent = null;
     return message;
+  }
+
+  private static assertAttachable(
+    authorId: string,
+    candidates: AttachmentCandidate[],
+  ): void {
+    const seen = new Set<string>();
+    for (const c of candidates) {
+      if (seen.has(c.assetId)) {
+        throw new InvalidAttachmentError(c.assetId, 'listed more than once');
+      }
+      seen.add(c.assetId);
+      // One reason for missing/foreign assets so other users' ids aren't probed.
+      if (!c.found || c.uploaderId !== authorId) {
+        throw new InvalidAttachmentError(c.assetId, 'not found');
+      }
+      if (c.visibility !== 'PRIVATE') {
+        throw new InvalidAttachmentError(c.assetId, 'not a chat upload');
+      }
+      if (c.alreadyAttached) {
+        throw new InvalidAttachmentError(c.assetId, 'already attached');
+      }
+    }
   }
 
   /**
@@ -192,6 +247,7 @@ export class Message extends TypeormEntityBase {
 
     this.content = null;
     this.attachmentIds = [];
+    this.attachments = [];
     this.deletedAt = new Date();
     this.changeSeq = changeSeq;
   }
@@ -205,5 +261,17 @@ export class Message extends TypeormEntityBase {
   /** A message is visible while the viewer is a member and it postdates their join. */
   isVisibleTo(participant: MessageViewer): boolean {
     return participant.leftAt == null && this.seq > participant.joinedSeq;
+  }
+
+  /**
+   * The attachment a viewer may download: the message is visible to them, not
+   * deleted, and `assetId` is one of its attachments. Null otherwise.
+   */
+  attachmentFor(
+    viewer: MessageViewer,
+    assetId: string,
+  ): MessageAttachmentFile | null {
+    if (this.deletedAt != null || !this.isVisibleTo(viewer)) return null;
+    return this.attachments.find((a) => a.assetId === assetId) ?? null;
   }
 }

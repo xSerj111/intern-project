@@ -1,5 +1,10 @@
 import { Inject, Injectable } from '@nestjs/common';
-import type { ICursorPage } from '@repo/contracts';
+import 'multer';
+import type {
+  IAttachmentUrl,
+  ICursorPage,
+  IUploadedAttachment,
+} from '@repo/contracts';
 import {
   LoggerKey,
   UniqueConstraintViolationError,
@@ -7,9 +12,14 @@ import {
 } from '@repo/shared';
 import type { Chat } from './domain/entities/chat.entity';
 import type { ChatParticipant } from './domain/entities/chat-participant.entity';
-import { Message } from './domain/entities/message.entity';
+import {
+  Message,
+  type AttachmentCandidate,
+  type MessageAttachmentFile,
+} from './domain/entities/message.entity';
 import {
   ChatNotFoundError,
+  InvalidAttachmentError,
   MessageNotFoundError,
 } from './domain/errors/chat.errors';
 import {
@@ -27,6 +37,12 @@ import {
   type ChatRealtimePayload,
   type IChatRealtimePort,
 } from './domain/interfaces/chat-realtime.port';
+import {
+  ATTACHMENT_STORAGE_PORT,
+  type IAttachmentStoragePort,
+  type PresignedAttachmentUrl,
+  type StoredAttachment,
+} from './domain/interfaces/attachment-storage.port';
 import { toMessageResponse } from './dto/chat-response.mapper';
 import type { EditMessageDto } from './dto/edit-message.dto';
 import type { ListMessagesQueryDto } from './dto/list-messages-query.dto';
@@ -47,6 +63,8 @@ export class MessagesService {
     @Inject(CHAT_REPOSITORY) private readonly chats: IChatRepository,
     @Inject(MESSAGE_REPOSITORY) private readonly messages: IMessageRepository,
     @Inject(CHAT_REALTIME_PORT) private readonly realtime: IChatRealtimePort,
+    @Inject(ATTACHMENT_STORAGE_PORT)
+    private readonly storage: IAttachmentStoragePort,
   ) {}
 
   /**
@@ -69,23 +87,28 @@ export class MessagesService {
     );
     if (existing) return this.replay(existing);
 
+    const attachmentIds = dto.attachmentIds ?? [];
     let message: Message;
     try {
       message = await this.chats.runInTransaction(async (tx) => {
         chat.assertCanPost(me);
+        const assets = await this.loadAttachmentAssets(attachmentIds, tx);
+        const candidates = await this.toCandidates(attachmentIds, assets, tx);
         const seq = await this.messages.allocateSeq(chatId, tx);
-        // US5: validate/link attachmentIds here before insert.
+        // Eligibility is decided by the domain; the unique assetId index is
+        // the backstop for a concurrent send of the same asset.
         const inserted = await this.messages.insert(
           Message.create({
             chatId,
             authorId: me,
             content: dto.content,
-            attachmentIds: dto.attachmentIds,
+            attachments: candidates,
             clientMessageId: dto.clientMessageId,
             seq,
           }),
           tx,
         );
+        await this.linkAttachments(inserted, assets, tx);
         // Targeted UPDATE: a cascading chat save would rewind other
         // participants' concurrent read pointers.
         await this.chats.advanceReadSeq(chatId, me, seq, tx);
@@ -103,7 +126,7 @@ export class MessagesService {
       return this.replay(original);
     }
 
-    const response = toMessageResponse(message);
+    const [response] = await this.toResponses([message]);
     this.logger.debug('Message sent', {
       props: { chatId, messageId: message.id, seq: response.seq },
     });
@@ -130,7 +153,7 @@ export class MessagesService {
       return this.messages.update(found, tx);
     });
 
-    const response = toMessageResponse(message);
+    const [response] = await this.toResponses([message]);
     this.logger.debug('Message edited', {
       props: { chatId, messageId, changeSeq: response.changeSeq },
     });
@@ -143,15 +166,22 @@ export class MessagesService {
    * fresh `changeSeq`; `message:deleted` goes out after the commit.
    */
   async delete(me: string, chatId: string, messageId: string): Promise<void> {
-    const changeSeq = await this.chats.runInTransaction(async (tx) => {
-      const found = await this.loadOwnVisible(me, chatId, messageId, tx);
-      const assetIds = [...found.attachmentIds];
-      const seq = await this.messages.allocateSeq(chatId, tx);
-      found.delete(me, seq);
-      await this.messages.update(found, tx);
-      await this.onMessageDeleted(chatId, messageId, assetIds, tx);
-      return seq;
-    });
+    const { changeSeq, storageKeys } = await this.chats.runInTransaction(
+      async (tx) => {
+        const found = await this.loadOwnVisible(me, chatId, messageId, tx);
+        const assetIds = [...found.attachmentIds];
+        const seq = await this.messages.allocateSeq(chatId, tx);
+        found.delete(me, seq);
+        await this.messages.update(found, tx);
+        const keys = await this.onMessageDeleted(
+          chatId,
+          messageId,
+          assetIds,
+          tx,
+        );
+        return { changeSeq: seq, storageKeys: keys };
+      },
+    );
 
     this.logger.debug('Message deleted', {
       props: { chatId, messageId, changeSeq },
@@ -161,23 +191,69 @@ export class MessagesService {
       messageId,
       changeSeq,
     });
+    await this.deleteStoredObjects(chatId, messageId, storageKeys);
   }
 
   /**
-   * Hook point for US5: runs inside the delete transaction after the message's
-   * `message_assets` rows are gone, with the asset ids that were attached.
-   * Attachment cleanup (orphaned assets) attaches here.
+   * Runs inside the delete transaction after the message's `message_assets`
+   * rows are gone: soft-deletes the assets that were attached and returns
+   * their storage keys for the post-commit object delete (FR-023).
    */
-  /* eslint-disable @typescript-eslint/no-unused-vars */
   async onMessageDeleted(
-    _chatId: string,
-    _messageId: string,
-    _assetIds: string[],
-    _tx: ChatTransaction,
-  ): Promise<void> {
-    // No-op until attachments exist.
+    chatId: string,
+    messageId: string,
+    assetIds: string[],
+    tx: ChatTransaction,
+  ): Promise<string[]> {
+    if (assetIds.length === 0) return [];
+    const assets = await this.storage.findAssets(assetIds, tx);
+    await this.storage.softDeleteAssets(assetIds, tx);
+    this.logger.debug('Message attachments soft-deleted', {
+      props: { chatId, messageId, count: assetIds.length },
+    });
+    return assets.flatMap((a) => (a.storageKey ? [a.storageKey] : []));
   }
-  /* eslint-enable @typescript-eslint/no-unused-vars */
+
+  /** Stores an uploaded file as a private chat attachment (FR-025). */
+  async uploadAttachment(
+    me: string,
+    file: Express.Multer.File,
+  ): Promise<IUploadedAttachment> {
+    const asset = await this.storage.upload(me, file);
+    this.logger.debug('Chat attachment uploaded', {
+      props: { assetId: asset.id, uploaderId: me },
+    });
+    return {
+      id: asset.id,
+      mimeType: asset.mimeType,
+      size: asset.size,
+      originalName: asset.originalName ?? 'attachment',
+    };
+  }
+
+  /**
+   * A fresh presigned URL for one attachment (FR-026). Participation and
+   * message visibility are checked again; anything the caller can't see is
+   * reported as a missing message.
+   */
+  async attachmentUrl(
+    me: string,
+    chatId: string,
+    messageId: string,
+    assetId: string,
+  ): Promise<IAttachmentUrl> {
+    const participant = await this.loadParticipation(chatId, me);
+    const message = await this.messages.findVisibleById(
+      chatId,
+      messageId,
+      participant.joinedSeq,
+    );
+    const attachment = message?.attachmentFor(participant, assetId);
+    if (!attachment) throw new MessageNotFoundError(messageId);
+
+    const { url, expiresAt } = await this.storage.presign(attachment);
+    return { url, expiresAt: expiresAt.toISOString() };
+  }
 
   /** Newest-first history page, limited to what the caller can see (FR-017). */
   async history(
@@ -252,11 +328,133 @@ export class MessagesService {
     throw new MessageNotFoundError(messageId);
   }
 
-  private replay(message: Message): SendMessageResult {
+  private async replay(message: Message): Promise<SendMessageResult> {
     this.logger.debug('Duplicate send, returning original', {
       props: { chatId: message.chatId, messageId: message.id },
     });
-    return { message: toMessageResponse(message), created: false };
+    const [response] = await this.toResponses([message]);
+    return { message: response, created: false };
+  }
+
+  private async loadAttachmentAssets(
+    attachmentIds: string[],
+    tx: ChatTransaction,
+  ): Promise<Map<string, StoredAttachment>> {
+    if (attachmentIds.length === 0) return new Map();
+    const assets = await this.storage.findAssets(attachmentIds, tx);
+    return new Map(assets.map((a) => [a.id, a]));
+  }
+
+  /** Facts about each requested asset, in request order, for `Message.create`. */
+  private async toCandidates(
+    attachmentIds: string[],
+    assets: Map<string, StoredAttachment>,
+    tx: ChatTransaction,
+  ): Promise<AttachmentCandidate[]> {
+    if (attachmentIds.length === 0) return [];
+    const attached = new Set(
+      await this.messages.findAttachedAssetIds(attachmentIds, tx),
+    );
+    return attachmentIds.map((assetId) => {
+      const asset = assets.get(assetId);
+      return {
+        assetId,
+        found: asset !== undefined,
+        uploaderId: asset?.uploaderId ?? null,
+        visibility: asset?.visibility ?? null,
+        alreadyAttached: attached.has(assetId),
+      };
+    });
+  }
+
+  /**
+   * Inserts the `message_assets` rows (display order = request order) and
+   * fills the message's file metadata for the response.
+   */
+  private async linkAttachments(
+    message: Message,
+    assets: Map<string, StoredAttachment>,
+    tx: ChatTransaction,
+  ): Promise<void> {
+    const ids = message.attachmentIds;
+    if (ids.length === 0) return;
+    try {
+      await this.messages.insertAttachments(
+        message.id,
+        ids.map((assetId, displayOrder) => ({ assetId, displayOrder })),
+        tx,
+      );
+    } catch (err: unknown) {
+      if (err instanceof UniqueConstraintViolationError) {
+        throw new InvalidAttachmentError(undefined, 'already attached');
+      }
+      throw err;
+    }
+    message.attachments = ids.flatMap((assetId, displayOrder) => {
+      const asset = assets.get(assetId);
+      return asset?.storageKey
+        ? [
+            {
+              assetId,
+              displayOrder,
+              storageKey: asset.storageKey,
+              mimeType: asset.mimeType,
+              size: asset.size,
+              originalName: asset.originalName,
+            },
+          ]
+        : [];
+    });
+  }
+
+  // Post-commit, best-effort: a leftover object only costs storage (FR-023).
+  private async deleteStoredObjects(
+    chatId: string,
+    messageId: string,
+    keys: string[],
+  ): Promise<void> {
+    if (keys.length === 0) return;
+    try {
+      await this.storage.deleteObjects(keys);
+    } catch (err: unknown) {
+      this.logger.warn('Attachment object delete failed', {
+        props: {
+          chatId,
+          messageId,
+          error: err instanceof Error ? err.message : String(err),
+        },
+      });
+    }
+  }
+
+  /**
+   * Maps messages to responses, presigning every attachment of the batch in
+   * parallel (local signing, no network). A failed signature drops only that
+   * attachment from the payload.
+   */
+  private async toResponses(
+    messages: Message[],
+  ): Promise<MessageResponseDto[]> {
+    const files: MessageAttachmentFile[] = messages
+      .filter((m) => m.deletedAt == null)
+      .flatMap((m) => m.attachments);
+    const signed = await Promise.allSettled(
+      files.map((f) => this.storage.presign(f)),
+    );
+    const urls = new Map<string, PresignedAttachmentUrl>();
+    signed.forEach((result, i) => {
+      if (result.status === 'fulfilled') {
+        urls.set(files[i].assetId, result.value);
+      } else {
+        this.logger.warn('Attachment presign failed', {
+          props: {
+            assetId: files[i].assetId,
+            error: String(result.reason),
+          },
+        });
+      }
+    });
+    return messages.map((m) => toMessageResponse(m, urls));
   }
 
   // Post-commit: a failed emit must not fail the request; clients catch up via /changes.
@@ -290,12 +488,12 @@ export class MessagesService {
     }
   }
 
-  private toPage(
+  private async toPage(
     rows: Message[],
     limit: number,
-  ): ICursorPage<MessageResponseDto> {
+  ): Promise<ICursorPage<MessageResponseDto>> {
     return {
-      items: rows.slice(0, limit).map(toMessageResponse),
+      items: await this.toResponses(rows.slice(0, limit)),
       hasMore: rows.length > limit,
     };
   }

@@ -1,0 +1,50 @@
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  max-width: 100%;
+}
+
+.media {
+  display: block;
+  max-width: min(20rem, 100%);
+  max-height: 18rem;
+  border-radius: 10px;
+  background: var(--innogram-bg);
+  object-fit: contain;
+}
+
+.file {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  max-width: 20rem;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid var(--innogram-border);
+  border-radius: 10px;
+  background: var(--innogram-surface);
+  color: var(--innogram-text);
+  text-decoration: none;
+}
+
+a.file:hover,
+a.file:focus-visible {
+  border-color: var(--innogram-primary);
+}
+
+.fileName {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.fileSize {
+  flex: none;
+  font-size: 0.75rem;
+  color: var(--innogram-muted);
+}
+
+.unavailable {
+  font-size: 0.8rem;
+  font-style: italic;
+  color: var(--innogram-muted);
+}

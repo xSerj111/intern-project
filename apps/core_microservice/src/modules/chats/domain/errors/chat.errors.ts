@@ -35,6 +35,14 @@ export class TooManyAttachmentsError extends DomainError {
   }
 }
 
+export class InvalidAttachmentError extends DomainError {
+  constructor(assetId?: string, reason?: string) {
+    const subject = assetId ? `Attachment ${assetId}` : 'Attachment';
+    const detail = reason ? `: ${reason}` : '.';
+    super(`${subject} is invalid${detail}`);
+  }
+}
+
 export class InvalidGroupTitleError extends DomainError {
   constructor(length: number, min: number, max: number) {
     super(
