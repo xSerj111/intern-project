@@ -6,7 +6,10 @@ import type { Chat } from './chat.entity';
 import type { UserProfile } from '../../../profiles/domain/entities/user-profile.entity';
 import {
   EmptyMessageError,
+  MessageAlreadyDeletedError,
   MessageTooLongError,
+  NotMessageAuthorError,
+  SystemMessageImmutableError,
   TooManyAttachmentsError,
 } from '../errors/chat.errors';
 
@@ -101,6 +104,10 @@ export class Message extends TypeormEntityBase {
   @Column({ type: 'jsonb', nullable: true })
   systemEvent!: SystemEvent | null;
 
+  // Not a column: attachment asset ids in display order, filled by the
+  // service from `message_assets` so edit/delete rules can see them.
+  attachmentIds: string[] = [];
+
   /**
    * Factory for a user message. Content is trimmed; it is either absent or
    * 1-2,000 chars; attachments are 0-10; at least one of the two is present.
@@ -130,6 +137,7 @@ export class Message extends TypeormEntityBase {
     message.seq = props.seq;
     message.changeSeq = props.seq;
     message.clientMessageId = props.clientMessageId;
+    message.attachmentIds = attachmentIds;
     message.editedAt = null;
     message.systemEvent = null;
     return message;
@@ -156,6 +164,42 @@ export class Message extends TypeormEntityBase {
     message.editedAt = null;
     message.systemEvent = { ...event, actorId };
     return message;
+  }
+
+  /**
+   * Edits the text of a user message. Blank text is allowed only when the
+   * message has attachments, in which case content becomes null.
+   */
+  edit(actorId: string, content: string, changeSeq: number): void {
+    this.assertMutableBy(actorId);
+
+    const next = content.trim() || null;
+    if (next !== null && next.length > MESSAGE_CONTENT_MAX_LENGTH) {
+      throw new MessageTooLongError(next.length, MESSAGE_CONTENT_MAX_LENGTH);
+    }
+    if (next === null && this.attachmentIds.length === 0) {
+      throw new EmptyMessageError();
+    }
+
+    this.content = next;
+    this.editedAt = new Date();
+    this.changeSeq = changeSeq;
+  }
+
+  /** Turns the message into a tombstone: no text, no attachments. */
+  delete(actorId: string, changeSeq: number): void {
+    this.assertMutableBy(actorId);
+
+    this.content = null;
+    this.attachmentIds = [];
+    this.deletedAt = new Date();
+    this.changeSeq = changeSeq;
+  }
+
+  private assertMutableBy(actorId: string): void {
+    if (this.kind === 'SYSTEM') throw new SystemMessageImmutableError();
+    if (this.authorId !== actorId) throw new NotMessageAuthorError();
+    if (this.deletedAt != null) throw new MessageAlreadyDeletedError();
   }
 
   /** A message is visible while the viewer is a member and it postdates their join. */

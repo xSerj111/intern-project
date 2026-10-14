@@ -16,7 +16,11 @@ describe('ChatsController / MessagesController', () => {
   let chats: ChatsController;
   let messages: MessagesController;
   let chatsService: { createDirect: jest.Mock; markRead: jest.Mock };
-  let messagesService: { send: jest.Mock };
+  let messagesService: {
+    send: jest.Mock;
+    edit: jest.Mock;
+    delete: jest.Mock;
+  };
   let membership: {
     createGroup: jest.Mock;
     rename: jest.Mock;
@@ -28,7 +32,11 @@ describe('ChatsController / MessagesController', () => {
 
   beforeEach(async () => {
     chatsService = { createDirect: jest.fn(), markRead: jest.fn() };
-    messagesService = { send: jest.fn() };
+    messagesService = {
+      send: jest.fn(),
+      edit: jest.fn(),
+      delete: jest.fn(),
+    };
     membership = {
       createGroup: jest.fn(),
       rename: jest.fn(),
@@ -85,6 +93,45 @@ describe('ChatsController / MessagesController', () => {
       expect(messagesService.send).toHaveBeenCalledWith('me', CHAT_ID, dto);
       expect(statusFn).toHaveBeenCalledWith(status);
       expect(out).toBe(message);
+    });
+  });
+
+  describe('message edit / delete', () => {
+    const MESSAGE_ID = '22222222-2222-4222-8222-222222222222';
+
+    it('PATCH /chats/:chatId/messages/:messageId returns the edited message', async () => {
+      const message = { id: MESSAGE_ID };
+      messagesService.edit.mockResolvedValue(message);
+
+      const out = await messages.edit('me', CHAT_ID, MESSAGE_ID, {
+        content: 'new',
+      });
+
+      expect(messagesService.edit).toHaveBeenCalledWith(
+        'me',
+        CHAT_ID,
+        MESSAGE_ID,
+        { content: 'new' },
+      );
+      expect(out).toBe(message);
+    });
+
+    it('DELETE /chats/:chatId/messages/:messageId delegates and is 204', async () => {
+      messagesService.delete.mockResolvedValue(undefined);
+
+      await messages.delete('me', CHAT_ID, MESSAGE_ID);
+
+      expect(messagesService.delete).toHaveBeenCalledWith(
+        'me',
+        CHAT_ID,
+        MESSAGE_ID,
+      );
+      const code = Reflect.getMetadata(
+        '__httpCode__',
+        (MessagesController.prototype as unknown as Record<string, object>)
+          .delete,
+      ) as number;
+      expect(code).toBe(204);
     });
   });
 

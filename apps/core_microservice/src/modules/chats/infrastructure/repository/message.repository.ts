@@ -5,6 +5,7 @@ import type { FindOptionsWhere, Repository } from 'typeorm';
 
 import { TypeormRepositoryBase } from '@repo/shared';
 import { Message } from '../../domain/entities/message.entity';
+import { MessageAttachment } from '../../domain/entities/message-attachment.entity';
 import { ChatNotFoundError } from '../../domain/errors/chat.errors';
 import type { ChatTransaction } from '../../domain/interfaces/chat-repository.port';
 import type {
@@ -75,6 +76,50 @@ export class MessageRepository
       withDeleted: true,
     });
     return message ? asTombstone(message) : null;
+  }
+
+  public async findVisibleById(
+    chatId: string,
+    messageId: string,
+    joinedSeq: number,
+    tx: ChatTransaction,
+  ): Promise<Message | null> {
+    const message = await tx.getRepository(Message).findOne({
+      where: { id: messageId, chatId, seq: MoreThan(joinedSeq) },
+      withDeleted: true,
+    });
+    if (!message) return null;
+
+    const attachments = await tx.getRepository(MessageAttachment).find({
+      where: { messageId },
+      order: { displayOrder: 'ASC' },
+    });
+    message.attachmentIds = attachments.map((a) => a.assetId);
+    return asTombstone(message);
+  }
+
+  public async update(message: Message, tx: ChatTransaction): Promise<Message> {
+    try {
+      // Plain UPDATE (not softDelete/save): one statement sets the tombstone
+      // columns together with the new changeSeq.
+      await tx.getRepository(Message).update(
+        { id: message.id },
+        {
+          content: message.content,
+          editedAt: message.editedAt,
+          changeSeq: message.changeSeq,
+          deletedAt: message.deletedAt,
+        },
+      );
+      if (message.deletedAt != null) {
+        await tx
+          .getRepository(MessageAttachment)
+          .delete({ messageId: message.id });
+      }
+      return message;
+    } catch (err: unknown) {
+      throw toPersistenceError(err, this.tableName, this.logger);
+    }
   }
 
   public async pageHistory(

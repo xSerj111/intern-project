@@ -12,9 +12,11 @@ import {
 import { GroupMembersPanel } from '../../../components/chat/group-members-panel';
 import {
   MessageComposer,
+  useMessageActions,
   useSendMessage,
 } from '../../../components/chat/message-composer';
 import { MessageList } from '../../../components/chat/message-list';
+import { TypingIndicator } from '../../../components/chat/typing-indicator';
 import { chatKeys, getChat, markRead } from '../../../lib/api/chats';
 import { ApiError } from '../../../lib/api/client';
 import { useAuth } from '../../../lib/auth/auth-context';
@@ -49,6 +51,7 @@ export default function ChatPage() {
   const messages = useChatMessages(chatId);
   const list = useConversationList();
   const { send, retry, discard } = useSendMessage(chatId, userId);
+  const { edit, remove } = useMessageActions(chatId);
 
   // Highest server seq already reported as read from this page.
   const readSeqRef = useRef(0);
@@ -177,9 +180,13 @@ export default function ChatPage() {
         onLoadOlder={() => loadOlderMessages(queryClient, chatId)}
         onRetry={retry}
         onDiscard={discard}
+        onEdit={edit}
+        onDelete={remove}
       />
 
-      <MessageComposer onSend={send} />
+      <TypingIndicator chatId={chatId} />
+
+      <MessageComposer chatId={chatId} onSend={send} />
     </main>
   );
 }

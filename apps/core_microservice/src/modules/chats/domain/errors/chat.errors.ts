@@ -68,3 +68,27 @@ export class NotChatAdminError extends AccessDeniedError {
     super('Only a chat admin can perform this action.');
   }
 }
+
+export class NotMessageAuthorError extends AccessDeniedError {
+  constructor() {
+    super('Only the author can change this message.');
+  }
+}
+
+export class MessageAlreadyDeletedError extends DomainError {
+  constructor() {
+    super('Message has already been deleted.');
+  }
+}
+
+export class SystemMessageImmutableError extends DomainError {
+  constructor() {
+    super('System messages cannot be edited or deleted.');
+  }
+}
+
+export class MessageNotFoundError extends EntityNotFoundError {
+  constructor(messageId: string) {
+    super('Message', { messageId });
+  }
+}

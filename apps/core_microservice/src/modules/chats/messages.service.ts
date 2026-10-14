@@ -8,9 +8,13 @@ import {
 import type { Chat } from './domain/entities/chat.entity';
 import type { ChatParticipant } from './domain/entities/chat-participant.entity';
 import { Message } from './domain/entities/message.entity';
-import { ChatNotFoundError } from './domain/errors/chat.errors';
+import {
+  ChatNotFoundError,
+  MessageNotFoundError,
+} from './domain/errors/chat.errors';
 import {
   CHAT_REPOSITORY,
+  type ChatTransaction,
   type IChatRepository,
 } from './domain/interfaces/chat-repository.port';
 import {
@@ -19,9 +23,12 @@ import {
 } from './domain/interfaces/message-repository.port';
 import {
   CHAT_REALTIME_PORT,
+  type ChatRealtimeEvent,
+  type ChatRealtimePayload,
   type IChatRealtimePort,
 } from './domain/interfaces/chat-realtime.port';
 import { toMessageResponse } from './dto/chat-response.mapper';
+import type { EditMessageDto } from './dto/edit-message.dto';
 import type { ListMessagesQueryDto } from './dto/list-messages-query.dto';
 import type { MessageChangesQueryDto } from './dto/message-changes-query.dto';
 import type { MessageResponseDto } from './dto/message-response.dto';
@@ -100,10 +107,77 @@ export class MessagesService {
     this.logger.debug('Message sent', {
       props: { chatId, messageId: message.id, seq: response.seq },
     });
-    this.emitMessageNew(chatId, response);
-    // US3: emitTypingStopped(chatId, me). US6: alert recipients not viewing the chat.
+    this.emitToChat(chatId, 'message:new', { message: response });
+    this.emitTypingStopped(chatId, me);
+    // US6: alert recipients not viewing the chat.
     return { message: response, created: true };
   }
+
+  /**
+   * Edits the caller's own message (FR-024). The edit takes a fresh `changeSeq`
+   * so catch-up sees it; `message:updated` goes out after the commit.
+   */
+  async edit(
+    me: string,
+    chatId: string,
+    messageId: string,
+    dto: EditMessageDto,
+  ): Promise<MessageResponseDto> {
+    const message = await this.chats.runInTransaction(async (tx) => {
+      const found = await this.loadOwnVisible(me, chatId, messageId, tx);
+      const changeSeq = await this.messages.allocateSeq(chatId, tx);
+      found.edit(me, dto.content, changeSeq);
+      return this.messages.update(found, tx);
+    });
+
+    const response = toMessageResponse(message);
+    this.logger.debug('Message edited', {
+      props: { chatId, messageId, changeSeq: response.changeSeq },
+    });
+    this.emitToChat(chatId, 'message:updated', { message: response });
+    return response;
+  }
+
+  /**
+   * Deletes the caller's own message, leaving a tombstone (FR-022). Takes a
+   * fresh `changeSeq`; `message:deleted` goes out after the commit.
+   */
+  async delete(me: string, chatId: string, messageId: string): Promise<void> {
+    const changeSeq = await this.chats.runInTransaction(async (tx) => {
+      const found = await this.loadOwnVisible(me, chatId, messageId, tx);
+      const assetIds = [...found.attachmentIds];
+      const seq = await this.messages.allocateSeq(chatId, tx);
+      found.delete(me, seq);
+      await this.messages.update(found, tx);
+      await this.onMessageDeleted(chatId, messageId, assetIds, tx);
+      return seq;
+    });
+
+    this.logger.debug('Message deleted', {
+      props: { chatId, messageId, changeSeq },
+    });
+    this.emitToChat(chatId, 'message:deleted', {
+      chatId,
+      messageId,
+      changeSeq,
+    });
+  }
+
+  /**
+   * Hook point for US5: runs inside the delete transaction after the message's
+   * `message_assets` rows are gone, with the asset ids that were attached.
+   * Attachment cleanup (orphaned assets) attaches here.
+   */
+  /* eslint-disable @typescript-eslint/no-unused-vars */
+  async onMessageDeleted(
+    _chatId: string,
+    _messageId: string,
+    _assetIds: string[],
+    _tx: ChatTransaction,
+  ): Promise<void> {
+    // No-op until attachments exist.
+  }
+  /* eslint-enable @typescript-eslint/no-unused-vars */
 
   /** Newest-first history page, limited to what the caller can see (FR-017). */
   async history(
@@ -150,6 +224,34 @@ export class MessagesService {
     return chat.participantOf(me)!;
   }
 
+  /**
+   * Inside the tx: locks the chat, checks the caller is an active member and
+   * loads the message they can see (tombstones included). A message from before
+   * their join is reported as a missing chat; a missing one as a missing message.
+   */
+  private async loadOwnVisible(
+    me: string,
+    chatId: string,
+    messageId: string,
+    tx: ChatTransaction,
+  ): Promise<Message> {
+    const chat = await this.chats.findByIdForUpdate(chatId, tx);
+    if (!chat) throw new ChatNotFoundError(chatId);
+    chat.assertCanPost(me);
+
+    const message = await this.messages.findVisibleById(
+      chatId,
+      messageId,
+      chat.participantOf(me)!.joinedSeq,
+      tx,
+    );
+    if (message) return message;
+
+    const hidden = await this.messages.findById(messageId);
+    if (hidden && hidden.chatId === chatId) throw new ChatNotFoundError(chatId);
+    throw new MessageNotFoundError(messageId);
+  }
+
   private replay(message: Message): SendMessageResult {
     this.logger.debug('Duplicate send, returning original', {
       props: { chatId: message.chatId, messageId: message.id },
@@ -157,15 +259,31 @@ export class MessagesService {
     return { message: toMessageResponse(message), created: false };
   }
 
-  // Post-commit: a failed emit must not fail the send; clients catch up via /changes.
-  private emitMessageNew(chatId: string, message: MessageResponseDto): void {
+  // Post-commit: a failed emit must not fail the request; clients catch up via /changes.
+  private emitToChat<E extends ChatRealtimeEvent>(
+    chatId: string,
+    event: E,
+    payload: ChatRealtimePayload<E>,
+  ): void {
     try {
-      this.realtime.emitToChat(chatId, 'message:new', { message });
+      this.realtime.emitToChat(chatId, event, payload);
     } catch (err: unknown) {
-      this.logger.warn('message:new emit failed', {
+      this.logger.warn(`${event} emit failed`, {
         props: {
           chatId,
-          messageId: message.id,
+          error: err instanceof Error ? err.message : String(err),
+        },
+      });
+    }
+  }
+
+  private emitTypingStopped(chatId: string, userId: string): void {
+    try {
+      this.realtime.emitTypingStopped(chatId, userId);
+    } catch (err: unknown) {
+      this.logger.warn('typing stop emit failed', {
+        props: {
+          chatId,
           error: err instanceof Error ? err.message : String(err),
         },
       });

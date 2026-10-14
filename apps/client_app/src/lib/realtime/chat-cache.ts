@@ -331,23 +331,42 @@ function applyMessages(
   return inserted;
 }
 
+/** True while a page observes the chat's messages (the user is looking at it). */
+function isChatOpen(client: QueryClient, chatId: string): boolean {
+  const query = client
+    .getQueryCache()
+    .find({ queryKey: chatKeys.messages(chatId), exact: true });
+  return (query?.getObserversCount() ?? 0) > 0;
+}
+
 /**
- * Conversation-list side of a new message.
+ * Conversation-list side of a new message: preview, activity time and
+ * `lastChangeSeq` advance, `unreadCount` goes up by one, and the list is
+ * re-sorted so the chat moves to the top.
  *
- * Extension point for B08 (T081): bump `unreadCount` when the chat isn't open,
- * `message.authorId !== ctx.userId` and `ctx.insertedIntoMessages !== false`
- * (fall back to comparing `seq` with the previous `lastMessage` when it is
- * `null`), then re-sort the list with `sortConversations` so the chat moves to
- * the top. Today it only advances the preview, activity time and `lastChangeSeq`.
+ * The unread bump needs a message that is new to the chat (`insertedIntoMessages`;
+ * when that chat's messages are not loaded, a `seq` past the previous
+ * `lastMessage`), written by someone else, in a chat that isn't open. That keeps
+ * catch-up replays, own send echoes and the `chat:alert` toast from adding to it.
  */
 export function applyNewMessageToConversations(
   client: QueryClient,
   message: IMessage,
   ctx: NewMessageContext,
 ): void {
-  void ctx;
-  patchConversation(client, message.chatId, (summary) =>
-    withNewMessage(summary, message),
+  const chatOpen = isChatOpen(client, message.chatId);
+  patchConversation(client, message.chatId, (summary) => {
+    const next = withNewMessage(summary, message);
+    const isNew =
+      ctx.insertedIntoMessages ??
+      message.seq > (summary.lastMessage?.seq ?? -1);
+    if (!isNew || chatOpen || message.authorId === ctx.userId) {
+      return next;
+    }
+    return { ...next, unreadCount: summary.unreadCount + 1 };
+  });
+  client.setQueryData<ConversationListData>(chatKeys.list(), (list) =>
+    list ? { ...list, items: sortConversations(list.items) } : list,
   );
 }
 
@@ -374,6 +393,96 @@ export function handleMessageNew(
   ctx: ChatCacheContext,
 ): void {
   applyNewMessage(client, message, ctx);
+}
+
+/** The tombstone a deleted message turns into (no text, no attachments). */
+function toTombstone(message: ChatMessage, changeSeq: number): ChatMessage {
+  return {
+    ...message,
+    content: null,
+    attachments: [],
+    deletedAt: message.deletedAt ?? new Date().toISOString(),
+    changeSeq,
+  };
+}
+
+/**
+ * Keep the list entry's preview in step with an edited or deleted message: only
+ * when it is the preview, and only with a newer `changeSeq` than the preview's.
+ */
+function refreshPreview(
+  client: QueryClient,
+  chatId: string,
+  messageId: string,
+  changeSeq: number,
+  update: (message: IMessage) => IMessage,
+): void {
+  patchConversation(client, chatId, (summary) => {
+    const last = summary.lastMessage;
+    if (!last || last.id !== messageId || last.changeSeq >= changeSeq) {
+      return summary;
+    }
+    return {
+      ...summary,
+      lastMessage: update(last),
+      lastChangeSeq: Math.max(summary.lastChangeSeq, changeSeq),
+    };
+  });
+}
+
+/** `message:updated` (an edit): upsert by id; an older `changeSeq` never overwrites. */
+export function handleMessageUpdated(
+  client: QueryClient,
+  { message }: { message: IMessage },
+): void {
+  applyMessages(client, message.chatId, [message]);
+  refreshPreview(
+    client,
+    message.chatId,
+    message.id,
+    message.changeSeq,
+    () => message,
+  );
+}
+
+/**
+ * `message:deleted`: turn the message into a tombstone (when `changeSeq` is newer
+ * than the cached one) and move the chat's cursor to `changeSeq`.
+ */
+export function handleMessageDeleted(
+  client: QueryClient,
+  {
+    chatId,
+    messageId,
+    changeSeq,
+  }: { chatId: string; messageId: string; changeSeq: number },
+): void {
+  const key = chatKeys.messages(chatId);
+  const data = client.getQueryData<ChatMessagesData>(key);
+  if (data) {
+    client.setQueryData<ChatMessagesData>(key, {
+      ...data,
+      items: data.items.map((m) =>
+        m.id === messageId && m.changeSeq < changeSeq
+          ? toTombstone(m, changeSeq)
+          : m,
+      ),
+      cursor: Math.max(data.cursor, changeSeq),
+    });
+  } else if (client.getQueryState(key)?.fetchStatus === 'fetching') {
+    stateOf(client).missedWhileLoading.add(chatId);
+  }
+  refreshPreview(client, chatId, messageId, changeSeq, (m) =>
+    toTombstone(m, changeSeq),
+  );
+}
+
+/** Apply the server's response to an edit right away (the `message:updated` echo is then a no-op). */
+export function applyEditedMessage(
+  client: QueryClient,
+  message: IMessage,
+): void {
+  handleMessageUpdated(client, { message });
 }
 
 /** `chat:upsert`: insert or refresh the list entry; participants may have changed. */
@@ -571,6 +680,13 @@ export function registerChatCacheHandlers(
 ): () => void {
   const onMessageNew = (payload: { message: IMessage }) =>
     handleMessageNew(client, payload, ctx);
+  const onMessageUpdated = (payload: { message: IMessage }) =>
+    handleMessageUpdated(client, payload);
+  const onMessageDeleted = (payload: {
+    chatId: string;
+    messageId: string;
+    changeSeq: number;
+  }) => handleMessageDeleted(client, payload);
   const onChatUpsert = (payload: { conversation: IConversationSummary }) =>
     handleChatUpsert(client, payload);
   const onChatRead = (state: IReadState) => handleChatRead(client, state);
@@ -583,6 +699,8 @@ export function registerChatCacheHandlers(
   };
 
   socket.on('message:new', onMessageNew);
+  socket.on('message:updated', onMessageUpdated);
+  socket.on('message:deleted', onMessageDeleted);
   socket.on('chat:upsert', onChatUpsert);
   socket.on('chat:read', onChatRead);
   socket.on('chat:removed', onChatRemoved);
@@ -590,6 +708,8 @@ export function registerChatCacheHandlers(
 
   return () => {
     socket.off('message:new', onMessageNew);
+    socket.off('message:updated', onMessageUpdated);
+    socket.off('message:deleted', onMessageDeleted);
     socket.off('chat:upsert', onChatUpsert);
     socket.off('chat:read', onChatRead);
     socket.off('chat:removed', onChatRemoved);

@@ -42,6 +42,7 @@ function fakeSocket(
       ...data,
     },
     join: jest.fn(),
+    rooms: new Set<string>(),
     emit: jest.fn(),
     disconnect: jest.fn(),
   } as unknown as RealtimeSocket & { emit: jest.Mock; disconnect: jest.Mock };
@@ -102,6 +103,7 @@ describe('ChatsGateway auth:renew', () => {
       { verify } as unknown as AccessTokenVerifier,
       redis as never,
       { findActiveChatIdsForUser: jest.fn().mockResolvedValue([]) } as never,
+      {} as never,
     );
   });
 
@@ -246,6 +248,7 @@ describe('ChatsGateway handleConnection', () => {
       {
         findActiveChatIdsForUser: find,
       } as never,
+      {} as never,
     );
   const socket = () => {
     const join = jest.fn().mockResolvedValue(undefined);
@@ -275,5 +278,133 @@ describe('ChatsGateway handleConnection', () => {
     await expect(gateway.handleConnection(s)).resolves.toBeUndefined();
     expect(join).toHaveBeenCalledTimes(1);
     gateway.handleDisconnect(s);
+  });
+});
+
+describe('ChatsGateway typing and chat:view', () => {
+  const CHAT = '22222222-2222-4222-8222-222222222222';
+  const typer = { id: USER, displayName: 'Anna' } as never;
+  let redis: { exists: jest.Mock };
+  let getUsers: jest.Mock;
+  let emit: jest.Mock;
+  let except: jest.Mock;
+  let to: jest.Mock;
+  let gateway: ChatsGateway;
+
+  const member = (data: Partial<RealtimeSocket['data']> = {}) => {
+    const socket = fakeSocket(data);
+    socket.rooms.add(`chat:${CHAT}`);
+    return socket;
+  };
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    redis = { exists: jest.fn().mockResolvedValue(0) };
+    getUsers = jest.fn().mockResolvedValue(new Map([[USER, typer]]));
+    emit = jest.fn();
+    except = jest.fn(() => ({ emit }));
+    to = jest.fn(() => ({ except }));
+    gateway = new ChatsGateway(
+      {} as never,
+      redis as never,
+      {} as never,
+      { getUsers } as never,
+    );
+    gateway.server = { to } as never;
+  });
+
+  afterEach(() => jest.useRealTimers());
+
+  it('ignores typing:start from a socket not in the chat room', async () => {
+    await gateway.handleTypingStart(fakeSocket(), { chatId: CHAT });
+    expect(to).not.toHaveBeenCalled();
+  });
+
+  it('relays a member typing:start to the room except the typer', async () => {
+    await gateway.handleTypingStart(member(), { chatId: CHAT });
+
+    expect(to).toHaveBeenCalledWith(`chat:${CHAT}`);
+    expect(except).toHaveBeenCalledWith(`user:${USER}`);
+    expect(emit).toHaveBeenCalledWith('typing', {
+      chatId: CHAT,
+      user: typer,
+      isTyping: true,
+    });
+  });
+
+  it('throttles a second typing:start within 2 s and resolves the user once', async () => {
+    const socket = member();
+    await gateway.handleTypingStart(socket, { chatId: CHAT });
+    jest.advanceTimersByTime(1500);
+    await gateway.handleTypingStart(socket, { chatId: CHAT });
+    expect(emit).toHaveBeenCalledTimes(1);
+
+    jest.advanceTimersByTime(600);
+    await gateway.handleTypingStart(socket, { chatId: CHAT });
+    expect(emit).toHaveBeenCalledTimes(2);
+    expect(getUsers).toHaveBeenCalledTimes(1);
+  });
+
+  it('relays typing:stop with isTyping false', async () => {
+    await gateway.handleTypingStop(member(), { chatId: CHAT });
+    expect(emit).toHaveBeenCalledWith('typing', {
+      chatId: CHAT,
+      user: typer,
+      isTyping: false,
+    });
+  });
+
+  it('rejects a blacklisted jti before relaying', async () => {
+    redis.exists.mockResolvedValue(1);
+    const socket = member();
+
+    await gateway.handleTypingStart(socket, { chatId: CHAT });
+    await gateway.handleTypingStop(socket, { chatId: CHAT });
+
+    const { emit: socketEmit, disconnect } = socket as unknown as Record<
+      'emit' | 'disconnect',
+      jest.Mock
+    >;
+    expect(to).not.toHaveBeenCalled();
+    expect(socketEmit).toHaveBeenCalledWith('session:expired', {
+      reason: 'revoked',
+    });
+    expect(disconnect).toHaveBeenCalledWith(true);
+  });
+
+  it('emitTypingStopped broadcasts isTyping false except the user', async () => {
+    gateway.emitTypingStopped(CHAT, USER);
+    await jest.advanceTimersByTimeAsync(0);
+    expect(except).toHaveBeenCalledWith(`user:${USER}`);
+    expect(emit).toHaveBeenCalledWith('typing', {
+      chatId: CHAT,
+      user: typer,
+      isTyping: false,
+    });
+  });
+
+  it('chat:view sets viewingChatId only for a joined room and clears on null', async () => {
+    const socket = member();
+    const ack = jest.fn();
+
+    await gateway.handleChatView(socket, { chatId: CHAT }, ack);
+    expect(socket.data.viewingChatId).toBe(CHAT);
+    expect(ack).toHaveBeenLastCalledWith({ ok: true });
+
+    await gateway.handleChatView(socket, { chatId: 'other' }, ack);
+    expect(socket.data.viewingChatId).toBeNull();
+
+    await gateway.handleChatView(socket, { chatId: CHAT }, ack);
+    await gateway.handleChatView(socket, { chatId: null }, ack);
+    expect(socket.data.viewingChatId).toBeNull();
+  });
+
+  it('chat:view re-checks the blacklist first', async () => {
+    redis.exists.mockResolvedValue(1);
+    const socket = member();
+    const ack = jest.fn();
+    await gateway.handleChatView(socket, { chatId: CHAT }, ack);
+    expect(socket.data.viewingChatId).toBeNull();
+    expect(ack).toHaveBeenCalledWith(expect.objectContaining({ ok: false }));
   });
 });

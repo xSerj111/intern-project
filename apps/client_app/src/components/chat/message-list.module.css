@@ -15,65 +15,6 @@
   font-size: 0.85rem;
 }
 
-.row {
-  display: flex;
-  flex-direction: column;
-  max-width: 80%;
-  align-items: flex-start;
-}
-
-.rowOwn {
-  align-self: flex-end;
-  align-items: flex-end;
-}
-
-.bubble {
-  margin: 0;
-  padding: 0.5rem 0.8rem;
-  border-radius: 14px;
-  background: var(--innogram-bg);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.bubbleOwn {
-  background: var(--innogram-primary);
-  color: #fff;
-}
-
-.bubbleSending {
-  opacity: 0.6;
-}
-
-.bubbleFailed {
-  background: var(--innogram-danger-bg);
-  color: var(--innogram-danger);
-  border: 1px solid var(--innogram-danger);
-}
-
-.meta {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-  margin-top: 0.15rem;
-  font-size: 0.75rem;
-  color: var(--innogram-muted);
-}
-
-.failed {
-  color: var(--innogram-danger);
-}
-
-.linkButton {
-  background: none;
-  border: none;
-  padding: 0;
-  font: inherit;
-  color: var(--innogram-primary);
-  cursor: pointer;
-  text-decoration: underline;
-}
-
 .empty {
   margin: auto;
 }

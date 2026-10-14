@@ -1,8 +1,11 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   HttpStatus,
+  Patch,
   Param,
   ParseUUIDPipe,
   Post,
@@ -15,6 +18,7 @@ import type { Response } from 'express';
 import type { ICursorPage } from '@repo/contracts';
 import { MessagesService } from './messages.service';
 import { SendMessageDto } from './dto/send-message.dto';
+import { EditMessageDto } from './dto/edit-message.dto';
 import { ListMessagesQueryDto } from './dto/list-messages-query.dto';
 import { MessageChangesQueryDto } from './dto/message-changes-query.dto';
 import type { MessageResponseDto } from './dto/message-response.dto';
@@ -62,5 +66,25 @@ export class MessagesController {
     );
     res.status(created ? HttpStatus.CREATED : HttpStatus.OK);
     return message;
+  }
+
+  @Patch(':messageId')
+  edit(
+    @CurrentUser('sub') userId: string,
+    @Param('chatId', ParseUUIDPipe) chatId: string,
+    @Param('messageId', ParseUUIDPipe) messageId: string,
+    @Body() dto: EditMessageDto,
+  ): Promise<MessageResponseDto> {
+    return this.messagesService.edit(userId, chatId, messageId, dto);
+  }
+
+  @Delete(':messageId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  delete(
+    @CurrentUser('sub') userId: string,
+    @Param('chatId', ParseUUIDPipe) chatId: string,
+    @Param('messageId', ParseUUIDPipe) messageId: string,
+  ): Promise<void> {
+    return this.messagesService.delete(userId, chatId, messageId);
   }
 }

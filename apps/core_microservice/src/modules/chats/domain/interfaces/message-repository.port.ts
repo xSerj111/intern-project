@@ -22,6 +22,23 @@ export interface IMessageRepository {
     clientMessageId: string,
   ): Promise<Message | null>;
   findById(messageId: string): Promise<Message | null>;
+  /**
+   * Loads a message of `chatId` with `seq > joinedSeq`, including soft-deleted
+   * tombstones, with `attachmentIds` filled from its `message_assets` rows.
+   * Null when missing, in another chat, or not visible to the caller.
+   */
+  findVisibleById(
+    chatId: string,
+    messageId: string,
+    joinedSeq: number,
+    tx: ChatTransaction,
+  ): Promise<Message | null>;
+  /**
+   * Narrow write of `content`, `editedAt`, `changeSeq` and `deletedAt` (never a
+   * cascading save). When the message is deleted its `message_assets` rows are
+   * removed in the same transaction.
+   */
+  update(message: Message, tx: ChatTransaction): Promise<Message>;
   /** Newest first, only `seq > joinedSeq`; callers fetch `limit + 1` to detect more. */
   pageHistory(
     chatId: string,

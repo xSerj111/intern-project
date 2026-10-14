@@ -1,7 +1,10 @@
 import { Message } from './message.entity';
 import {
   EmptyMessageError,
+  MessageAlreadyDeletedError,
   MessageTooLongError,
+  NotMessageAuthorError,
+  SystemMessageImmutableError,
   TooManyAttachmentsError,
 } from '../errors/chat.errors';
 
@@ -72,5 +75,86 @@ describe('Message.isVisibleTo', () => {
 
   it('is hidden once the participant has left', () => {
     expect(m.isVisibleTo({ leftAt: new Date(), joinedSeq: 0 })).toBe(false);
+  });
+});
+
+describe('Message.edit', () => {
+  const make = (attachments = 0) =>
+    Message.create({
+      ...base,
+      content: 'hi',
+      attachmentIds: ids(attachments),
+    });
+
+  it('sets content, editedAt and the new changeSeq', () => {
+    const m = make();
+    m.edit('user-1', '  updated  ', 9);
+    expect(m.content).toBe('updated');
+    expect(m.editedAt).toBeInstanceOf(Date);
+    expect(m.changeSeq).toBe(9);
+    expect(m.seq).toBe(5);
+  });
+
+  it('rejects a non-author', () => {
+    expect(() => make().edit('user-2', 'x', 9)).toThrow(NotMessageAuthorError);
+  });
+
+  it('rejects a deleted message', () => {
+    const m = make();
+    m.delete('user-1', 8);
+    expect(() => m.edit('user-1', 'x', 9)).toThrow(MessageAlreadyDeletedError);
+  });
+
+  it('rejects a SYSTEM message', () => {
+    const s = Message.system('chat-1', 'user-1', { type: 'group_created' }, 6);
+    expect(() => s.edit('user-1', 'x', 9)).toThrow(SystemMessageImmutableError);
+  });
+
+  it('rejects empty content without attachments', () => {
+    expect(() => make().edit('user-1', '   ', 9)).toThrow(EmptyMessageError);
+  });
+
+  it('allows empty content with attachments, storing null', () => {
+    const m = make(1);
+    m.edit('user-1', '', 9);
+    expect(m.content).toBeNull();
+  });
+
+  it('rejects 2,001 chars and accepts 2,000', () => {
+    expect(() => make().edit('user-1', 'a'.repeat(2001), 9)).toThrow(
+      MessageTooLongError,
+    );
+    const m = make();
+    m.edit('user-1', 'a'.repeat(2000), 9);
+    expect(m.content).toHaveLength(2000);
+  });
+});
+
+describe('Message.delete', () => {
+  const make = () =>
+    Message.create({ ...base, content: 'hi', attachmentIds: ids(2) });
+
+  it('clears content and attachments, sets deletedAt and changeSeq', () => {
+    const m = make();
+    m.delete('user-1', 9);
+    expect(m.content).toBeNull();
+    expect(m.attachmentIds).toEqual([]);
+    expect(m.deletedAt).toBeInstanceOf(Date);
+    expect(m.changeSeq).toBe(9);
+  });
+
+  it('rejects a non-author', () => {
+    expect(() => make().delete('user-2', 9)).toThrow(NotMessageAuthorError);
+  });
+
+  it('rejects a second delete', () => {
+    const m = make();
+    m.delete('user-1', 9);
+    expect(() => m.delete('user-1', 10)).toThrow(MessageAlreadyDeletedError);
+  });
+
+  it('rejects a SYSTEM message', () => {
+    const s = Message.system('chat-1', 'user-1', { type: 'group_created' }, 6);
+    expect(() => s.delete('user-1', 9)).toThrow(SystemMessageImmutableError);
   });
 });

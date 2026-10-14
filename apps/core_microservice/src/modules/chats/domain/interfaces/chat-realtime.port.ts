@@ -37,4 +37,11 @@ export interface IChatRealtimePort {
 
   /** True when any of the user's sockets currently views the chat. */
   isUserViewingChat(userId: string, chatId: string): boolean;
+
+  /**
+   * Emits `typing { isTyping: false }` for the user to the `chat:{chatId}`
+   * room, excluding the user's own sockets. Called when a message is sent.
+   * Best effort: never throws.
+   */
+  emitTypingStopped(chatId: string, userId: string): void;
 }

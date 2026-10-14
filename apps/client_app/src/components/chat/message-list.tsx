@@ -4,24 +4,13 @@ import type { IChatParticipant } from '@repo/contracts';
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 
 import type { ChatMessage } from '../../lib/realtime/chat-cache';
-import { isPendingMessage } from '../../lib/realtime/chat-cache';
 
+import { MessageBubble } from './message-bubble';
 import styles from './message-list.module.css';
 import { SystemMessage } from './system-message';
 
 const NEAR_BOTTOM_PX = 120;
 const NEAR_TOP_PX = 80;
-
-function formatTime(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) {
-    return '';
-  }
-  return date.toLocaleTimeString(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
 
 interface MessageListProps {
   messages: ChatMessage[];
@@ -34,6 +23,10 @@ interface MessageListProps {
   /** Re-send a failed message with its original `clientMessageId`. */
   onRetry: (message: ChatMessage) => void;
   onDiscard: (message: ChatMessage) => void;
+  /** Save an edit of an own message; rejects on failure. */
+  onEdit: (message: ChatMessage, content: string) => Promise<void>;
+  /** Delete an own message; rejects on failure. */
+  onDelete: (message: ChatMessage) => Promise<void>;
 }
 
 /** Messages in ascending `seq` (pending last); scrolling to the top loads older ones. */
@@ -45,6 +38,8 @@ export function MessageList({
   onLoadOlder,
   onRetry,
   onDiscard,
+  onEdit,
+  onDelete,
 }: MessageListProps) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const loadingRef = useRef(false);
@@ -141,63 +136,16 @@ export function MessageList({
             />
           );
         }
-        const own = message.authorId === currentUserId;
-        const pending = isPendingMessage(message);
-        const failed = message.delivery === 'failed';
-        const bubbleClass = [
-          styles.bubble,
-          own ? styles.bubbleOwn : '',
-          pending && !failed ? styles.bubbleSending : '',
-          failed ? styles.bubbleFailed : '',
-        ]
-          .filter(Boolean)
-          .join(' ');
-
         return (
-          <div
+          <MessageBubble
             key={message.id}
-            className={own ? `${styles.row} ${styles.rowOwn}` : styles.row}
-          >
-            <p className={bubbleClass}>
-              {message.deletedAt
-                ? 'Message deleted'
-                : (message.content ??
-                  (message.attachments.length > 0 ? 'Attachment' : ''))}
-            </p>
-            <div className={styles.meta}>
-              {failed ? (
-                <>
-                  <span className={styles.failed}>Failed to send</span>
-                  <button
-                    type="button"
-                    className={styles.linkButton}
-                    onClick={() => onRetry(message)}
-                  >
-                    Retry
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.linkButton}
-                    onClick={() => onDiscard(message)}
-                  >
-                    Discard
-                  </button>
-                </>
-              ) : pending ? (
-                <span>Sending…</span>
-              ) : (
-                <>
-                  <time dateTime={message.createdAt}>
-                    {formatTime(message.createdAt)}
-                  </time>
-                  {message.editedAt && !message.deletedAt && (
-                    <span>edited</span>
-                  )}
-                  {own && <span>Sent</span>}
-                </>
-              )}
-            </div>
-          </div>
+            message={message}
+            own={message.authorId === currentUserId}
+            onRetry={onRetry}
+            onDiscard={onDiscard}
+            onEdit={onEdit}
+            onDelete={onDelete}
+          />
         );
       })}
     </div>

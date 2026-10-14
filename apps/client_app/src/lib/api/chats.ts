@@ -4,6 +4,7 @@ import type {
   IConversationDetail,
   IConversationSummary,
   ICursorPage,
+  IEditMessageRequest,
   IListChatsQuery,
   IListMessagesQuery,
   IMarkReadRequest,
@@ -99,6 +100,34 @@ export function sendMessage(
     token,
     signal,
     body,
+  });
+}
+
+/** Edit the caller's own message (`PATCH /chats/:chatId/messages/:messageId`). */
+export function editMessage(
+  chatId: string,
+  messageId: string,
+  content: IEditMessageRequest['content'],
+  { token, signal }: Auth = {},
+): Promise<IMessage> {
+  return coreApi<IMessage>(`/chats/${chatId}/messages/${messageId}`, {
+    method: 'PATCH',
+    token,
+    signal,
+    body: { content } satisfies IEditMessageRequest,
+  });
+}
+
+/** Delete the caller's own message (`DELETE /chats/:chatId/messages/:messageId`, 204). */
+export function deleteMessage(
+  chatId: string,
+  messageId: string,
+  { token, signal }: Auth = {},
+): Promise<void> {
+  return coreApi<void>(`/chats/${chatId}/messages/${messageId}`, {
+    method: 'DELETE',
+    token,
+    signal,
   });
 }
 

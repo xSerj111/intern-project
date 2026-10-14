@@ -3,10 +3,11 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useState } from 'react';
 
-import { sendMessage } from '../../lib/api/chats';
+import { deleteMessage, editMessage, sendMessage } from '../../lib/api/chats';
 import { getAccessToken } from '../../lib/auth/refresh';
 import {
   addPendingMessage,
+  applyEditedMessage,
   applySentMessage,
   removePendingMessage,
   setPendingMessageDelivery,
@@ -14,6 +15,7 @@ import {
 } from '../../lib/realtime/chat-cache';
 
 import styles from './message-composer.module.css';
+import { useTypingSignal } from './use-typing-signal';
 
 export const MESSAGE_MAX_LENGTH = 2000;
 
@@ -89,13 +91,48 @@ export function useSendMessage(chatId: string, userId: string | undefined) {
   return { send, retry, discard };
 }
 
+/**
+ * Edit and delete of the caller's own messages. An edit is applied to the cache
+ * from the response; a delete turns into a tombstone via the `message:deleted`
+ * event. Both reject on failure so the caller can show the error.
+ */
+export function useMessageActions(chatId: string) {
+  const queryClient = useQueryClient();
+
+  const edit = useCallback(
+    async (message: ChatMessage, content: string) => {
+      const updated = await editMessage(chatId, message.id, content, {
+        token: getAccessToken(),
+      });
+      applyEditedMessage(queryClient, updated);
+    },
+    [chatId, queryClient],
+  );
+
+  const remove = useCallback(
+    async (message: ChatMessage) => {
+      await deleteMessage(chatId, message.id, { token: getAccessToken() });
+    },
+    [chatId],
+  );
+
+  return { edit, remove };
+}
+
 interface MessageComposerProps {
+  chatId: string;
   onSend: (content: string) => void;
   disabled?: boolean;
 }
 
-export function MessageComposer({ onSend, disabled }: MessageComposerProps) {
+export function MessageComposer({
+  chatId,
+  onSend,
+  disabled,
+}: MessageComposerProps) {
   const [text, setText] = useState('');
+  // Clearing the text on send also emits `typing:stop`.
+  const { stop } = useTypingSignal(chatId, text);
   const trimmed = text.trim();
   const tooLong = text.length > MESSAGE_MAX_LENGTH;
   const canSend = !disabled && trimmed.length > 0 && !tooLong;
@@ -124,6 +161,7 @@ export function MessageComposer({ onSend, disabled }: MessageComposerProps) {
           rows={1}
           value={text}
           onChange={(event) => setText(event.target.value)}
+          onBlur={stop}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.shiftKey) {
               event.preventDefault();

@@ -15,6 +15,7 @@ import type { DefaultEventsMap, Namespace } from 'socket.io';
 import {
   REALTIME_NAMESPACE,
   type ClientToServerEvents,
+  type IChatUser,
   type IRealtimeAckError,
   type ServerToClientEvents,
 } from '@repo/contracts';
@@ -23,6 +24,10 @@ import {
   CHAT_REPOSITORY,
   type IChatRepository,
 } from '../../domain/interfaces/chat-repository.port';
+import {
+  USER_DIRECTORY_PORT,
+  type IUserDirectoryPort,
+} from '../../../profiles/domain/interfaces/user-directory.port';
 import { ACCESS_TOKEN_VERIFIER } from '../../../../common/auth/access-token-verifier.provider';
 import { REDIS_CLIENT } from '../../../../common/redis/redis.module';
 import type {
@@ -43,6 +48,19 @@ export type RealtimeNamespace = Namespace<
   DefaultEventsMap,
   RealtimeSocketData
 >;
+
+/** Typing state kept on `socket.data`; optional so the handshake can omit it. */
+declare module './socket-auth.middleware' {
+  interface RealtimeSocketData {
+    /** The typer's wire profile, resolved once per socket. */
+    typingUser?: IChatUser;
+    /** Last relayed `typing:start` per chat id (ms since epoch). */
+    typingRelayedAt?: Map<string, number>;
+  }
+}
+
+/** One `typing:start` relay per socket per chat in this window (FR-018). */
+const TYPING_THROTTLE_MS = 2000;
 
 type RenewAck = (
   res: { ok: true; expiresAt: string } | IRealtimeAckError,
@@ -88,6 +106,8 @@ export class ChatsGateway
     private readonly verifier: AccessTokenVerifier,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     @Inject(CHAT_REPOSITORY) private readonly chats: IChatRepository,
+    @Inject(USER_DIRECTORY_PORT)
+    private readonly directory: IUserDirectoryPort,
   ) {}
 
   afterInit(server: RealtimeNamespace): void {
@@ -153,7 +173,64 @@ export class ChatsGateway
     return false;
   }
 
+  emitTypingStopped(chatId: string, userId: string): void {
+    this.relayTyping(chatId, userId, false).catch((err: unknown) =>
+      this.logger.warn(
+        `Failed to emit typing stop for chat ${chatId}: ${String(err)}`,
+      ),
+    );
+  }
+
   // ---- Client to server ----
+
+  @SubscribeMessage('chat:view')
+  async handleChatView(
+    @ConnectedSocket() socket: RealtimeSocket,
+    @MessageBody() body: { chatId?: unknown } | undefined,
+    @Ack() ack: (res: { ok: true } | IRealtimeAckError) => void,
+  ): Promise<void> {
+    if (!(await this.ensureSessionActive(socket, ack))) return;
+
+    const chatId = typeof body?.chatId === 'string' ? body.chatId : null;
+    socket.data.viewingChatId =
+      chatId !== null && socket.rooms.has(chatRoom(chatId)) ? chatId : null;
+    this.reply(ack, { ok: true });
+  }
+
+  @SubscribeMessage('typing:start')
+  async handleTypingStart(
+    @ConnectedSocket() socket: RealtimeSocket,
+    @MessageBody() body: { chatId?: unknown } | undefined,
+  ): Promise<void> {
+    if (!(await this.ensureSessionActive(socket))) return;
+    const chatId = this.typingChatId(socket, body);
+    if (!chatId) return;
+
+    const relayedAt = (socket.data.typingRelayedAt ??= new Map<
+      string,
+      number
+    >());
+    const now = Date.now();
+    const last = relayedAt.get(chatId);
+    if (last !== undefined && now - last < TYPING_THROTTLE_MS) return;
+    relayedAt.set(chatId, now);
+
+    await this.relayTyping(chatId, socket.data.userId, true, socket);
+  }
+
+  @SubscribeMessage('typing:stop')
+  async handleTypingStop(
+    @ConnectedSocket() socket: RealtimeSocket,
+    @MessageBody() body: { chatId?: unknown } | undefined,
+  ): Promise<void> {
+    if (!(await this.ensureSessionActive(socket))) return;
+    const chatId = this.typingChatId(socket, body);
+    if (!chatId) return;
+
+    // The next start after a stop is relayed immediately.
+    socket.data.typingRelayedAt?.delete(chatId);
+    await this.relayTyping(chatId, socket.data.userId, false, socket);
+  }
 
   @SubscribeMessage('auth:renew')
   async handleAuthRenew(
@@ -231,6 +308,37 @@ export class ChatsGateway
       return false;
     }
     return true;
+  }
+
+  /** Chat id from a typing payload, only when the socket is in its room. */
+  private typingChatId(
+    socket: RealtimeSocket,
+    body: { chatId?: unknown } | undefined,
+  ): string | null {
+    const chatId = typeof body?.chatId === 'string' ? body.chatId : null;
+    return chatId && socket.rooms.has(chatRoom(chatId)) ? chatId : null;
+  }
+
+  /**
+   * Broadcasts a typing state to the chat room except every socket of the
+   * typer. The typer's profile is resolved once per socket. Nothing is stored.
+   */
+  private async relayTyping(
+    chatId: string,
+    userId: string,
+    isTyping: boolean,
+    socket?: RealtimeSocket,
+  ): Promise<void> {
+    let user = socket?.data.typingUser;
+    if (!user) {
+      user = (await this.directory.getUsers([userId])).get(userId);
+      if (!user) return;
+      if (socket) socket.data.typingUser = user;
+    }
+    this.server
+      .to(chatRoom(chatId))
+      .except(userRoom(userId))
+      .emit('typing', { chatId, user, isTyping });
   }
 
   private emitToRoom<E extends ChatRealtimeEvent>(

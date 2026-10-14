@@ -3,7 +3,13 @@ import { LoggerKey, UniqueConstraintViolationError } from '@repo/shared';
 import { MessagesService } from './messages.service';
 import { Chat } from './domain/entities/chat.entity';
 import { Message } from './domain/entities/message.entity';
-import { ChatNotFoundError } from './domain/errors/chat.errors';
+import {
+  ChatNotFoundError,
+  EmptyMessageError,
+  MessageAlreadyDeletedError,
+  MessageNotFoundError,
+  NotMessageAuthorError,
+} from './domain/errors/chat.errors';
 import { CHAT_REPOSITORY } from './domain/interfaces/chat-repository.port';
 import { MESSAGE_REPOSITORY } from './domain/interfaces/message-repository.port';
 import { CHAT_REALTIME_PORT } from './domain/interfaces/chat-realtime.port';
@@ -56,12 +62,16 @@ describe('MessagesService', () => {
     findById: jest.fn(),
     save: jest.fn(),
     advanceReadSeq: jest.fn(),
+    findByIdForUpdate: jest.fn(),
     runInTransaction: jest.fn(),
   };
   const messageRepo = {
     allocateSeq: jest.fn(),
     insert: jest.fn(),
     findByClientMessageId: jest.fn(),
+    findById: jest.fn(),
+    findVisibleById: jest.fn(),
+    update: jest.fn(),
     pageHistory: jest.fn(),
     pageChanges: jest.fn(),
   };
@@ -71,6 +81,7 @@ describe('MessagesService', () => {
     joinUserToChat: jest.fn(),
     removeUserFromChat: jest.fn(),
     isUserViewingChat: jest.fn(),
+    emitTypingStopped: jest.fn(),
   };
 
   beforeEach(async () => {
@@ -80,6 +91,7 @@ describe('MessagesService', () => {
     committedAtEmit = [];
 
     chatRepo.findById.mockResolvedValue(chat);
+    chatRepo.findByIdForUpdate.mockResolvedValue(chat);
     chatRepo.advanceReadSeq.mockImplementation(
       (_c: string, _u: string, seq: number) => Promise.resolve(seq),
     );
@@ -92,6 +104,7 @@ describe('MessagesService', () => {
     );
     messageRepo.findByClientMessageId.mockResolvedValue(null);
     messageRepo.allocateSeq.mockResolvedValue(5);
+    messageRepo.update.mockImplementation((m: Message) => Promise.resolve(m));
     messageRepo.insert.mockImplementation((m: Message) =>
       Promise.resolve(persisted(m)),
     );
@@ -157,6 +170,25 @@ describe('MessagesService', () => {
       });
     });
 
+    it('emits typing stopped for the sender after commit', async () => {
+      realtime.emitTypingStopped.mockImplementation(() => {
+        committedAtEmit.push(committed);
+      });
+
+      await service.send(ME, CHAT_ID, dto);
+
+      expect(realtime.emitTypingStopped).toHaveBeenCalledWith(CHAT_ID, ME);
+      expect(committedAtEmit).toEqual([true, true]);
+    });
+
+    it('does not emit typing stopped for a replay', async () => {
+      messageRepo.findByClientMessageId.mockResolvedValue(existingMessage());
+
+      await service.send(ME, CHAT_ID, dto);
+
+      expect(realtime.emitTypingStopped).not.toHaveBeenCalled();
+    });
+
     it("moves the sender's lastReadSeq to the new seq inside the transaction", async () => {
       await service.send(ME, CHAT_ID, dto);
 
@@ -215,6 +247,231 @@ describe('MessagesService', () => {
 
       await expect(service.send(ME, CHAT_ID, dto)).rejects.toBe(error);
       expect(realtime.emitToChat).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('edit / delete', () => {
+    const MESSAGE_ID = 'm-1';
+    let stored: Message;
+
+    beforeEach(() => {
+      stored = persisted(
+        Message.create({
+          chatId: CHAT_ID,
+          authorId: ME,
+          content: 'old',
+          clientMessageId: CLIENT_ID,
+          seq: 3,
+        }),
+        MESSAGE_ID,
+      );
+      messageRepo.findVisibleById.mockResolvedValue(stored);
+      messageRepo.allocateSeq.mockResolvedValue(6);
+    });
+
+    describe('edit', () => {
+      it('allocates a new changeSeq in the tx and emits message:updated after commit', async () => {
+        const result = await service.edit(ME, CHAT_ID, MESSAGE_ID, {
+          content: ' new ',
+        });
+
+        expect(chatRepo.findByIdForUpdate).toHaveBeenCalledWith(CHAT_ID, tx);
+        expect(messageRepo.findVisibleById).toHaveBeenCalledWith(
+          CHAT_ID,
+          MESSAGE_ID,
+          0,
+          tx,
+        );
+        expect(messageRepo.allocateSeq).toHaveBeenCalledWith(CHAT_ID, tx);
+        expect(messageRepo.update).toHaveBeenCalledWith(stored, tx);
+        expect(result).toMatchObject({
+          id: MESSAGE_ID,
+          content: 'new',
+          seq: 3,
+          changeSeq: 6,
+        });
+        expect(result.editedAt).not.toBeNull();
+        expect(committedAtEmit).toEqual([true]);
+        expect(realtime.emitToChat).toHaveBeenCalledWith(
+          CHAT_ID,
+          'message:updated',
+          { message: result },
+        );
+      });
+
+      it('rejects a non-author with NotMessageAuthorError and emits nothing', async () => {
+        messageRepo.findVisibleById.mockResolvedValue(
+          persisted(
+            Message.create({
+              chatId: CHAT_ID,
+              authorId: OTHER,
+              content: 'theirs',
+              clientMessageId: 'c9',
+              seq: 3,
+            }),
+          ),
+        );
+
+        await expect(
+          service.edit(ME, CHAT_ID, MESSAGE_ID, { content: 'x' }),
+        ).rejects.toThrow(NotMessageAuthorError);
+        expect(messageRepo.update).not.toHaveBeenCalled();
+        expect(realtime.emitToChat).not.toHaveBeenCalled();
+      });
+
+      it('rejects blank text when the message has no attachments', async () => {
+        await expect(
+          service.edit(ME, CHAT_ID, MESSAGE_ID, { content: '   ' }),
+        ).rejects.toThrow(EmptyMessageError);
+      });
+
+      it('allows blank text when the message has attachments', async () => {
+        stored.attachmentIds = ['asset-1'];
+
+        const result = await service.edit(ME, CHAT_ID, MESSAGE_ID, {
+          content: '',
+        });
+
+        expect(result.content).toBeNull();
+      });
+
+      it('rejects a deleted message with MessageAlreadyDeletedError', async () => {
+        stored.deletedAt = new Date();
+
+        await expect(
+          service.edit(ME, CHAT_ID, MESSAGE_ID, { content: 'x' }),
+        ).rejects.toThrow(MessageAlreadyDeletedError);
+      });
+
+      it('rejects a non-participant with ChatNotFoundError', async () => {
+        await expect(
+          service.edit(STRANGER, CHAT_ID, MESSAGE_ID, { content: 'x' }),
+        ).rejects.toThrow(ChatNotFoundError);
+        expect(messageRepo.findVisibleById).not.toHaveBeenCalled();
+        expect(realtime.emitToChat).not.toHaveBeenCalled();
+      });
+
+      it('rejects an unknown chat with ChatNotFoundError', async () => {
+        chatRepo.findByIdForUpdate.mockResolvedValue(null);
+
+        await expect(
+          service.edit(ME, CHAT_ID, MESSAGE_ID, { content: 'x' }),
+        ).rejects.toThrow(ChatNotFoundError);
+      });
+
+      it('rejects a message from before the caller joined with ChatNotFoundError', async () => {
+        chat.participantOf(ME)!.joinedSeq = 3;
+        messageRepo.findVisibleById.mockResolvedValue(null);
+        messageRepo.findById.mockResolvedValue(stored);
+
+        await expect(
+          service.edit(ME, CHAT_ID, MESSAGE_ID, { content: 'x' }),
+        ).rejects.toThrow(ChatNotFoundError);
+        expect(messageRepo.findVisibleById).toHaveBeenCalledWith(
+          CHAT_ID,
+          MESSAGE_ID,
+          3,
+          tx,
+        );
+        expect(realtime.emitToChat).not.toHaveBeenCalled();
+      });
+
+      it('rejects a missing message with MessageNotFoundError', async () => {
+        messageRepo.findVisibleById.mockResolvedValue(null);
+        messageRepo.findById.mockResolvedValue(null);
+
+        await expect(
+          service.edit(ME, CHAT_ID, MESSAGE_ID, { content: 'x' }),
+        ).rejects.toThrow(MessageNotFoundError);
+      });
+
+      it('rejects a message of another chat with MessageNotFoundError', async () => {
+        messageRepo.findVisibleById.mockResolvedValue(null);
+        messageRepo.findById.mockResolvedValue(
+          Object.assign(stored, { chatId: 'other-chat' }),
+        );
+
+        await expect(
+          service.edit(ME, CHAT_ID, MESSAGE_ID, { content: 'x' }),
+        ).rejects.toThrow(MessageNotFoundError);
+      });
+
+      it('still resolves when the emit fails', async () => {
+        realtime.emitToChat.mockImplementation(() => {
+          throw new Error('socket down');
+        });
+
+        const result = await service.edit(ME, CHAT_ID, MESSAGE_ID, {
+          content: 'new',
+        });
+
+        expect(result.changeSeq).toBe(6);
+      });
+    });
+
+    describe('delete', () => {
+      it('allocates a new changeSeq, tombstones, and emits message:deleted after commit', async () => {
+        await service.delete(ME, CHAT_ID, MESSAGE_ID);
+
+        expect(messageRepo.allocateSeq).toHaveBeenCalledWith(CHAT_ID, tx);
+        expect(messageRepo.update).toHaveBeenCalledWith(stored, tx);
+        expect(stored.deletedAt).not.toBeNull();
+        expect(stored.content).toBeNull();
+        expect(stored.changeSeq).toBe(6);
+        expect(committedAtEmit).toEqual([true]);
+        expect(realtime.emitToChat).toHaveBeenCalledWith(
+          CHAT_ID,
+          'message:deleted',
+          { chatId: CHAT_ID, messageId: MESSAGE_ID, changeSeq: 6 },
+        );
+      });
+
+      it('rejects a non-author and emits nothing', async () => {
+        await expect(
+          service.delete(OTHER, CHAT_ID, MESSAGE_ID),
+        ).rejects.toThrow(NotMessageAuthorError);
+        expect(messageRepo.update).not.toHaveBeenCalled();
+        expect(realtime.emitToChat).not.toHaveBeenCalled();
+      });
+
+      it('rejects a deleted message with MessageAlreadyDeletedError', async () => {
+        stored.deletedAt = new Date();
+
+        await expect(service.delete(ME, CHAT_ID, MESSAGE_ID)).rejects.toThrow(
+          MessageAlreadyDeletedError,
+        );
+      });
+
+      it('rejects a non-participant with ChatNotFoundError', async () => {
+        await expect(
+          service.delete(STRANGER, CHAT_ID, MESSAGE_ID),
+        ).rejects.toThrow(ChatNotFoundError);
+      });
+
+      it('rejects a message from before the caller joined with ChatNotFoundError', async () => {
+        messageRepo.findVisibleById.mockResolvedValue(null);
+        messageRepo.findById.mockResolvedValue(stored);
+
+        await expect(service.delete(ME, CHAT_ID, MESSAGE_ID)).rejects.toThrow(
+          ChatNotFoundError,
+        );
+      });
+
+      it('runs the attachment hook with the removed asset ids', async () => {
+        stored.attachmentIds = ['a1', 'a2'];
+        const hook = jest
+          .spyOn(service, 'onMessageDeleted')
+          .mockResolvedValue(undefined);
+
+        await service.delete(ME, CHAT_ID, MESSAGE_ID);
+
+        expect(hook).toHaveBeenCalledWith(
+          CHAT_ID,
+          MESSAGE_ID,
+          ['a1', 'a2'],
+          tx,
+        );
+      });
     });
   });
 
