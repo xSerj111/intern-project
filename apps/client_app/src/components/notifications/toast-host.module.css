@@ -1,0 +1,52 @@
+.host {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  width: min(320px, calc(100vw - 2rem));
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.75rem 0.9rem;
+  background: var(--innogram-surface);
+  border: 1px solid var(--innogram-border);
+  border-left: 3px solid var(--innogram-primary);
+  border-radius: var(--innogram-radius);
+  box-shadow: var(--innogram-shadow);
+}
+
+.link {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  font-weight: 600;
+  color: var(--innogram-text);
+}
+
+.link:hover {
+  color: var(--innogram-primary);
+}
+
+.close {
+  background: none;
+  border: none;
+  padding: 0 0.25rem;
+  font-size: 1.25rem;
+  line-height: 1;
+  color: var(--innogram-muted);
+  cursor: pointer;
+}
+
+.close:hover {
+  color: var(--innogram-text);
+}

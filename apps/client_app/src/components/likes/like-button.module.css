@@ -1,0 +1,38 @@
+.wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.6rem;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--innogram-muted);
+  background: transparent;
+  border: 1px solid var(--innogram-border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled) {
+  border-color: var(--innogram-accent);
+}
+
+.button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.liked {
+  color: var(--innogram-accent);
+  border-color: var(--innogram-accent);
+}
+
+.error {
+  font-size: 0.8rem;
+  color: var(--innogram-danger);
+}

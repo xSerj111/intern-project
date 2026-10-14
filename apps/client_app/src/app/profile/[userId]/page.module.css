@@ -1,0 +1,48 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  padding-top: 1.5rem;
+  padding-bottom: 2rem;
+}
+
+.title {
+  font-size: 1.75rem;
+  letter-spacing: -0.02em;
+}
+
+.card {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+.avatar {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(109, 40, 217, 0.1);
+  color: var(--innogram-primary);
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+
+.identity {
+  min-width: 0;
+}
+
+.displayName {
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+.username {
+  margin: 0;
+  color: var(--innogram-muted);
+}

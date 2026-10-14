@@ -1,0 +1,65 @@
+.item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: var(--innogram-surface);
+  border: 1px solid var(--innogram-border);
+  border-radius: var(--innogram-radius);
+  box-shadow: var(--innogram-shadow);
+}
+
+.item:hover {
+  border-color: var(--innogram-primary);
+}
+
+.unseen {
+  background: rgba(109, 40, 217, 0.06);
+  border-color: var(--innogram-primary);
+}
+
+.avatar {
+  flex: 0 0 auto;
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  object-fit: cover;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--innogram-primary);
+  color: #fff;
+  font-weight: 700;
+}
+
+.body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.text {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.excerpt {
+  margin: 0.15rem 0 0;
+  font-size: 0.9rem;
+  color: var(--innogram-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.time {
+  font-size: 0.8rem;
+  color: var(--innogram-muted);
+}
+
+.dot {
+  flex: 0 0 auto;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: var(--innogram-primary);
+}

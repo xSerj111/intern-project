@@ -3,6 +3,8 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
+import { useTotalUnreadCount } from '../../lib/realtime/notification-cache';
+
 import styles from './nav-links.module.css';
 
 interface NavLink {
@@ -15,10 +17,12 @@ const LINKS: NavLink[] = [
   { href: '/', label: 'Home' },
   { href: '/messages', label: 'Messages' },
   { href: '/profile', label: 'Profile' },
+  { href: '/settings/notifications', label: 'Notification settings' },
 ];
 
 export function NavLinks() {
   const pathname = usePathname();
+  const unread = useTotalUnreadCount();
 
   return (
     <nav className={styles.nav} aria-label="Primary">
@@ -36,6 +40,14 @@ export function NavLinks() {
             aria-current={isActive ? 'page' : undefined}
           >
             {link.label}
+            {link.href === '/messages' && unread > 0 && (
+              <span
+                className={styles.badge}
+                aria-label={`${unread} unread messages`}
+              >
+                {unread > 99 ? '99+' : unread}
+              </span>
+            )}
           </Link>
         );
       })}

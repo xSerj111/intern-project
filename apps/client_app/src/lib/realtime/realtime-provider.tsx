@@ -25,6 +25,7 @@ import {
 } from '../auth/refresh';
 import { config } from '../config';
 import { registerChatCacheHandlers } from './chat-cache';
+import { registerNotificationCacheHandlers } from './notification-cache';
 
 export type RealtimeSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -107,6 +108,10 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
     const unregisterChatCache = registerChatCacheHandlers(next, queryClient, {
       userId,
     });
+    const unregisterNotificationCache = registerNotificationCacheHandlers(
+      next,
+      queryClient,
+    );
 
     const signOut = () => {
       if (!disposed) {
@@ -230,6 +235,7 @@ export function RealtimeProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('online', handleOnline);
       unsubscribeTokens();
       unregisterChatCache();
+      unregisterNotificationCache();
       next.removeAllListeners();
       next.disconnect();
       setSocket(null);

@@ -26,6 +26,7 @@ import {
   useChatMessages,
   useConversationList,
 } from '../../../lib/realtime/chat-cache';
+import { useSocket } from '../../../lib/realtime/use-socket-event';
 
 import styles from './page.module.css';
 
@@ -50,8 +51,33 @@ export default function ChatPage() {
   });
   const messages = useChatMessages(chatId);
   const list = useConversationList();
+  const socket = useSocket();
   const { send, retry, discard } = useSendMessage(chatId, userId);
   const { edit, remove } = useMessageActions(chatId);
+
+  // Tell the server which chat is on screen (suppresses `chat:alert` for it):
+  // only while the tab is visible; cleared on route change, unmount and hide,
+  // and re-sent on every (re)connect because a new socket starts with no value.
+  useEffect(() => {
+    if (!socket) {
+      return;
+    }
+    const send = (viewing: string | null) => {
+      if (socket.connected) {
+        socket.emit('chat:view', { chatId: viewing }, () => undefined);
+      }
+    };
+    const sendCurrent = () =>
+      send(document.visibilityState === 'visible' ? chatId : null);
+    sendCurrent();
+    socket.on('connect', sendCurrent);
+    document.addEventListener('visibilitychange', sendCurrent);
+    return () => {
+      socket.off('connect', sendCurrent);
+      document.removeEventListener('visibilitychange', sendCurrent);
+      send(null);
+    };
+  }, [socket, chatId]);
 
   // Highest server seq already reported as read from this page.
   const readSeqRef = useRef(0);

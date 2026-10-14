@@ -2,12 +2,15 @@
 
 import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
+import { useState } from 'react';
 
 import type { IPostResponse } from '@repo/contracts';
 
 import { getFeed } from '../../lib/api/feed';
 import { useAuth } from '../../lib/auth/auth-context';
+import { PostComments } from '../comments/post-comments';
 import { ErrorState, LoadingState } from '../common/async-state';
+import { LikeButton } from '../likes/like-button';
 
 import styles from './feed-list.module.css';
 
@@ -23,7 +26,16 @@ function formatDate(iso: string): string {
   });
 }
 
-function PostCard({ post }: { post: IPostResponse }) {
+/** One post with its like button and a collapsible comment thread. */
+export function PostCard({
+  post,
+  commentsOpen = false,
+}: {
+  post: IPostResponse;
+  commentsOpen?: boolean;
+}) {
+  const [showComments, setShowComments] = useState(commentsOpen);
+
   return (
     <li className={styles.post}>
       <div className={styles.postHeader}>
@@ -33,6 +45,23 @@ function PostCard({ post }: { post: IPostResponse }) {
         </time>
       </div>
       <p className={styles.content}>{post.content}</p>
+      <div className={styles.actions}>
+        <LikeButton
+          target="post"
+          targetId={post.id}
+          initialLiked={post.likedByMe}
+          initialCount={post.likeCount}
+        />
+        <button
+          type="button"
+          className={styles.commentsToggle}
+          onClick={() => setShowComments((open) => !open)}
+          aria-expanded={showComments}
+        >
+          {showComments ? 'Hide comments' : 'Comments'}
+        </button>
+      </div>
+      {showComments && <PostComments postId={post.id} />}
     </li>
   );
 }
