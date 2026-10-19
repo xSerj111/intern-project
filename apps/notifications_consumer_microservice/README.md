@@ -57,7 +57,7 @@ Set in the root `.env` (see `.env.example`):
 ## Local run
 
 ```bash
-# from the repo root: Postgres, Redis, RabbitMQ, MinIO and Mailpit
+# from the repo root: Postgres, Redis, RabbitMQ, SeaweedFS and Mailpit
 npm run docker:up
 
 # build shared packages once, then run migrations for this service
