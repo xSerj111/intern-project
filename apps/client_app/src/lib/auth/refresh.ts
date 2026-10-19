@@ -2,10 +2,12 @@ import type { ILoginResponse } from '@repo/contracts';
 
 import { ApiError, authApi } from '../api/client';
 
-/** Access/refresh token pair held for the signed-in user. */
+/**
+ * Access token held for the signed-in user. The refresh token lives in an
+ * httpOnly cookie set by the auth service and is never readable here.
+ */
 export interface AuthTokens {
   accessToken: string;
-  refreshToken: string;
 }
 
 /**
@@ -52,22 +54,17 @@ function isRejection(error: unknown): boolean {
 }
 
 async function performRefresh(): Promise<string> {
-  const refreshToken = currentTokens?.refreshToken;
-  if (!refreshToken) {
-    currentTokens = null;
+  if (!currentTokens) {
     notify(null);
     throw new ApiError('Not signed in', 401);
   }
 
   try {
+    // The refresh token travels as the httpOnly cookie (`authApi` includes credentials).
     const result = await authApi<ILoginResponse>('/auth/refresh', {
       method: 'POST',
-      body: { refreshToken },
     });
-    currentTokens = {
-      accessToken: result.accessToken,
-      refreshToken: result.refreshToken,
-    };
+    currentTokens = { accessToken: result.accessToken };
     notify(result);
     return result.accessToken;
   } catch (error) {

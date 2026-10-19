@@ -25,10 +25,12 @@ import {
 
 const STORAGE_KEY = 'innogram.session';
 
-/** Signed-in session persisted client-side (research.md §6). */
+/**
+ * Signed-in session persisted client-side (research.md §6). The refresh token is
+ * not part of it: the auth service keeps it in an httpOnly cookie.
+ */
 export interface AuthSession {
   accessToken: string;
-  refreshToken: string;
   user: IAuthUserResponse;
 }
 
@@ -67,7 +69,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
       if (raw) {
-        const stored = JSON.parse(raw) as AuthSession;
+        const { accessToken, user } = JSON.parse(raw) as AuthSession;
+        const stored: AuthSession = { accessToken, user };
+        // Rewrite so a refresh token persisted by older builds doesn't linger.
+        window.localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
         setAuthTokens(stored);
         setSession(stored);
       }
@@ -89,7 +94,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setSession((previous) => {
           const nextSession: AuthSession = {
             accessToken: change.accessToken,
-            refreshToken: change.refreshToken,
             user: change.user ?? previous?.user,
           };
           window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextSession));
@@ -102,7 +106,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const establishSession = useCallback((result: ILoginResponse) => {
     const nextSession: AuthSession = {
       accessToken: result.accessToken,
-      refreshToken: result.refreshToken,
       user: result.user,
     };
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(nextSession));
@@ -125,11 +128,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const logout = useCallback(() => {
-    // Revoke both tokens server-side; local state is cleared whatever the call returns.
+    // Revoke both tokens server-side (the refresh token rides in its httpOnly cookie,
+    // which the response clears); local state is cleared whatever the call returns.
     if (session) {
       authApi('/auth/logout', {
         method: 'POST',
-        body: { refreshToken: session.refreshToken },
         token: session.accessToken,
       }).catch(() => undefined);
     }

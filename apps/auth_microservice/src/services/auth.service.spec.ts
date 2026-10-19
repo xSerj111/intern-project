@@ -104,6 +104,7 @@ describe('AuthService', () => {
       expiresAt: expect.any(String) as string,
     });
     expect(new Date(session.expiresAt).getTime()).toBeGreaterThan(Date.now());
+    expect(result.refreshExpiresAt.toISOString()).toBe(session.expiresAt);
   });
 
   it('refresh rotates: old session deleted, old id blacklisted, new session created', async () => {
@@ -221,6 +222,17 @@ describe('AuthService', () => {
 
   it('logout does not fail on an invalid refresh token', async () => {
     await expect(service.logout('garbage')).resolves.toBeUndefined();
+  });
+
+  it('logout without a refresh token still blacklists the access token', async () => {
+    const { accessToken } = await service.login(user.email, 'password', ctx);
+
+    await service.logout(undefined, accessToken);
+
+    expect(cache.store.has(RedisKeys.accessBlacklist(jtiOf(accessToken)))).toBe(true);
+    expect(publisher.publish).toHaveBeenCalledWith(
+      expect.objectContaining({ userId: user.id, jti: jtiOf(accessToken) }),
+    );
   });
 
   it('verifyToken rejects an access token without jti', async () => {

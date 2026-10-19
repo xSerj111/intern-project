@@ -39,14 +39,5 @@ export function createUsersRouter(usersService: UsersService): Router {
     }
   });
 
-  router.get('/:id', async (req, res, next) => {
-    try {
-      const result = await usersService.getUserById(req.params.id);
-      res.status(200).json(result);
-    } catch (error) {
-      next(error);
-    }
-  });
-
   return router;
 }
