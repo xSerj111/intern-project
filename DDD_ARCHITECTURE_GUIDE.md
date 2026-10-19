@@ -23,7 +23,7 @@ intern-project/
 │   ├── contracts/                            # @repo/contracts: zero-dependency wire types
 │   └── shared/                               # @repo/shared: backend-only infrastructure
 ├── docker/postgres/init-databases.sh         # creates innogram_auth / innogram_core / innogram_notifications
-├── docker-compose.yml                        # Postgres, Redis, MinIO, RabbitMQ, Mailpit (infrastructure only)
+├── docker-compose.yml                        # Postgres, Redis, SeaweedFS, RabbitMQ, Mailpit (infrastructure only)
 ├── turbo.json
 └── package.json                              # npm workspaces: apps/*, packages/*
 ```
@@ -456,7 +456,7 @@ Two older services still inject a concrete repository class: `ProfilesService` (
 | `comments` | `Comment`, `CommentLike` entities | `COMMENT_REPOSITORY` |
 | `likes` | like/unlike routes and the like repositories (entities belong to posts/comments) | — |
 | `follows` | `Follow` | `FollowsService`, `FollowRepositoryKey` |
-| `assets` | `Asset`, S3/MinIO storage, private bucket presigning | `AssetsService` |
+| `assets` | `Asset`, S3 storage (SeaweedFS locally), private bucket presigning | `AssetsService` |
 | `chats` | `Chat`, `ChatParticipant`, `Message`, `MessageAttachment`, `ChatsGateway` | `CHAT_REALTIME_PORT` |
 | `internal-events` | `POST /internal/events/user-created` | — |
 | `notifications-relay` | AMQP consumer for `notification.*` → sockets | — |
