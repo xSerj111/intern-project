@@ -14,13 +14,13 @@ export interface IAuthUserResponse {
 }
 
 /**
- * Result of a successful `POST /auth/login`.
+ * Result of a successful `POST /auth/login`, `/auth/google` or `/auth/refresh`.
+ * The refresh token is not part of the body: auth sets it as the httpOnly
+ * `refresh_token` cookie (path `/auth`), so browser code never sees it.
  */
 export interface ILoginResponse {
   /** JWT attached as `Authorization: Bearer <token>` on backend requests. */
   accessToken: string;
-  /** Opaque refresh token; stored but not exercised in the baseline. */
-  refreshToken: string;
   user: IAuthUserResponse;
 }
 

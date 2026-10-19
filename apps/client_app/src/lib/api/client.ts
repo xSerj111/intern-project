@@ -24,6 +24,8 @@ export interface ApiRequestOptions {
   body?: unknown;
   query?: Record<string, string | number | boolean | undefined | null>;
   signal?: AbortSignal;
+  /** Cookie mode; `authApi` uses `'include'` so the refresh cookie travels. */
+  credentials?: RequestCredentials;
 }
 
 function buildUrl(
@@ -73,7 +75,7 @@ async function send(
   options: ApiRequestOptions,
   token: string | null | undefined,
 ): Promise<Response> {
-  const { method = 'GET', body, query, signal } = options;
+  const { method = 'GET', body, query, signal, credentials } = options;
   const isFormData =
     typeof FormData !== 'undefined' && body instanceof FormData;
 
@@ -97,6 +99,7 @@ async function send(
             ? body
             : JSON.stringify(body),
       signal,
+      credentials,
       cache: 'no-store',
     });
   } catch (cause) {
@@ -168,12 +171,18 @@ export function coreApi<T>(
   return apiRequest<T>(config.coreServiceUrl, path, options);
 }
 
-/** Request against the auth service (`AUTH_SERVICE_URL`). */
+/**
+ * Request against the auth service (`AUTH_SERVICE_URL`). Sends cookies so the
+ * httpOnly `refresh_token` cookie reaches `/auth/refresh` and `/auth/logout`.
+ */
 export function authApi<T>(
   path: string,
   options?: ApiRequestOptions,
 ): Promise<T> {
-  return apiRequest<T>(config.authServiceUrl, path, options);
+  return apiRequest<T>(config.authServiceUrl, path, {
+    credentials: 'include',
+    ...options,
+  });
 }
 
 /** Request against the notifications service (`NOTIFICATIONS_SERVICE_URL`). */

@@ -1,6 +1,7 @@
 import helmet from 'helmet';
 import express, { Application } from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import { DataSource } from 'typeorm';
 import type { Redis } from 'ioredis';
 import type { WinstonLogger } from '@repo/shared';
@@ -29,14 +30,14 @@ export function createApp(
 ): Application {
   const app = express();
 
-  app.use(cors());
   app.use(express.json());
+  app.use(cookieParser());
 
   app.use(helmet());
 
   app.use(
     cors({
-      origin: env.app.allowedOrigins,
+      origin: env.app.allowedOrigins.split(',').map((origin) => origin.trim()),
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization'],

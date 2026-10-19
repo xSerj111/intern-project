@@ -16,6 +16,8 @@ import { ISessionRevocationPublisher } from '../domain/interfaces/session-revoca
 export interface LoginResult {
   accessToken: string;
   refreshToken: string;
+  /** When the refresh token expires; used as the refresh cookie's lifetime. */
+  refreshExpiresAt: Date;
   user: Omit<AuthUser, 'passwordHash'>;
 }
 
@@ -146,12 +148,14 @@ export class AuthService {
     return this.generateTokensAndSession(user, ctx, session.sid);
   }
 
-  async logout(refreshToken: string, accessToken?: string): Promise<void> {
+  async logout(refreshToken?: string, accessToken?: string): Promise<void> {
     let refresh: RefreshTokenPayload | null = null;
-    try {
-      refresh = this.jwtService.verifyRefreshToken(refreshToken);
-    } catch {
-      // An invalid or expired refresh token has nothing left to revoke.
+    if (refreshToken) {
+      try {
+        refresh = this.jwtService.verifyRefreshToken(refreshToken);
+      } catch {
+        // An invalid or expired refresh token has nothing left to revoke.
+      }
     }
 
     if (refresh) {
@@ -233,6 +237,6 @@ export class AuthService {
 
     const { passwordHash: omittedHash, ...safeUser } = user;
     void omittedHash;
-    return { accessToken, refreshToken, user: safeUser };
+    return { accessToken, refreshToken, refreshExpiresAt: expiresAt, user: safeUser };
   }
 }

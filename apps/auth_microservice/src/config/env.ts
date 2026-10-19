@@ -25,6 +25,19 @@ const requireInternalApiToken = (): string => {
   return token;
 };
 
+const SAME_SITE_VALUES = ['strict', 'lax', 'none'] as const;
+type SameSite = (typeof SAME_SITE_VALUES)[number];
+
+const parseSameSite = (value: string | undefined): SameSite => {
+  if (!value) return 'strict';
+  if (!(SAME_SITE_VALUES as readonly string[]).includes(value)) {
+    throw new Error(
+      `AUTH_COOKIE_SAMESITE must be one of: ${SAME_SITE_VALUES.join(', ')}`,
+    );
+  }
+  return value as SameSite;
+};
+
 export const env = {
   app: {
     // Auth service domyślnie działa na 3002 (zgodnie z AUTH_SERVICE_URL z .env)
@@ -66,5 +79,11 @@ export const env = {
   },
   crypto: {
     saltRounds: parseInt(process.env.BCRYPT_SALT_ROUNDS || '10', 10),
+  },
+  cookie: {
+    secure: process.env.NODE_ENV === 'production',
+    // 'strict' works while client and auth share a site (localhost:3000 -> :3002);
+    // a cross-site deployment needs 'none' (which browsers only accept with secure).
+    sameSite: parseSameSite(process.env.AUTH_COOKIE_SAMESITE),
   },
 } as const;

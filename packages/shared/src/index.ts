@@ -5,7 +5,6 @@ export * from "./dtos/core/update-profile.dto";
 export * from "./dtos/core/create-comment.dto";
 export * from "./dtos/core/update-comment.dto";
 export * from "./dtos/auth/google-login.dto";
-export * from "./dtos/auth/refresh-token.dto";
 
 // Events
 export * from "./events/user-created.event";
