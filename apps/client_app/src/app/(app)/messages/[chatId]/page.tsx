@@ -8,25 +8,25 @@ import { useEffect, useRef, useState } from 'react';
 import {
   ErrorState,
   LoadingState,
-} from '../../../components/common/async-state';
-import { GroupMembersPanel } from '../../../components/chat/group-members-panel';
+} from '../../../../components/common/async-state';
+import { GroupMembersPanel } from '../../../../components/chat/group-members-panel';
 import {
   MessageComposer,
   useMessageActions,
   useSendMessage,
-} from '../../../components/chat/message-composer';
-import { MessageList } from '../../../components/chat/message-list';
-import { TypingIndicator } from '../../../components/chat/typing-indicator';
-import { chatKeys, getChat, markRead } from '../../../lib/api/chats';
-import { ApiError } from '../../../lib/api/client';
-import { useAuth } from '../../../lib/auth/auth-context';
+} from '../../../../components/chat/message-composer';
+import { MessageList } from '../../../../components/chat/message-list';
+import { TypingIndicator } from '../../../../components/chat/typing-indicator';
+import { chatKeys, getChat, markRead } from '../../../../lib/api/chats';
+import { ApiError } from '../../../../lib/api/client';
+import { useAuth } from '../../../../lib/auth/auth-context';
 import {
   isPendingMessage,
   loadOlderMessages,
   useChatMessages,
   useConversationList,
-} from '../../../lib/realtime/chat-cache';
-import { useSocket } from '../../../lib/realtime/use-socket-event';
+} from '../../../../lib/realtime/chat-cache';
+import { useSocket } from '../../../../lib/realtime/use-socket-event';
 
 import styles from './page.module.css';
 
@@ -142,15 +142,15 @@ export default function ChatPage() {
       (detail.isPending || messages.isPending))
   ) {
     return (
-      <main className={`container ${styles.page}`}>
+      <div className={`container ${styles.page}`}>
         <LoadingState label="Loading conversation…" />
-      </main>
+      </div>
     );
   }
 
   if (detail.isError || messages.isError || !detail.data || !messages.data) {
     return (
-      <main className={`container ${styles.page}`}>
+      <div className={`container ${styles.page}`}>
         <ErrorState
           message="We couldn't load this conversation."
           onRetry={() => {
@@ -158,7 +158,7 @@ export default function ChatPage() {
             void messages.refetch();
           }}
         />
-      </main>
+      </div>
     );
   }
 
@@ -169,7 +169,7 @@ export default function ChatPage() {
       : (chat.counterpart?.displayName ?? 'Conversation');
 
   return (
-    <main className={`container ${styles.page}`}>
+    <div className={`container ${styles.page}`}>
       <div className={styles.header}>
         <Link href="/messages" className="button button--ghost">
           Back
@@ -213,13 +213,13 @@ export default function ChatPage() {
       <TypingIndicator chatId={chatId} />
 
       <MessageComposer chatId={chatId} onSend={send} />
-    </main>
+    </div>
   );
 }
 
 function NotFound() {
   return (
-    <main className={`container ${styles.page}`}>
+    <div className={`container ${styles.page}`}>
       <h1 className={styles.title}>Conversation not found</h1>
       <p className="muted">
         This conversation doesn&apos;t exist or you aren&apos;t a participant.
@@ -227,6 +227,6 @@ function NotFound() {
       <Link href="/messages" className="button button--ghost">
         Back to messages
       </Link>
-    </main>
+    </div>
   );
 }

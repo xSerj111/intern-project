@@ -1,3 +1,5 @@
+import { useId } from 'react';
+
 import styles from './logo.module.css';
 
 interface LogoProps {
@@ -6,10 +8,13 @@ interface LogoProps {
 }
 
 /**
- * Innogram brand lockup (mark + wordmark), shared by the home screen and the
- * application header.
+ * Innogram brand lockup (mark + wordmark), shared by the app shell, auth
+ * screens and error pages.
  */
 export function Logo({ markOnly = false }: LogoProps) {
+  // Unique per instance: the logo can appear more than once on a page.
+  const gradientId = useId();
+
   return (
     <span className={styles.logo} aria-label="Innogram">
       <svg
@@ -22,12 +27,13 @@ export function Logo({ markOnly = false }: LogoProps) {
         focusable="false"
       >
         <defs>
-          <linearGradient id="innogram-mark" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="var(--innogram-primary)" />
-            <stop offset="100%" stopColor="var(--innogram-accent)" />
+          <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stopColor="var(--brand-violet)" />
+            <stop offset="55%" stopColor="var(--brand-fuchsia)" />
+            <stop offset="100%" stopColor="var(--brand-pink)" />
           </linearGradient>
         </defs>
-        <rect width="32" height="32" rx="9" fill="url(#innogram-mark)" />
+        <rect width="32" height="32" rx="9" fill={`url(#${gradientId})`} />
         <circle
           cx="16"
           cy="16"

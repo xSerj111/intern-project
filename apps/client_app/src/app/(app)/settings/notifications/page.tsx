@@ -8,13 +8,13 @@ import type { INotificationPreferences } from '@repo/contracts';
 import {
   ErrorState,
   LoadingState,
-} from '../../../components/common/async-state';
+} from '../../../../components/common/async-state';
 import {
   getPreferences,
   notificationKeys,
   updatePreferences,
-} from '../../../lib/api/notifications';
-import { useAuth } from '../../../lib/auth/auth-context';
+} from '../../../../lib/api/notifications';
+import { useAuth } from '../../../../lib/auth/auth-context';
 
 import styles from './page.module.css';
 
@@ -169,9 +169,9 @@ export default function NotificationSettingsPage() {
   }
 
   return (
-    <main className={`container ${styles.page}`}>
+    <div className={`container ${styles.page}`}>
       <h1 className={styles.title}>Notification settings</h1>
       {content}
-    </main>
+    </div>
   );
 }

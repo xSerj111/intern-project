@@ -3,8 +3,8 @@
 import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
 
-import { Logo } from '../../components/brand/logo';
-import { useAuth } from '../../lib/auth/auth-context';
+import { Logo } from '../../../components/brand/logo';
+import { useAuth } from '../../../lib/auth/auth-context';
 
 import styles from './login.module.css';
 
@@ -57,7 +57,7 @@ export default function LoginPage() {
   }
 
   return (
-    <main className={`container ${styles.page}`}>
+    <div className={`container ${styles.page}`}>
       <Logo />
       <h1 className={styles.title}>Sign in</h1>
 
@@ -116,6 +116,6 @@ export default function LoginPage() {
           {isSubmitting ? 'Signing in…' : 'Sign in'}
         </button>
       </form>
-    </main>
+    </div>
   );
 }

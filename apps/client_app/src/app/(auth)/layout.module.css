@@ -1,0 +1,88 @@
+.layout {
+  display: grid;
+  min-height: 100dvh;
+}
+
+.brandPanel {
+  display: none;
+}
+
+.formPanel {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-10) var(--space-4);
+}
+
+@media (min-width: 960px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .brandPanel {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    padding: var(--space-10) var(--space-12);
+    color: #ffffff;
+    background: var(--gradient-brand);
+    overflow: hidden;
+  }
+
+  /* Soft light blooms over the gradient. */
+  .brandPanel::before,
+  .brandPanel::after {
+    content: '';
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(40px);
+    opacity: 0.45;
+    pointer-events: none;
+  }
+
+  .brandPanel::before {
+    top: -120px;
+    right: -80px;
+    width: 360px;
+    height: 360px;
+    background: var(--brand-amber);
+  }
+
+  .brandPanel::after {
+    bottom: -160px;
+    left: -100px;
+    width: 420px;
+    height: 420px;
+    background: var(--brand-violet);
+  }
+
+  .brandPanel > * {
+    position: relative;
+  }
+}
+
+.pitch {
+  max-width: 440px;
+}
+
+.headline {
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-3xl);
+  font-weight: var(--weight-bold);
+  letter-spacing: -0.025em;
+  line-height: 1.15;
+}
+
+.tagline {
+  margin: 0;
+  font-size: var(--text-lg);
+  opacity: 0.9;
+}
+
+.footnote {
+  margin: 0;
+  font-size: var(--text-sm);
+  opacity: 0.75;
+}

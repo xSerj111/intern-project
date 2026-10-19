@@ -4,9 +4,9 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
 
-import { GoogleSignUpButton } from '../../components/auth/google-sign-up-button';
-import { Logo } from '../../components/brand/logo';
-import { register } from '../../lib/auth/register';
+import { GoogleSignUpButton } from '../../../components/auth/google-sign-up-button';
+import { Logo } from '../../../components/brand/logo';
+import { register } from '../../../lib/auth/register';
 
 import styles from './signup.module.css';
 
@@ -58,7 +58,7 @@ export default function SignupPage() {
   }
 
   return (
-    <main className={`container ${styles.page}`}>
+    <div className={`container ${styles.page}`}>
       <Logo />
       <h1 className={styles.title}>Create your account</h1>
 
@@ -130,6 +130,6 @@ export default function SignupPage() {
           Sign in
         </Link>
       </p>
-    </main>
+    </div>
   );
 }

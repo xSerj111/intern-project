@@ -1,11 +1,11 @@
-import { Logo } from '../components/brand/logo';
-import { FeedList } from '../components/feed/feed-list';
+import { Logo } from '../../components/brand/logo';
+import { FeedList } from '../../components/feed/feed-list';
 
 import styles from './page.module.css';
 
 export default function HomePage() {
   return (
-    <main className={`container ${styles.page}`}>
+    <div className={`container ${styles.page}`}>
       <section className={styles.hero}>
         <Logo />
         <h1>Welcome to Innogram</h1>
@@ -16,6 +16,6 @@ export default function HomePage() {
         <h2 className={styles.sectionTitle}>Home feed</h2>
         <FeedList />
       </section>
-    </main>
+    </div>
   );
 }

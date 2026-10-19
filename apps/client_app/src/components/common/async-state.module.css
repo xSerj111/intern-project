@@ -19,9 +19,9 @@
   border-radius: 6px;
   background: linear-gradient(
     90deg,
-    rgba(109, 40, 217, 0.08) 25%,
-    rgba(109, 40, 217, 0.16) 37%,
-    rgba(109, 40, 217, 0.08) 63%
+    var(--color-surface-2) 25%,
+    var(--color-surface-3) 37%,
+    var(--color-surface-2) 63%
   );
   background-size: 400% 100%;
   animation: shimmer 1.4s ease infinite;
@@ -41,10 +41,10 @@
 }
 
 .error {
-  background: var(--innogram-danger-bg);
-  border: 1px solid rgba(220, 38, 38, 0.25);
-  border-radius: var(--innogram-radius);
-  color: var(--innogram-danger);
+  background: var(--color-danger-soft);
+  border: 1px solid color-mix(in srgb, var(--color-danger) 25%, transparent);
+  border-radius: var(--radius-md);
+  color: var(--color-danger);
 }
 
 @media (prefers-reduced-motion: reduce) {

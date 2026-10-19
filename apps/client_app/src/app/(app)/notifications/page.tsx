@@ -9,14 +9,14 @@ import { useEffect, useRef, useState } from 'react';
 
 import type { INotificationsPage } from '@repo/contracts';
 
-import { ErrorState, LoadingState } from '../../components/common/async-state';
-import { NotificationItem } from '../../components/notifications/notification-item';
+import { ErrorState, LoadingState } from '../../../components/common/async-state';
+import { NotificationItem } from '../../../components/notifications/notification-item';
 import {
   listNotifications,
   markSeen,
   notificationKeys,
-} from '../../lib/api/notifications';
-import { useAuth } from '../../lib/auth/auth-context';
+} from '../../../lib/api/notifications';
+import { useAuth } from '../../../lib/auth/auth-context';
 
 import styles from './page.module.css';
 
@@ -119,9 +119,9 @@ export default function NotificationsPage() {
   }
 
   return (
-    <main className={`container ${styles.page}`}>
+    <div className={`container ${styles.page}`}>
       <h1 className={styles.title}>Notifications</h1>
       <section aria-label="Notifications">{content}</section>
-    </main>
+    </div>
   );
 }

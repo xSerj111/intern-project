@@ -4,15 +4,14 @@ import { useQuery } from '@tanstack/react-query';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 
-import type { IPostResponse } from '@repo/contracts';
-
 import {
   ErrorState,
   LoadingState,
-} from '../../../components/common/async-state';
-import { PostCard } from '../../../components/feed/feed-list';
-import { ApiError, coreApi } from '../../../lib/api/client';
-import { useAuth } from '../../../lib/auth/auth-context';
+} from '../../../../components/common/async-state';
+import { PostCard } from '../../../../components/feed/feed-list';
+import { ApiError } from '../../../../lib/api/client';
+import { getPost, postKeys } from '../../../../lib/api/posts';
+import { useAuth } from '../../../../lib/auth/auth-context';
 
 import styles from './page.module.css';
 
@@ -29,12 +28,8 @@ export default function PostPage() {
   const { accessToken, isHydrated } = useAuth();
 
   const query = useQuery({
-    queryKey: ['post', postId, accessToken],
-    queryFn: ({ signal }) =>
-      coreApi<IPostResponse>(`/posts/${postId}`, {
-        token: accessToken,
-        signal,
-      }),
+    queryKey: [...postKeys.detail(postId), accessToken],
+    queryFn: ({ signal }) => getPost(postId, { token: accessToken, signal }),
     enabled: isHydrated,
     // A missing post will not reappear on retry, so skip the default retry/poll.
     retry: (count, error) => !isUnavailable(error) && count < 2,
@@ -74,9 +69,9 @@ export default function PostPage() {
   }
 
   return (
-    <main className={`container ${styles.page}`}>
+    <div className={`container ${styles.page}`}>
       <h1 className={styles.title}>Post</h1>
       {body}
-    </main>
+    </div>
   );
 }

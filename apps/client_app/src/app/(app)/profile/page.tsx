@@ -1,15 +1,15 @@
-import { ProfileCard } from '../../components/profile/profile-card';
+import { ProfileCard } from '../../../components/profile/profile-card';
 
 import styles from './page.module.css';
 
 export default function ProfilePage() {
   return (
-    <main className={`container ${styles.page}`}>
+    <div className={`container ${styles.page}`}>
       <h1 className={styles.title}>Profile</h1>
 
       <section aria-label="Your profile">
         <ProfileCard />
       </section>
-    </main>
+    </div>
   );
 }

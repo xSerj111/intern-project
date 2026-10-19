@@ -1,25 +1,211 @@
+/*
+ * Innogram design tokens.
+ *
+ * Components use the semantic tokens below (`--color-*`, `--space-*`, ...).
+ * Light is the default; dark applies via the OS preference unless the user
+ * picked a theme explicitly (`<html data-theme="light|dark">`).
+ */
 :root {
-  /* Innogram brand palette */
-  --innogram-primary: #6d28d9;
-  --innogram-primary-strong: #5b21b6;
-  --innogram-accent: #ec4899;
+  color-scheme: light;
 
-  /* Surfaces & text */
-  --innogram-bg: #f6f6fb;
-  --innogram-surface: #ffffff;
-  --innogram-border: #e4e4ef;
-  --innogram-text: #1c1b22;
-  --innogram-muted: #6b6b7b;
-  --innogram-danger: #dc2626;
-  --innogram-danger-bg: #fef2f2;
+  /* Brand */
+  --brand-violet: #6d28d9;
+  --brand-fuchsia: #c026d3;
+  --brand-pink: #ec4899;
+  --brand-amber: #f59e0b;
+  --gradient-brand: linear-gradient(
+    135deg,
+    var(--brand-violet) 0%,
+    var(--brand-fuchsia) 55%,
+    var(--brand-pink) 100%
+  );
+  /* Avatar "story" ring */
+  --gradient-ring: conic-gradient(
+    from 210deg,
+    var(--brand-amber),
+    var(--brand-pink),
+    var(--brand-fuchsia),
+    var(--brand-violet),
+    var(--brand-amber)
+  );
 
-  /* Shape & depth */
-  --innogram-radius: 12px;
-  --innogram-shadow:
-    0 1px 3px rgba(17, 12, 46, 0.08), 0 8px 24px rgba(17, 12, 46, 0.06);
-  --innogram-max-width: 720px;
+  /* Surfaces */
+  --color-bg: #fafafb;
+  --color-surface: #ffffff;
+  --color-surface-2: #f4f4f7;
+  --color-surface-3: #eaeaf0;
+  --color-overlay: rgb(10 10 15 / 0.55);
+  --color-header-bg: color-mix(in srgb, var(--color-surface) 85%, transparent);
+
+  /* Lines */
+  --color-border: #e7e7ee;
+  --color-border-strong: #d2d2dc;
+
+  /* Text */
+  --color-text: #121217;
+  --color-text-muted: #66667a;
+  --color-text-subtle: #9797a8;
+
+  /* Interactive */
+  --color-primary: #6d28d9;
+  --color-primary-hover: #5b21b6;
+  --color-primary-soft: color-mix(in srgb, var(--color-primary) 10%, transparent);
+  --color-on-primary: #ffffff;
+  /* Primary-coloured text and icons (lighter in dark mode for contrast) */
+  --color-link: #6d28d9;
+  --color-focus-ring: color-mix(in srgb, var(--color-primary) 55%, transparent);
+
+  /* Status */
+  --color-like: #f43f5e;
+  --color-danger: #dc2626;
+  --color-danger-soft: color-mix(in srgb, var(--color-danger) 10%, transparent);
+  --color-success: #16a34a;
+  --color-success-soft: color-mix(in srgb, var(--color-success) 12%, transparent);
+
+  /* Spacing (4px grid) */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  /* Typography */
+  --font-sans:
+    var(--font-inter), system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica,
+    Arial, sans-serif;
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-md: 1rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 1.75rem;
+  --text-3xl: 2.25rem;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+  --leading-tight: 1.25;
+  --leading-normal: 1.5;
+
+  /* Shape */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-full: 999px;
+
+  /* Depth */
+  --shadow-1: 0 1px 2px rgb(17 12 46 / 0.06), 0 1px 3px rgb(17 12 46 / 0.04);
+  --shadow-2: 0 4px 12px rgb(17 12 46 / 0.08), 0 1px 3px rgb(17 12 46 / 0.06);
+  --shadow-3: 0 16px 48px rgb(17 12 46 / 0.18), 0 4px 12px rgb(17 12 46 / 0.08);
+
+  /* Layers */
+  --z-sticky: 10;
+  --z-nav: 20;
+  --z-dropdown: 30;
+  --z-dialog: 40;
+  --z-toast: 50;
+
+  /* Motion */
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* Layout */
+  --content-width: 630px;
+  --content-width-wide: 935px;
+  --sidebar-width: 244px;
+  --sidebar-rail-width: 72px;
+  --topbar-height: 56px;
+  --bottombar-height: 56px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+
+  /*
+   * Legacy aliases (pre-redesign names). Kept so not-yet-migrated modules pick
+   * up the new palette and dark mode; remove once nothing references them.
+   */
+  --innogram-primary: var(--color-primary);
+  --innogram-primary-strong: var(--color-primary-hover);
+  --innogram-accent: var(--brand-pink);
+  --innogram-bg: var(--color-bg);
+  --innogram-surface: var(--color-surface);
+  --innogram-border: var(--color-border);
+  --innogram-text: var(--color-text);
+  --innogram-muted: var(--color-text-muted);
+  --innogram-danger: var(--color-danger);
+  --innogram-danger-bg: var(--color-danger-soft);
+  --innogram-radius: var(--radius-md);
+  --innogram-shadow: var(--shadow-1);
+  --innogram-max-width: var(--content-width);
 }
 
+/* Dark palette: once for the OS preference, once for an explicit choice. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+    --color-bg: #0b0b0e;
+    --color-surface: #141418;
+    --color-surface-2: #1c1c22;
+    --color-surface-3: #26262e;
+    --color-overlay: rgb(0 0 0 / 0.7);
+    --color-border: #26262e;
+    --color-border-strong: #383842;
+    --color-text: #f3f3f6;
+    --color-text-muted: #a3a3b2;
+    --color-text-subtle: #70707e;
+    --color-primary: #7c3aed;
+    --color-primary-hover: #8b5cf6;
+    --color-primary-soft: color-mix(in srgb, #a78bfa 14%, transparent);
+    --color-link: #b49cfc;
+    --color-focus-ring: color-mix(in srgb, #a78bfa 65%, transparent);
+    --color-like: #fb7185;
+    --color-danger: #f87171;
+    --color-danger-soft: color-mix(in srgb, #f87171 14%, transparent);
+    --color-success: #4ade80;
+    --color-success-soft: color-mix(in srgb, #4ade80 14%, transparent);
+    --shadow-1: 0 1px 2px rgb(0 0 0 / 0.4);
+    --shadow-2: 0 6px 16px rgb(0 0 0 / 0.45), 0 1px 3px rgb(0 0 0 / 0.4);
+    --shadow-3: 0 20px 56px rgb(0 0 0 / 0.6), 0 4px 12px rgb(0 0 0 / 0.4);
+  }
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --color-bg: #0b0b0e;
+  --color-surface: #141418;
+  --color-surface-2: #1c1c22;
+  --color-surface-3: #26262e;
+  --color-overlay: rgb(0 0 0 / 0.7);
+  --color-border: #26262e;
+  --color-border-strong: #383842;
+  --color-text: #f3f3f6;
+  --color-text-muted: #a3a3b2;
+  --color-text-subtle: #70707e;
+  --color-primary: #7c3aed;
+  --color-primary-hover: #8b5cf6;
+  --color-primary-soft: color-mix(in srgb, #a78bfa 14%, transparent);
+  --color-link: #b49cfc;
+  --color-focus-ring: color-mix(in srgb, #a78bfa 65%, transparent);
+  --color-like: #fb7185;
+  --color-danger: #f87171;
+  --color-danger-soft: color-mix(in srgb, #f87171 14%, transparent);
+  --color-success: #4ade80;
+  --color-success-soft: color-mix(in srgb, #4ade80 14%, transparent);
+  --shadow-1: 0 1px 2px rgb(0 0 0 / 0.4);
+  --shadow-2: 0 6px 16px rgb(0 0 0 / 0.45), 0 1px 3px rgb(0 0 0 / 0.4);
+  --shadow-3: 0 20px 56px rgb(0 0 0 / 0.6), 0 4px 12px rgb(0 0 0 / 0.4);
+}
+
+/* Reset */
 *,
 *::before,
 *::after {
@@ -32,31 +218,32 @@ body {
   padding: 0;
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
-  font-family:
-    system-ui,
-    -apple-system,
-    'Segoe UI',
-    Roboto,
-    Helvetica,
-    Arial,
-    sans-serif;
-  background: var(--innogram-bg);
-  color: var(--innogram-text);
-  line-height: 1.5;
+  min-height: 100dvh;
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  background: var(--color-bg);
+  color: var(--color-text);
+  line-height: var(--leading-normal);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
 }
 
 h1,
 h2,
 h3 {
-  margin: 0 0 0.5rem;
-  line-height: 1.2;
+  margin: 0 0 var(--space-2);
+  line-height: var(--leading-tight);
+  letter-spacing: -0.015em;
 }
 
 p {
-  margin: 0 0 0.75rem;
+  margin: 0 0 var(--space-3);
 }
 
 a {
@@ -64,96 +251,146 @@ a {
   text-decoration: none;
 }
 
-img {
+img,
+video,
+svg {
   max-width: 100%;
   display: block;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+/* Lock page scroll behind modal dialogs. */
+html:has(dialog[open]) {
+  overflow: hidden;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-primary) 25%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* Layout helpers */
 .container {
   width: 100%;
-  max-width: var(--innogram-max-width);
+  max-width: var(--content-width);
   margin: 0 auto;
-  padding: 0 1rem;
+  padding: 0 var(--space-4);
 }
 
 @media (min-width: 768px) {
   .container {
-    padding: 0 1.5rem;
+    padding: 0 var(--space-6);
   }
 }
 
-/* Shared surfaces */
-.card {
-  background: var(--innogram-surface);
-  border: 1px solid var(--innogram-border);
-  border-radius: var(--innogram-radius);
-  box-shadow: var(--innogram-shadow);
-  padding: 1.25rem;
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
 }
 
-/* Buttons */
+/*
+ * Legacy global classes. New code uses the `ui/` primitives (Button, Input,
+ * Card styles in modules); these stay until every page is migrated.
+ */
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-1);
+  padding: var(--space-5);
+}
+
 .button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 0.5rem;
-  padding: 0.6rem 1.1rem;
-  font: inherit;
-  font-weight: 600;
-  color: #fff;
-  background: var(--innogram-primary);
+  gap: var(--space-2);
+  min-height: 36px;
+  padding: 0 var(--space-4);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-on-primary);
+  background: var(--color-primary);
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition:
-    background-color 0.15s ease,
-    opacity 0.15s ease;
+    background-color var(--duration-fast) ease,
+    opacity var(--duration-fast) ease;
 }
 
 .button:hover {
-  background: var(--innogram-primary-strong);
+  background: var(--color-primary-hover);
 }
 
 .button:disabled {
-  opacity: 0.6;
+  opacity: 0.55;
   cursor: not-allowed;
 }
 
 .button--ghost {
-  color: var(--innogram-primary);
-  background: transparent;
-  border-color: var(--innogram-border);
+  color: var(--color-text);
+  background: var(--color-surface-2);
+  border-color: transparent;
 }
 
 .button--ghost:hover {
-  background: rgba(109, 40, 217, 0.08);
+  background: var(--color-surface-3);
 }
 
-/* Form controls */
 .input {
   width: 100%;
-  padding: 0.65rem 0.75rem;
-  font: inherit;
-  color: inherit;
-  background: var(--innogram-surface);
-  border: 1px solid var(--innogram-border);
-  border-radius: 8px;
+  min-height: 40px;
+  padding: var(--space-2) var(--space-3);
+  color: var(--color-text);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  transition:
+    border-color var(--duration-fast) ease,
+    background-color var(--duration-fast) ease;
 }
 
 .input:focus {
-  outline: 2px solid rgba(109, 40, 217, 0.35);
-  outline-offset: 1px;
-  border-color: var(--innogram-primary);
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 0;
+  border-color: var(--color-primary);
+  background: var(--color-surface);
 }
 
-/* Utilities */
 .muted {
-  color: var(--innogram-muted);
-}
-
-.stack {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
+  color: var(--color-text-muted);
 }

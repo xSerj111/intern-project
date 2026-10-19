@@ -1,12 +1,24 @@
 .host {
   position: fixed;
-  right: 1rem;
-  bottom: 1rem;
-  z-index: 50;
+  z-index: var(--z-toast);
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
-  width: min(320px, calc(100vw - 2rem));
+  gap: var(--space-2);
+  /* Phones: top-centre, under the top bar and clear of the bottom tab bar. */
+  top: calc(var(--topbar-height) + var(--space-2));
+  left: 50%;
+  width: min(360px, calc(100vw - var(--space-8)));
+  transform: translateX(-50%);
+}
+
+@media (min-width: 768px) {
+  .host {
+    top: auto;
+    right: var(--space-6);
+    bottom: var(--space-6);
+    left: auto;
+    transform: none;
+  }
 }
 
 .toast {
@@ -17,8 +29,8 @@
   background: var(--innogram-surface);
   border: 1px solid var(--innogram-border);
   border-left: 3px solid var(--innogram-primary);
-  border-radius: var(--innogram-radius);
-  box-shadow: var(--innogram-shadow);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-2);
 }
 
 .link {

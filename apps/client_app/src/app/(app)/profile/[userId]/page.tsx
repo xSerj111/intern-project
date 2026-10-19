@@ -7,10 +7,10 @@ import { useParams } from 'next/navigation';
 import {
   ErrorState,
   LoadingState,
-} from '../../../components/common/async-state';
-import { getUsersByIds } from '../../../lib/api/profile';
-import { ApiError } from '../../../lib/api/client';
-import { useAuth } from '../../../lib/auth/auth-context';
+} from '../../../../components/common/async-state';
+import { getUsersByIds } from '../../../../lib/api/profile';
+import { ApiError } from '../../../../lib/api/client';
+import { useAuth } from '../../../../lib/auth/auth-context';
 
 import styles from './page.module.css';
 
@@ -82,9 +82,9 @@ export default function UserProfilePage() {
   }
 
   return (
-    <main className={`container ${styles.page}`}>
+    <div className={`container ${styles.page}`}>
       <h1 className={styles.title}>Profile</h1>
       <section aria-label="Profile">{content}</section>
-    </main>
+    </div>
   );
 }

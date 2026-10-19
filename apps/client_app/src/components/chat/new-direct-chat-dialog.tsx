@@ -4,10 +4,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
-import type { IChatUser, IFollowResponse } from '@repo/contracts';
+import type { IChatUser } from '@repo/contracts';
 
 import { chatKeys, createDirectChat } from '../../lib/api/chats';
-import { coreApi } from '../../lib/api/client';
+import { listFollowers, listFollowing } from '../../lib/api/follows';
 import { getUsersByIds, searchProfiles } from '../../lib/api/profile';
 import { useAuth } from '../../lib/auth/auth-context';
 
@@ -33,14 +33,8 @@ export function useFollowSuggestions(enabled: boolean) {
     queryKey: ['chats', 'suggestions', me],
     queryFn: async ({ signal }): Promise<Suggestion[]> => {
       const [following, followers] = await Promise.all([
-        coreApi<IFollowResponse[]>(`/follows/${me}/following`, {
-          token: accessToken,
-          signal,
-        }),
-        coreApi<IFollowResponse[]>(`/follows/${me}/followers`, {
-          token: accessToken,
-          signal,
-        }),
+        listFollowing(me!, { token: accessToken, signal }),
+        listFollowers(me!, { token: accessToken, signal }),
       ]);
       const seen = new Set<string>();
       const out: Suggestion[] = [];

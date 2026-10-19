@@ -2,9 +2,9 @@
 
 import { useState } from 'react';
 
-import { ConversationList } from '../../components/chat/conversation-list';
-import { NewDirectChatDialog } from '../../components/chat/new-direct-chat-dialog';
-import { NewGroupDialog } from '../../components/chat/new-group-dialog';
+import { ConversationList } from '../../../components/chat/conversation-list';
+import { NewDirectChatDialog } from '../../../components/chat/new-direct-chat-dialog';
+import { NewGroupDialog } from '../../../components/chat/new-group-dialog';
 
 import styles from './page.module.css';
 
@@ -12,7 +12,7 @@ export default function MessagesPage() {
   const [dialog, setDialog] = useState<'direct' | 'group' | null>(null);
 
   return (
-    <main className={`container ${styles.page}`}>
+    <div className={`container ${styles.page}`}>
       <div className={styles.header}>
         <h1 className={styles.title}>Messages</h1>
         <div className={styles.actions}>
@@ -41,6 +41,6 @@ export default function MessagesPage() {
         <NewDirectChatDialog onClose={() => setDialog(null)} />
       )}
       {dialog === 'group' && <NewGroupDialog onClose={() => setDialog(null)} />}
-    </main>
+    </div>
   );
 }
