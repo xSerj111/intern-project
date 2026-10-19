@@ -1,0 +1,89 @@
+.picker {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.attach {
+  align-self: flex-start;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  max-width: 100%;
+  padding: 0.2rem 0.4rem 0.2rem 0.6rem;
+  border: 1px solid var(--innogram-border);
+  border-radius: 999px;
+  background: var(--innogram-surface);
+  font-size: 0.8rem;
+}
+
+.chipError {
+  border-color: var(--innogram-danger);
+  background: var(--innogram-danger-bg);
+  color: var(--innogram-danger);
+}
+
+.name {
+  max-width: 10rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status {
+  font-size: 0.75rem;
+  color: var(--innogram-muted);
+}
+
+.chipError .status {
+  color: var(--innogram-danger);
+}
+
+.progress {
+  width: 4rem;
+  height: 0.4rem;
+  vertical-align: middle;
+}
+
+.iconButton {
+  background: none;
+  border: none;
+  padding: 0 0.25rem;
+  font: inherit;
+  line-height: 1.2;
+  color: var(--innogram-muted);
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.iconButton:hover:not(:disabled),
+.iconButton:focus-visible {
+  background: var(--innogram-border);
+  color: var(--innogram-text);
+}
+
+.iconButton:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

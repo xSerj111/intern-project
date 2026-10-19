@@ -2,8 +2,10 @@ import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 
 import { Header } from '../components/nav/header';
+import { ToastHost } from '../components/notifications/toast-host';
 import { AuthProvider } from '../lib/auth/auth-context';
 import { QueryProvider } from '../lib/query/provider';
+import { RealtimeProvider } from '../lib/realtime/realtime-provider';
 
 import './globals.css';
 
@@ -18,8 +20,11 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       <body>
         <AuthProvider>
           <QueryProvider>
-            <Header />
-            {children}
+            <RealtimeProvider>
+              <Header />
+              {children}
+              <ToastHost />
+            </RealtimeProvider>
           </QueryProvider>
         </AuthProvider>
       </body>

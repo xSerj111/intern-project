@@ -22,4 +22,9 @@ export class Follow extends TypeormEntityBase implements FollowProps {
     follow.followingId = props.followingId;
     return follow;
   }
+
+  /** Following yourself is not worth a notification. */
+  notifiesFollowed(): boolean {
+    return this.followerId !== this.followingId;
+  }
 }

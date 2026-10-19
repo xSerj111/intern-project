@@ -1,8 +1,10 @@
 # DDD & Hexagonal Architecture Guide — Innogram Monorepo
 
 **Audience:** Backend and full-stack developers working in the Innogram codebase.  
-**Last updated:** 2026-08-03  
+**Last updated:** 2026-10-14  
 **Monorepo root:** `intern-project/`
+
+This guide describes the code as it is. Every code block is a short excerpt; the file path above it is the source of truth. When this guide and the code disagree, the code wins: fix the guide.
 
 ---
 
@@ -10,112 +12,86 @@
 
 ### 1.1 Monorepo Topology
 
-The repository is a **Turborepo-powered monorepo** organized as follows:
-
 ```
 intern-project/
 ├── apps/
-│   ├── auth_microservice/          # Authentication & user identity (Express.js + Ports & Adapters DDD)
-│   ├── core_microservice/          # Social graph, content, interactions (NestJS + Hexagonal Architecture)
-│   ├── notifications_consumer_microservice/  # Async event consumers
-│   └── client_app/                 # Frontend (consumes @repo/contracts)
+│   ├── auth_microservice/                    # Credentials, JWTs, Redis sessions, Google OAuth (Express + manual DI)
+│   ├── core_microservice/                    # Profiles, posts, comments, likes, follows, assets, chats, /realtime gateway (NestJS)
+│   ├── notifications_consumer_microservice/  # Notifications, email preferences, RabbitMQ consumers, SMTP (NestJS)
+│   └── client_app/                           # Next.js App Router web client (imports @repo/contracts only)
 ├── packages/
-│   ├── contracts/                  # → @repo/contracts (zero-dependency API shapes)
-│   └── shared/                     # → @repo/shared    (backend infrastructure)
-├── turbo.json                      # Turborepo pipeline definition
-├── package.json                    # Workspace root (workspaces: ["apps/*", "packages/*"])
-└── tsconfig.json
+│   ├── contracts/                            # @repo/contracts: zero-dependency wire types
+│   └── shared/                               # @repo/shared: backend-only infrastructure
+├── docker/postgres/init-databases.sh         # creates innogram_auth / innogram_core / innogram_notifications
+├── docker-compose.yml                        # Postgres, Redis, SeaweedFS, RabbitMQ, Mailpit (infrastructure only)
+├── turbo.json
+└── package.json                              # npm workspaces: apps/*, packages/*
 ```
 
 ### 1.2 Architectural Styles
 
-The monorepo employs **two distinct architectural approaches** tailored to each microservice's complexity:
+| Service | Framework | DI | Database | Layout |
+|---|---|---|---|---|
+| `auth_microservice` | Express | Manual, in `createApp()` / `createInternalApp()` | `innogram_auth` | `src/{config,domain,infrastructure,middleware,routes,services,types}` |
+| `core_microservice` | NestJS | Nest IoC, ports bound to `Symbol` tokens | `innogram_core` | `src/modules/<module>/{domain,dto,infrastructure}` (§3) |
+| `notifications_consumer_microservice` | NestJS | Nest IoC, ports bound to `Symbol` tokens | `innogram_notifications` | `src/modules/<module>/{domain,application,infrastructure}` (§5) |
+| `client_app` | Next.js | — | — | `src/{app,components,lib}` |
 
-| Microservice | Framework | DI Strategy | Architecture |
+All three backends follow Ports & Adapters: domain entities and port interfaces in `domain/`, adapters in `infrastructure/`, application services that depend on ports only. Each service owns its database and its port variable (`AUTH_PORT` 3002, `CORE_PORT` 3001, `NOTIFICATIONS_PORT` 3003, `CLIENT_PORT` 3000); no service reads another service's database.
+
+### 1.3 How Services Talk to Each Other
+
+```
+ client_app ── HTTP ──────────────────▶ auth           (:3002)
+ client_app ── HTTP + Socket.IO /realtime ─▶ core   (:3001, ChatsGateway)
+ client_app ── HTTP ──────────────────▶ notifications (:3003)
+
+ auth ── POST /internal/events/user-created (fire-and-forget) ──▶ core
+ auth ── Redis pub/sub "auth:session-revoked" ──────────────────▶ core (closes sockets)
+ core ── outbox → RabbitMQ exchange innogram.events ─────────────▶ notifications (social.#, chat.message.alerted)
+ notifications ── innogram.events notification.* ───────────────▶ core relay ─▶ user:{id} room
+ notifications ── GET /internal/users/:id/contact (X-Internal-Token) ─▶ auth internal listener (:3012)
+```
+
+| Channel | Producer → consumer | Delivery | Details |
 |---|---|---|---|
-| `auth_microservice` | Bare Express.js | Manual Dependency Injection | Hexagonal Architecture (Ports & Adapters) with DDD layering |
-| `core_microservice` | NestJS | NestJS IoC container (`@Injectable`) | Full Hexagonal Architecture (Ports & Adapters) |
+| `POST /internal/events/user-created` | auth → core | HTTP, fire-and-forget, no retry | §7 |
+| `auth:session-revoked` | auth → core | Redis pub/sub, not durable | §3.10 |
+| `innogram.events` (`social.*`, `chat.message.alerted`) | core → notifications | transactional outbox, at-least-once | §3.11 |
+| `innogram.events` (`notification.created`, `notification.seen`) | notifications → core | AMQP, relayed to sockets | §3.11 |
+| `GET /internal/users/:id/contact` | notifications → auth | HTTP on an internal-only listener | §4.7 |
 
-**Why the same architectural style?** Both microservices now follow the Ports & Adapters pattern. `auth_microservice` achieves it with manual DI and Express router factories instead of NestJS decorators, but the layering — domain entities, port interfaces, infrastructure adapters — is the same. `core_microservice` uses NestJS IoC for wiring; the architectural principles are identical. The key difference is that `auth_microservice` has a narrower domain scope (register, login, token management, Google OAuth) and uses a lightweight framework.
+### 1.4 How Turborepo Orchestrates Builds
 
-Both services share `@repo/shared` (TypeORM base classes, DTOs, domain errors, logger) and `@repo/contracts` (API contracts).
-
-### 1.3 How Turborepo Orchestrates Builds
-
-The root `turbo.json` defines the build pipeline:
+`turbo.json` (Turborepo 1.x, so the top-level key is `pipeline`, not `tasks`):
 
 ```jsonc
-// turbo.json (excerpt)
 {
   "pipeline": {
-    "build": {
-      "dependsOn": ["^build"],     // "^build" = build upstream dependencies first
-      "outputs": ["dist/**"]
-    },
-    "dev":    { "dependsOn": ["^build"], "cache": false, "persistent": true },
-    "test":   { "dependsOn": ["^build"] },
-    "lint":   {},
+    "build": { "dependsOn": ["^build"], "outputs": ["dist/**", "build/**"] },
+    "dev":   { "dependsOn": ["^build"], "cache": false, "persistent": true },
+    "test":  { "dependsOn": ["^build"] },
+    "lint":  {},
     "type-check": { "dependsOn": ["^build"] }
   }
 }
 ```
 
-**The `^build` prefix means:** For every task `build` in workspace `X`, Turborepo first runs `build` in all workspaces that `X` depends on. Concretely:
-
-```
-packages/contracts   ──build──▶  dist/
-packages/shared      ──build──▶  dist/     (depends on contracts? No — contracts is dep-free)
-apps/core_microservice ──build──▶ dist/    (depends on @repo/shared, @repo/contracts)
-apps/auth_microservice  ──build──▶ dist/   (depends on @repo/shared, @repo/contracts)
-apps/client_app         ──build──▶ build/  (depends on @repo/contracts)
-```
-
-This ensures the shared packages are compiled before any app consumes them. Running `npm run build` at the root triggers `turbo run build`, which traverses the dependency graph and builds in correct topological order — with parallel execution where possible.
+`^build` builds a workspace's dependencies first, so `@repo/contracts` and `@repo/shared` produce their `dist/` before any app builds. The apps consume those packages through `dist/` (`main`/`types` point at `dist/index.js`), so running one app standalone needs `npm run build -w @repo/shared -w @repo/contracts` first; a stale `dist/` shows up as confusing type errors. `core_microservice` type-checks against `../shared/src` through tsconfig paths, so `npx tsc --noEmit -p apps/core_microservice/tsconfig.json` works without a rebuild.
 
 ---
 
 ## 2. The Package Ecosystem: `@repo/contracts` vs. `@repo/shared`
 
-This is the single most important architectural boundary in the monorepo. These two packages serve **fundamentally different consumers**.
+### 2.1 `@repo/contracts`: the wire format
 
-### 2.1 `@repo/contracts` — The API Contract Layer
+| Property | Value |
+|---|---|
+| Dependencies | none |
+| Consumed by | `client_app` and every backend |
+| Purpose | Request/response interfaces, realtime event maps, a few shared constants |
 
-| Property       | Value |
-|----------------|-------|
-| Package name   | `@repo/contracts` |
-| Dependencies   | **None** (zero runtime deps) |
-| Consumed by    | `client_app` (frontend), all microservices |
-| Purpose        | Define the **wire format** — the shape of requests and responses |
-
-**Contents:**
-
-```
-packages/contracts/src/
-├── index.ts                    # Re-exports everything
-├── common/
-│   ├── index.ts
-│   └── responses.ts            # IPaginatedResponse<T>, IPaginationMeta, PAGINATION_DEFAULTS
-└── profiles/
-    ├── index.ts
-    ├── requests.ts             # ICreateProfileRequest, IUpdateProfileRequest
-    └── responses.ts            # IProfileResponse
-```
-
-Each interface is a **pure TypeScript type** — no decorators, no runtime libraries, no NestJS, no TypeORM:
-
-```typescript
-// packages/contracts/src/profiles/requests.ts
-export interface ICreateProfileRequest {
-  authUserId: string;
-  handle: string;          // e.g. "@john_doe"
-}
-
-export interface IUpdateProfileRequest {
-  displayName?: string;
-  bio?: string | null;     // null means "clear the bio"
-  avatarUrl?: string | null;
-}
-```
+One folder per area under `packages/contracts/src/` (`auth`, `chats`, `comments`, `common`, `follows`, `likes`, `notifications`, `posts`, `profiles`, `realtime`), each with `requests.ts` / `responses.ts` and an `index.ts`, re-exported from `packages/contracts/src/index.ts`. Interfaces are plain TypeScript: no decorators, no runtime libraries, dates as ISO strings.
 
 ```typescript
 // packages/contracts/src/profiles/responses.ts
@@ -126,145 +102,95 @@ export interface IProfileResponse {
   displayName: string;
   bio: string | null;
   avatarUrl: string | null;
-  createdAt: string;       // ISO 8601 string, not Date
+  createdAt: string; // ISO 8601
   updatedAt: string;
 }
 ```
 
-**Why this matters:** The frontend (`client_app`) imports `@repo/contracts` to type its HTTP client calls. Because the package has no dependencies, the frontend bundles no backend code (no TypeORM, no NestJS, no Winston). The contract is the single source of truth for the API surface.
+The Socket.IO protocol is typed here too: `REALTIME_NAMESPACE`, `ServerToClientEvents`, `ClientToServerEvents` and `IRealtimeAckError` in `packages/contracts/src/realtime/events.ts`. The gateway and the client share these maps, so an event name or payload change is a compile error on both sides. The full export list is in A.7.
 
-### 2.2 `@repo/shared` — The Backend Infrastructure Toolkit
+### 2.2 `@repo/shared`: backend infrastructure
 
-| Property       | Value |
-|----------------|-------|
-| Package name   | `@repo/shared` |
-| Dependencies   | `@nestjs/common`, `@nestjs/swagger`, `class-validator`, `class-transformer`, `typeorm`, `winston` |
-| Consumed by    | Backend microservices only — **never** the frontend |
-| Purpose        | Provide reusable backend infrastructure: DTOs, base classes, ports, errors, logging, exception filters |
-
-**Contents (grouped by concern):**
+| Property | Value |
+|---|---|
+| Dependencies | `@nestjs/common`, `@nestjs/swagger`, `class-validator`, `class-transformer`, `typeorm`, `winston`, `jsonwebtoken` |
+| Consumed by | backends only, **never** `client_app` |
 
 ```
 packages/shared/src/
-├── index.ts                              # Central barrel export
-│
-├── dtos/
-│   ├── auth/
-│   │   ├── create-user.dto.ts            # CreateUserDto (auth microservice)
-│   │   └── login.dto.ts                  # LoginDto (auth microservice — class-validator decorated)
-│   └── core/
-│       ├── create-post.dto.ts            # CreatePostDto
-│       ├── update-post.dto.ts            # UpdatePostDto
-│       ├── create-comment.dto.ts         # CreateCommentDto
-│       ├── update-comment.dto.ts         # UpdateCommentDto
-│       └── update-profile.dto.ts         # UpdateProfileDto
-│
-├── database/
-│   ├── typeorm-entity.base.ts            # TypeormEntityBase (id, createdAt, updatedAt, deletedAt)
-│   ├── repository.port.ts               # RepositoryPort<Entity, EntityProps> interface
-│   ├── typeorm-repository.base.ts        # TypeormRepositoryBase<Entity, EntityProps> (adapter)
-│   ├── postgres-error-code.enum.ts       # PostgresErrorCode enum (23505, etc.)
-│   └── typeorm-error.guard.ts           # isTypeOrmError() type guard
-│
-├── errors/
-│   ├── domain.error.ts                   # DomainError abstract base class
-│   └── database.errors.ts                # Concrete errors: EntityByIdNotFoundError, UnauthorizedError, etc.
-│
-├── filters/
-│   └── domain-exception.filter.ts        # DomainExceptionFilter (domain errors → HTTP — NestJS only)
-│
-├── logger/
-│   ├── logger.port.ts                    # Logger interface + LoggerKey DI token
-│   ├── winston.logger.ts                 # WinstonLogger (default implementation)
-│   └── index.ts
-│
-└── events/
-    └── user-created.event.ts             # UserCreatedEvent (shared event payload)
+├── index.ts                        # barrel export
+├── auth/access-token.verifier.ts   # AccessTokenVerifier (JWT verify + blacklist check), VerifyResult
+├── database/                       # TypeormEntityBase, RepositoryPort, TypeormRepositoryBase, PostgresErrorCode, isTypeOrmError
+├── dtos/{auth,core}/               # class-validator DTOs shared by Express and Nest (A.5)
+├── errors/                         # DomainError, database errors, AccessDeniedError (A.6)
+├── events/                         # UserCreatedEvent, SessionRevokedEvent, EventEnvelope, RoutingKeys, broker payloads, EmailJob
+├── filters/domain-exception.filter.ts  # DomainExceptionFilter (Nest)
+├── logger/                         # Logger port, LoggerKey, LoggerModule, WinstonLogger
+└── redis/redis-keys.ts             # RedisKeys, secondsUntil (key layout shared by auth and core)
 ```
 
-**Key additions for the Express migration:**
-
-- `LoginDto` — class-validator-decorated DTO (`@IsEmail`, `@MinLength(8)`) used by `auth_microservice`'s `POST /auth/login` endpoint, validated via the custom `validateBody` middleware (not NestJS `ValidationPipe`).
-- `UnauthorizedError` — framework-agnostic domain error used by `AuthService` to signal invalid credentials, mapped to HTTP 401 by both the NestJS `DomainExceptionFilter` and the Express `errorHandler` middleware.
+`packages/shared` source uses double quotes; match the file you edit. Some types exist in both packages on purpose (`NotificationKind`): `@repo/shared` cannot depend on `@repo/contracts`, so it re-declares them structurally. Alias one of them when a file imports both.
 
 ### 2.3 The Decisive Rule: Where Do New Types Go?
 
-| If the type... | Goes in... | Because... |
-|----------------|------------|------------|
-| Describes the HTTP request/response wire format | `@repo/contracts` | The frontend needs it without pulling in backend deps |
-| Is a DTO with `class-validator` decorators (used by either Express or NestJS) | `@repo/shared/dtos/` | Depends on `class-validator` and optionally `@nestjs/swagger` |
-| Is a domain entity, props interface, or repository port | Inside the module's `domain/` folder | Module-specific — not shared |
-| Is a reusable base class for multiple microservices | `@repo/shared` | Avoids duplication across services |
+| If the type... | It goes in... | Because... |
+|---|---|---|
+| describes an HTTP request/response or a realtime event payload | `@repo/contracts` | the frontend needs it without backend dependencies |
+| is a `class-validator` DTO used by both Express and Nest (auth DTOs, `UpdateProfileDto`) | `packages/shared/src/dtos/` | it depends on `class-validator` |
+| is a request/response DTO used by one core module | the module's `dto/` folder | module-specific |
+| is an entity, props interface, port or domain error | the module's `domain/` folder | module-specific |
+| is a cross-service event class (validated) | `packages/shared/src/events/` | both producer and consumer validate it |
+| is a Redis key or channel shared by auth and core | `packages/shared/src/redis/redis-keys.ts` | both services must agree on the string |
+
+Request DTOs `implements` the matching contracts interface, so the wire type and the validated class can't drift: `export class SendMessageDto implements ISendMessageRequest`.
 
 ---
 
 ## 3. Module Anatomy & Hexagonal Architecture — `core_microservice` (NestJS)
 
-> **Note:** This section describes the architecture of `core_microservice`. For `auth_microservice`'s bare Express architecture, see [Section 4](#4-express--manual-di-architecture--auth_microservice).
-
-### 3.1 The Fully-Scaffolded Module: `modules/profiles`
-
-The `profiles` module is the canonical reference implementation. Every new module should mirror its folder structure:
+### 3.1 The Reference Module: `modules/profiles`
 
 ```
 modules/profiles/
-├── profiles.module.ts                         # NestJS module wiring
-├── profiles.controller.ts                     # HTTP entry point
-├── profiles.service.ts                        # Application orchestration
-│
+├── profiles.module.ts
+├── profiles.controller.ts
+├── profiles.service.ts
 ├── domain/
 │   ├── entities/
-│   │   ├── user-profile.entity.ts             # Aggregate root (extends TypeormEntityBase)
-│   │   ├── user-profile.entity.spec.ts        # Unit tests for domain logic
-│   │   └── profile-to-profile-configuration.entity.ts  # Child entity
+│   │   ├── user-profile.entity.ts             # aggregate (extends TypeormEntityBase)
+│   │   ├── user-profile.entity.spec.ts        # domain rule tests, no Nest
+│   │   └── profile-to-profile-configuration.entity.ts
 │   ├── interfaces/
-│   │   ├── user-profile.props.ts              # Domain props (pure interface, no TypeORM)
-│   │   └── user-profile-repository.port.ts    # Repository port (extends RepositoryPort)
-│   └── errors/
-│       └── user-profile.errors.ts             # Module-specific domain errors
-│
-├── dto/
-│   ├── create-profile.dto.ts                  # Inbound request DTO
-│   └── profile-response.dto.ts                # Outbound response DTO
-│
+│   │   ├── user-profile.props.ts              # persisted columns, no TypeORM
+│   │   ├── user-profile-repository.port.ts    # IUserProfileRepository + UserProfileRepositoryKey
+│   │   └── user-directory.port.ts             # IUserDirectoryPort + USER_DIRECTORY_PORT (cross-module, §3.4)
+│   └── errors/user-profile.errors.ts
+├── dto/{create-profile.dto.ts, profile-response.dto.ts, search-profiles-query.dto.ts}
 ├── infrastructure/
-│   └── repository/
-│       └── user-profile.repository.ts         # TypeORM adapter (extends TypeormRepositoryBase)
-│
-└── __tests__/
-    └── fakers/
-        ├── index.ts
-        └── user-profile.faker.ts              # Test data factory
+│   ├── repository/user-profile.repository.ts  # TypeORM adapter
+│   └── user-directory.adapter.ts              # IUserDirectoryPort adapter
+└── __tests__/fakers/{index.ts, user-profile.faker.ts}
 ```
 
-### 3.2 The Layers Explained
+Larger modules add `infrastructure/realtime/` (chats gateway) and `infrastructure/storage/` (assets, chat attachments), and split services by use case (`chats.service.ts`, `messages.service.ts`, `chat-membership.service.ts`).
+
+A request flows: **controller** (HTTP mapping, DTO validation) → **service** (orchestration, loading, transactions, emits) → **entity method** (business rule, throws `DomainError`) → **repository port** (bound to a TypeORM adapter by a `Symbol` token) → **`DomainExceptionFilter`** (maps `DomainError` to HTTP).
+
+### 3.2 The Layers
 
 #### Layer 1: Domain Entities (`domain/entities/`)
 
-Entities are the **heart of the domain**. They extend `TypeormEntityBase` (which provides `id`, `createdAt`, `updatedAt`, `deletedAt`) and encapsulate business rules through methods — never through external validators:
+Entities are both domain objects and TypeORM entities: they extend `TypeormEntityBase` (`id` uuid, `createdAt`, `updatedAt`, `deletedAt`). Construction goes through a `static create()` factory; every rule is an entity method that throws a `DomainError` subclass.
 
 ```typescript
-// modules/profiles/domain/entities/user-profile.entity.ts
-
+// apps/core_microservice/src/modules/profiles/domain/entities/user-profile.entity.ts
 @Entity('user_profiles')
 export class UserProfile extends TypeormEntityBase implements UserProfileProps {
   @Index()
   @Column({ type: 'uuid', unique: true })
   authUserId!: string;
+  // ... username, displayName, bio, avatarUrl ...
 
-  @Column({ type: 'varchar', length: 50, unique: true })
-  username!: string;
-
-  @Column({ type: 'varchar', length: DISPLAY_NAME_MAX_LENGTH })
-  displayName!: string;
-
-  @Column({ type: 'text', nullable: true })
-  bio?: string;
-
-  @Column({ type: 'varchar', nullable: true })
-  avatarUrl?: string;
-
-  // Factory: centralizes construction logic (display name defaults to handle)
   static create(props: CreateUserProfileProps): UserProfile {
     const profile = new UserProfile();
     profile.authUserId = props.authUserId;
@@ -273,2468 +199,1117 @@ export class UserProfile extends TypeormEntityBase implements UserProfileProps {
     return profile;
   }
 
-  // Domain method: enforces display name length rule
-  rename(displayName: string): void {
-    const next = displayName.trim();
-    if (next.length === 0 || next.length > DISPLAY_NAME_MAX_LENGTH) {
-      throw new InvalidDisplayNameError(displayName);
-    }
-    this.displayName = next;
-  }
-
-  // Domain method: enforces bio length, supports null-to-clear
   editBio(bio: string | null): void {
     if (bio !== null && bio.length > PROFILE_BIO_MAX_LENGTH) {
       throw new InvalidProfileBioError(bio.length);
     }
     this.bio = bio ?? undefined;
   }
-
-  // Domain computed properties
-  get hasAvatar(): boolean { return Boolean(this.avatarUrl); }
-  get isComplete(): boolean {
-    return Boolean(this.displayName) && Boolean(this.bio) && this.hasAvatar;
-  }
 }
 ```
 
-**Key principles:**
-- Business rules live **inside** the entity, as methods and getters — never in services or controllers.
-- Validation failures throw `DomainError` subclasses, which are framework-agnostic and unit-testable.
-- A `static create()` factory ensures entities are never constructed in an inconsistent state.
-- The entity **directly extends** `TypeormEntityBase` — it is both a domain object and a TypeORM entity. This is a pragmatic choice: separating them into a pure domain model + a separate ORM model would add complexity without benefit at this scale.
-
-The same pattern is used across all domains. For example, `Post` (in `modules/posts`):
+Rules that involve the caller live on the entity too, with the caller's id as an argument:
 
 ```typescript
-// modules/posts/domain/entities/post.entity.ts
-
-@Entity('posts')
-export class Post extends TypeormEntityBase {
-  // ... columns ...
-
-  static create(props: { authorId: string; content: string }): Post {
-    const post = new Post();
-    post.authorId = props.authorId;
-    post.content = props.content;
-    post.status = PostStatus.Draft;      // Invariant: new posts are always drafts
-    return post;
-  }
-
-  publish(): void {
-    if (!this.canPublish) {
-      throw new InvalidPostStateError(this.status);  // Only drafts can be published
-    }
-    this.status = PostStatus.Published;
-  }
-
-  get canPublish(): boolean {
-    return this.status === PostStatus.Draft && this.content.trim().length > 0;
-  }
+// apps/core_microservice/src/modules/chats/domain/entities/message.entity.ts
+edit(actorId: string, content: string, changeSeq: number): void {
+  this.assertMutableBy(actorId); // SYSTEM → NotMessageAuthorError → MessageAlreadyDeletedError
+  // ... length/empty checks, then mutate ...
+}
+private assertMutableBy(actorId: string): void {
+  if (this.kind === 'SYSTEM') throw new SystemMessageImmutableError();
+  if (this.authorId !== actorId) throw new NotMessageAuthorError(); // extends AccessDeniedError → 403
+  if (this.deletedAt != null) throw new MessageAlreadyDeletedError();
 }
 ```
 
-And `Comment` (in `modules/comments`):
+Other examples: `Post.publish()` / `archive()` / `assertLikeableBy()`, `Comment.edit()` / `notifiesPostAuthor()`, `Chat.assertCanRead()` / `addMembers()` / `leave()`, `Follow.notifiesFollowed()`.
+
+Conventions:
+- Never call `new Entity()` outside its factory or a test faker.
+- Cross-module references use `import type` and a string relation target, so modules don't import each other's entities at runtime: `@ManyToOne('UserProfile')`.
+- Columns that point at a user store the **auth user id** (the JWT `sub`) and reference `user_profiles."authUserId"`, not `user_profiles.id`. Give FKs, indexes and unique constraints explicit names so `migration:generate` stays drift-free:
 
 ```typescript
-// modules/comments/domain/entities/comment.entity.ts
-
-export class EmptyCommentError extends DomainError {
-  constructor() { super('Comment content cannot be empty.'); }
-}
-
-@Entity('comments')
-export class Comment extends TypeormEntityBase {
-  // ... columns (postId, authorId, parentId, content) ...
-
-  static create(props: { postId: string; authorId: string; content: string; parentId?: string }): Comment {
-    const comment = new Comment();
-    comment.postId = props.postId;
-    comment.authorId = props.authorId;
-    comment.content = props.content;
-    comment.parentId = props.parentId;
-    return comment;
-  }
-
-  edit(content: string): void {
-    const next = content.trim();
-    if (next.length === 0) throw new EmptyCommentError();
-    this.content = next;
-  }
-}
+// apps/core_microservice/src/modules/comments/domain/entities/comment.entity.ts
+@ManyToOne('UserProfile')
+@JoinColumn({
+  name: 'authorId',
+  referencedColumnName: 'authUserId',
+  foreignKeyConstraintName: 'FK_comments_authorId_authUserId',
+})
+author!: UserProfile;
 ```
+
+- `bigint` columns that must surface as `number` use `bigintNumberTransformer` from `apps/core_microservice/src/common/typeorm/bigint-number.transformer.ts`.
+- Group-chat methods (`Chat.createGroup`, `addMembers`, `removeMember`, `leave`) mutate in memory and **return** `SystemEvent[]`; the service persists them with narrow repository writes (§3.5).
 
 #### Layer 2: Domain Interfaces (`domain/interfaces/`)
 
-Two kinds of interfaces live here:
+**Props interfaces** describe persisted columns without TypeORM; the entity `implements` them and the repository port is typed against them, so query criteria are checked against real fields.
 
-**a) Props interfaces** — pure data shapes decoupled from TypeORM. These type the repository's query parameters:
-
-```typescript
-// modules/profiles/domain/interfaces/user-profile.props.ts
-export interface UserProfileProps {
-  authUserId: string;
-  username: string;
-  displayName: string;
-  bio?: string;
-  avatarUrl?: string;
-}
-```
-
-**b) Repository ports** — abstractions the service depends on. This is the "port" in "Ports and Adapters":
+**Ports** are what services depend on. A repository port usually extends the generic `RepositoryPort<Entity, Props>` from `@repo/shared` and adds domain finders; it is exported together with its DI token:
 
 ```typescript
-// modules/profiles/domain/interfaces/user-profile-repository.port.ts
-import type { RepositoryPort } from '@repo/shared';
-import type { UserProfile } from '../../domain/entities/user-profile.entity';
-import type { UserProfileProps } from './user-profile.props';
-
-export interface IUserProfileRepository
-  extends RepositoryPort<UserProfile, UserProfileProps> {
-  // Domain-specific finders beyond the generic RepositoryPort surface
-  findByAuthUserId(authUserId: string): Promise<UserProfile | null>;
+// apps/core_microservice/src/modules/posts/domain/interfaces/post-repository.port.ts
+export interface IPostRepository extends RepositoryPort<Post, PostProps> {
+  findById(id: string): Promise<Post | null>;
+  getFeedForAuthors(authorIds: string[], page: number, limit: number): Promise<[Post[], number]>;
+  getLikeStats(postIds: string[], viewerId?: string): Promise<Map<string, LikeStats>>;
 }
 
-// DI token for injecting by interface rather than concrete class
-export const UserProfileRepositoryKey = Symbol.for('IUserProfileRepository');
+export const POST_REPOSITORY = Symbol.for('IPostRepository');
 ```
 
-The `RepositoryPort<Entity, EntityProps>` is defined in `@repo/shared` and represents the **complete generic data-access contract** — find, save, delete, paginate, count, exists, upsert, soft-delete:
+`RepositoryPort` (`packages/shared/src/database/repository.port.ts`) covers `findOne`, `findOneOrThrow`, `findOneByIdOrThrow`, `findMany`, `findManyPaginated`, `save`, `saveMultiple`, `delete`, `deleteMultiple`, `deleteByCriteria`, `softDelete`, `count`, `exists`, `upsert`. Ports with very specific persistence (chats, likes, outbox) don't extend it and declare exactly the operations they need.
+
+Non-repository ports follow the same shape: `IFileStoragePort` / `FileStoragePortKey`, `IAttachmentStoragePort` / `ATTACHMENT_STORAGE_PORT`, `IChatRealtimePort` / `CHAT_REALTIME_PORT`, `IUserDirectoryPort` / `USER_DIRECTORY_PORT`.
+
+#### Layer 3: Domain Errors (`domain/errors/`) and the HTTP Mapping
+
+Module errors go in `domain/errors/<module>.errors.ts` (a few older ones sit next to their entity, e.g. `EmptyCommentError`, `InvalidPostStateError`). All extend `DomainError` (`packages/shared/src/errors/domain.error.ts`), an abstract class with a `protected` constructor that sets `name` to the subclass name. Pick the base class by the status you want; subclasses inherit the mapping:
 
 ```typescript
-// packages/shared/src/database/repository.port.ts (abridged)
-export interface RepositoryPort<Entity, EntityProps>
-  extends
-    DeleteOne<Entity>, DeleteMultiple<Entity>, DeleteByCriteria<EntityProps>,
-    FindMany<Entity, EntityProps>, FindManyPaginated<Entity, EntityProps>,
-    FindOne<Entity, EntityProps>, FindOneByIdOrThrow<Entity>,
-    FindOneOrThrow<Entity, EntityProps>, Save<Entity>, SaveMultiple<Entity>,
-    SoftDelete<Entity>, Count<EntityProps>, Exists<EntityProps>, Upsert<Entity> {}
+// apps/core_microservice/src/modules/chats/domain/errors/chat.errors.ts
+export class ChatNotFoundError extends EntityNotFoundError { ... }   // 404
+export class NotChatAdminError extends AccessDeniedError { ... }     // 403
+export class MessageTooLongError extends DomainError { ... }         // 400
 ```
 
-#### Layer 3: Domain Errors (`domain/errors/`)
+**Error mapping (the one table).** Nest services register `DomainExceptionFilter` from `packages/shared/src/filters/domain-exception.filter.ts` globally (core and notifications); auth uses `apps/auth_microservice/src/middleware/error-handler.middleware.ts`. Both check `instanceof` in this order:
 
-Module-specific errors that encode domain rule violations:
+| Error (and its subclasses) | Nest `DomainExceptionFilter` | Express `errorHandler` |
+|---|---|---|
+| `EntityNotFoundError`, `EntityByIdNotFoundError` (e.g. `ChatNotFoundError`, `MessageNotFoundError`, `UserNotFoundError`) | 404 | 404 |
+| `AccessDeniedError` (e.g. `NotChatAdminError`, `NotMessageAuthorError`) | 403 | 403 |
+| `UniqueConstraintViolationError` | 409 | 409 |
+| `DatabaseQueryError` | 500 (logged at error level) | 500 |
+| `UnauthorizedError` | **400** (no special case) | 401 |
+| any other `DomainError` (e.g. `InvalidDisplayNameError`, `MessageTooLongError`) | 400 | 400 |
+| not a `DomainError` | not caught: Nest's default handling (an `HttpException` keeps its status, anything else is 500) | 500 `{ statusCode: 500, message: 'Internal Server Error' }` |
 
-```typescript
-// modules/profiles/domain/errors/user-profile.errors.ts
-import { DomainError } from '@repo/shared';
+Body for mapped errors: `{ statusCode, error: <error class name>, message }`. On the socket, `WsDomainExceptionFilter` (`apps/core_microservice/src/modules/chats/infrastructure/realtime/ws-domain-exception.filter.ts`) acks `{ ok: false, error: { code: <class name>, message } }`, and `InternalError` for anything else.
 
-export class InvalidDisplayNameError extends DomainError {
-  constructor(value: string) {
-    super(`Display name "${value}" is invalid: it must be 1–100 characters.`);
-  }
-}
-
-export class InvalidProfileBioError extends DomainError {
-  constructor(length: number) {
-    super(`Profile bio is too long: ${length} characters (max 160).`);
-  }
-}
-```
-
-All domain errors extend the shared `DomainError` abstract class:
-
-```typescript
-// packages/shared/src/errors/domain.error.ts
-export abstract class DomainError extends Error {
-  protected constructor(message: string) {
-    super(message);
-    this.name = new.target.name;
-    Object.setPrototypeOf(this, new.target.prototype);
-  }
-}
-```
-
-The `DomainExceptionFilter` (registered globally in `main.ts`) catches all `DomainError` subclasses and maps them to appropriate HTTP status codes:
-
-| Error class | HTTP status |
-|-------------|-------------|
-| `EntityByIdNotFoundError` | 404 Not Found |
-| `EntityNotFoundError` | 404 Not Found |
-| `UniqueConstraintViolationError` | 409 Conflict |
-| `UnauthorizedError` | 401 Unauthorized |
-| `DatabaseQueryError` | 500 Internal Server Error |
-| Any other `DomainError` subclass (e.g. `InvalidDisplayNameError`) | 400 Bad Request |
-
-This means entities can throw business errors without knowing anything about HTTP.
+Domain code never throws `HttpException`. Nest exceptions appear only at the HTTP edge: `JwtAuthGuard` (401/503) and the legacy ownership checks in profiles/posts/comments (`ForbiddenException`, §3.6). For a new 403 rule, extend `AccessDeniedError` instead.
 
 #### Layer 4: DTOs (`dto/`)
 
-**Inbound DTOs** carry validation decorators and can optionally implement a `@repo/contracts` interface:
+Request DTOs implement the contracts interface and carry `class-validator` and `@ApiProperty` decorators. The global `ValidationPipe` is `{ whitelist: true, transform: true }`: **an undecorated property is silently stripped.**
 
 ```typescript
-// modules/profiles/dto/create-profile.dto.ts
-export class CreateProfileDto implements ICreateProfileRequest {
-  @ApiProperty({ example: '123e4567-e89b-12d3-a456-426614174000' })
-  @IsUUID()
-  authUserId!: string;
-
-  @ApiProperty({ example: 'john_doe' })
-  @IsString()
-  @MinLength(3)
-  @MaxLength(30)
-  handle!: string;
+// apps/core_microservice/src/modules/chats/dto/edit-message.dto.ts
+export class EditMessageDto implements IEditMessageRequest {
+  @ApiProperty({ description: 'New message text (0-2000 chars); blank only if attachments' })
+  @IsString({ message: 'Content must be a text' })
+  @MaxLength(2000, { message: 'Message is too long (max 2000 chars)' })
+  content!: string;
 }
 ```
 
-**Note:** Some DTOs that are shared across microservices live in `@repo/shared/dtos/` (e.g. `CreatePostDto`, `UpdateProfileDto`, `LoginDto`, `CreateUserDto`). Module-specific DTOs that are tightly coupled to one module live inside the module's `dto/` folder (e.g. `CreateProfileDto`).
-
-**Outbound DTOs** (response DTOs) are constructed from entities. They are the translation layer between the domain and the wire:
+Response DTOs take the entity in the constructor and normalise it for the wire: dates → `toISOString()`, optional fields → `?? null`, internal columns such as `deletedAt` left out. Controllers never return entities.
 
 ```typescript
-// modules/profiles/dto/profile-response.dto.ts
-export class ProfileResponseDto implements IProfileResponse {
-  @ApiProperty() id: string;
-  @ApiProperty() authUserId: string;
-  @ApiProperty() username: string;
-  @ApiProperty() displayName: string;
-  @ApiProperty({ type: String, nullable: true }) bio: string | null;
-  @ApiProperty({ type: String, nullable: true }) avatarUrl: string | null;
-  @ApiProperty() createdAt: string;
-  @ApiProperty() updatedAt: string;
-
-  constructor(profile: UserProfile) {
-    this.id = profile.id;
-    this.authUserId = profile.authUserId;
-    this.username = profile.username;
-    this.displayName = profile.displayName;
-    this.bio = profile.bio ?? null;         // normalize undefined → null
-    this.avatarUrl = profile.avatarUrl ?? null;
-    this.createdAt = profile.createdAt.toISOString();   // Date → ISO string
-    this.updatedAt = profile.updatedAt.toISOString();
-  }
+// apps/core_microservice/src/modules/profiles/dto/profile-response.dto.ts
+constructor(profile: UserProfile) {
+  this.id = profile.id;
+  this.bio = profile.bio ?? null;
+  this.createdAt = profile.createdAt.toISOString();
+  // ...
 }
 ```
 
-The post response DTO follows the exact same pattern:
-
-```typescript
-// modules/posts/dto/post-response.dto.ts
-export class PostResponseDto {
-  @ApiProperty() id: string;
-  @ApiProperty() authorId: string;
-  @ApiProperty() content: string;
-  @ApiProperty({ enum: PostStatus }) status: PostStatus;
-  @ApiProperty() createdAt: string;
-  @ApiProperty() updatedAt: string;
-
-  constructor(post: Post) {
-    this.id = post.id;
-    this.authorId = post.authorId;
-    this.content = post.content;
-    this.status = post.status;
-    this.createdAt = post.createdAt.toISOString();
-    this.updatedAt = post.updatedAt.toISOString();
-  }
-}
-```
+Chats builds responses through functions in `apps/core_microservice/src/modules/chats/dto/chat-response.mapper.ts` (`toMessageResponse`, `toConversationSummary`, `presignAttachments`) because they need user maps and presigned URLs.
 
 #### Layer 5: Infrastructure — Repository Adapter (`infrastructure/repository/`)
 
-This is the "adapter" in "Ports and Adapters." It extends `TypeormRepositoryBase` from `@repo/shared`:
-
 ```typescript
-// modules/profiles/infrastructure/repository/user-profile.repository.ts
+// apps/core_microservice/src/modules/profiles/infrastructure/repository/user-profile.repository.ts
 @Injectable()
 export class UserProfileRepository
   extends TypeormRepositoryBase<UserProfile, UserProfileProps>
   implements IUserProfileRepository
 {
   public static readonly entity = UserProfile;
-  protected relations: string[] = [];   // no default joined relations
+  protected relations: string[] = [];
 
   constructor(@InjectRepository(UserProfile) repository: Repository<UserProfile>) {
     super(repository);
   }
 
-  // Domain-specific finder
   public async findByAuthUserId(authUserId: string): Promise<UserProfile | null> {
     return this.repository.findOne({ where: { authUserId } });
   }
 }
 ```
 
-By extending `TypeormRepositoryBase`, the concrete repository **inherits the full data-access surface** (save, findOneByIdOrThrow, findManyPaginated, softDelete, upsert, etc.) without writing a single line of repetitive code. The base class handles:
+`TypeormRepositoryBase` (`packages/shared/src/database/typeorm-repository.base.ts`) wraps a `Repository<Entity>` and implements `RepositoryPort`: it resolves the default `relations`, logs persistence calls, throws `EntityByIdNotFoundError` / `EntityNotFoundError` from the `...OrThrow` finders, and in `save` translates a Postgres unique violation into `UniqueConstraintViolationError` and anything else into `DatabaseQueryError`.
 
-- Converting string-array relations to TypeORM's nested object format
-- Logging every persistence operation
-- Catching TypeORM `QueryFailedError` and translating unique violations into `UniqueConstraintViolationError`
-- Implementing `findOneByIdOrThrow` / `findOneOrThrow` with proper `EntityByIdNotFoundError` / `EntityNotFoundError` throws
+Adapters with hand-written SQL (`chat.repository.ts`, `message.repository.ts`, `post-like.repository.ts`, `typeorm-outbox.adapter.ts`) are covered against Postgres by e2e suites under `apps/core_microservice/test/`, not only by mocked unit specs.
 
-The post repository demonstrates a repository with default relations:
+#### Layer 6: Service
+
+Services orchestrate: load through ports, call entity methods, persist, write outbox rows, emit realtime events after the commit, log. They contain no business rules, and they receive the caller's id (`user.sub`) as an argument.
 
 ```typescript
-// modules/posts/infrastructure/repository/post.repository.ts
+// apps/core_microservice/src/modules/comments/comments.service.ts
 @Injectable()
-export class PostRepository extends TypeormRepositoryBase<Post, PostProps> {
-  public static readonly entity = Post;
-  protected relations: string[] = ['author'];  // author profile joined on every read
+export class CommentsService {
+  constructor(
+    @Inject(LoggerKey) private readonly logger: Logger,
+    @Inject(COMMENT_REPOSITORY) private readonly commentRepository: ICommentRepository,
+    @Inject(POST_REPOSITORY) private readonly postRepository: IPostRepository,
+    @Inject(OUTBOX_PORT) private readonly outbox: IOutboxPort,
+    @Inject(USER_DIRECTORY_PORT) private readonly userDirectory: IUserDirectoryPort,
+  ) {}
+```
 
-  constructor(@InjectRepository(Post) repository: Repository<Post>) {
-    super(repository);
+The logger is `@Inject(LoggerKey) logger: Logger` and needs `LoggerModule.forFeature('<Name>')` in the module's imports; log with `this.logger.debug('Comment created', { props: { commentId } })`.
+
+#### Layer 7: Controller
+
+Controllers map HTTP to service calls and entities to response DTOs. They inject **services only**, never repositories or ports.
+
+```typescript
+// apps/core_microservice/src/modules/chats/messages.controller.ts
+@ApiTags('chats')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
+@Controller('chats/:chatId/messages')
+export class MessagesController {
+  constructor(private readonly messagesService: MessagesService) {}
+
+  @Patch(':messageId')
+  @ApiOperation({ summary: 'Edit your own message' })
+  edit(
+    @CurrentUser('sub') userId: string,
+    @Param('chatId', ParseUUIDPipe) chatId: string,
+    @Param('messageId', ParseUUIDPipe) messageId: string,
+    @Body() dto: EditMessageDto,
+  ): Promise<MessageResponseDto> {
+    return this.messagesService.edit(userId, chatId, messageId, dto);
   }
 }
 ```
 
-The comment repository adds a domain-specific finder:
+Route ids go through `ParseUUIDPipe`; status codes other than the default use `@HttpCode` (or `@Res({ passthrough: true })` when it depends on the result, as `POST /chats/:chatId/messages` does for 201 vs 200 on a replay).
+
+#### Layer 8: Module
 
 ```typescript
-// modules/comments/infrastructure/repository/comment.repository.ts
-@Injectable()
-export class CommentRepository extends TypeormRepositoryBase<Comment, CommentProps> {
-  public static readonly entity = Comment;
-  protected relations: string[] = ['author'];
-
-  constructor(@InjectRepository(Comment) repository: Repository<Comment>) {
-    super(repository);
-  }
-
-  async findByPost(postId: string): Promise<Comment[]> {
-    return this.repository.find({
-      where: { postId },
-      relations: { author: true },
-      order: { createdAt: 'DESC' },
-    });
-  }
-}
-```
-
-#### Layer 6: Service (`profiles.service.ts`)
-
-The service orchestrates the domain — it does not contain business rules. It fetches entities, calls their domain methods, and persists:
-
-```typescript
-// modules/profiles/profiles.service.ts
-@Injectable()
-export class ProfilesService {
-  constructor(private readonly userProfileRepository: UserProfileRepository) {}
-
-  async createProfile(authUserId: string, handle: string): Promise<UserProfile> {
-    // Entity factory knows how to build a valid profile
-    const profile = UserProfile.create({ authUserId, username: handle });
-    return this.userProfileRepository.save(profile);
-  }
-
-  async getProfile(id: string): Promise<UserProfile> {
-    return this.userProfileRepository.findOneByIdOrThrow(id);
-    // ↑ throws EntityByIdNotFoundError (→ 404 via DomainExceptionFilter)
-  }
-
-  async updateOwnProfile(
-    profileId: string,
-    authUserId: string,
-    updateDto: UpdateProfileDto,
-  ): Promise<UserProfile> {
-    const profile = await this.getProfile(profileId);
-    // IDOR protection: verify the JWT subject owns this profile
-    if (profile.authUserId !== authUserId) {
-      throw new UnauthorizedError('You can only update your own profile');
-    }
-    // Mutations go through entity domain methods — not raw property assignment
-    if (updateDto.bio !== undefined) {
-      profile.editBio(updateDto.bio ?? null);  // throws InvalidProfileBioError if too long
-    }
-    return this.userProfileRepository.save(profile);
-  }
-}
-```
-
-**Key change:** The `updateProfile` method was replaced with `updateOwnProfile`, which accepts the authenticated `authUserId` (extracted from the JWT by `@CurrentUser()`) and asserts ownership before applying mutations. This prevents **Insecure Direct Object Reference (IDOR)** attacks — a user cannot modify another user's profile by guessing a UUID.
-
-#### Layer 7: Controller (`profiles.controller.ts`)
-
-The controller is a thin translation layer: validate input → call service → map entity to response DTO. All mutating endpoints are protected by `JwtAuthGuard` (see [Section 3.4](#34-security--authentication)) and use `@CurrentUser` for IDOR-safe ownership validation:
-
-```typescript
-// modules/profiles/profiles.controller.ts
-@ApiTags('Profiles')
-@Controller('profiles')
-export class ProfilesController {
-  constructor(private readonly profilesService: ProfilesService) {}
-
-  @Get(':id')
-  async getProfile(@Param('id', ParseUUIDPipe) id: string): Promise<ProfileResponseDto> {
-    return new ProfileResponseDto(await this.profilesService.getProfile(id));
-  }
-
-  @Patch(':id')
-  @UseGuards(JwtAuthGuard)
-  async updateProfile(
-    @Param('id', ParseUUIDPipe) id: string,
-    @Body() updateProfileDto: UpdateProfileDto,
-    @CurrentUser() user: JwtPayload,
-  ): Promise<ProfileResponseDto> {
-    const profile = await this.profilesService.updateOwnProfile(id, user.sub, updateProfileDto);
-    return new ProfileResponseDto(profile);
-  }
-}
-```
-
-**Key security changes from the original design:**
-- `POST /profiles` was **removed**. Profiles are no longer created via a public HTTP endpoint. They are created internally by `InternalEventsModule` when a `UserCreatedEvent` is received from `auth_microservice` (see [Section 7](#7-inter-service-communication-auth--core)).
-- `PATCH /profiles/:id` is protected by `JwtAuthGuard` — the Core service independently validates the JWT using the shared `JWT_ACCESS_SECRET` without needing a database call.
-- The `@CurrentUser()` decorator extracts the authenticated `JwtPayload` from the request context. The service then compares `user.sub` against the profile's `authUserId` to enforce **IDOR protection** (users can only update their own profile).
-
-#### Layer 8: Module (`profiles.module.ts`)
-
-The module wires everything together via NestJS DI. The `ProfilesModule` is consumed by the `InternalEventsModule` (see [Section 3.3](#33-internaleventsmodule--event-driven-profile-creation)) for event-driven profile creation and exposes its `ProfilesService` for inter-module use:
-
-```typescript
-// modules/profiles/profiles.module.ts
+// apps/core_microservice/src/modules/posts/posts.module.ts
 @Module({
-  imports: [TypeOrmModule.forFeature([UserProfile, ProfileToProfileConfiguration])],
-  controllers: [ProfilesController],
-  providers: [ProfilesService, UserProfileRepository],
-  exports: [ProfilesService],   // ← exported so InternalEventsModule can call createProfile()
+  imports: [
+    TypeOrmModule.forFeature([Post, PostLike, PostAsset]),
+    LoggerModule.forFeature('PostsService'),
+    FollowsModule, // exports FollowRepositoryKey
+  ],
+  controllers: [PostsController],
+  providers: [
+    PostsService,
+    PostRepository,
+    { provide: POST_REPOSITORY, useExisting: PostRepository },
+  ],
+  exports: [POST_REPOSITORY],
 })
-export class ProfilesModule {}
+export class PostsModule {}
 ```
 
----
+Every module lists its entities in `TypeOrmModule.forFeature([...])` (the root uses `autoLoadEntities: true`) and is imported by `apps/core_microservice/src/app.module.ts`.
 
-### 3.3 InternalEventsModule & Event-Driven Profile Creation
+### 3.3 The DI Rule: Ports Bound to Symbol Tokens
 
-To avoid the "God Object" anti-pattern where one module handles unrelated concerns, a dedicated `InternalEventsModule` intercepts incoming events from `auth_microservice` and delegates to the appropriate domain module:
+**Every port is an interface plus a `Symbol` token in `domain/interfaces/`. The module binds the token to an adapter; consumers inject by token and type the field as the interface.**
 
 ```typescript
-// modules/internal-events/internal-events.module.ts
-@Module({
-  imports: [ProfilesModule],   // imports for ProfilesService
-  controllers: [InternalEventsController],
-})
-export class InternalEventsModule {}
+// 1. Port + token (domain/interfaces/comment-repository.port.ts)
+export interface ICommentRepository extends RepositoryPort<Comment, CommentProps> { ... }
+export const COMMENT_REPOSITORY = Symbol.for('ICommentRepository');
+
+// 2. Binding (comments.module.ts)
+providers: [
+  CommentsService,
+  CommentRepository,
+  { provide: COMMENT_REPOSITORY, useExisting: CommentRepository },
+],
+exports: [COMMENT_REPOSITORY],
+
+// 3. Injection (any service in a module that imports CommentsModule)
+@Inject(COMMENT_REPOSITORY) private readonly commentRepository: ICommentRepository,
 ```
 
-```typescript
-// modules/internal-events/internal-events.controller.ts
-@Controller('internal/events')
-export class InternalEventsController {
-  constructor(private readonly profilesService: ProfilesService) {}
+`useClass` vs `useExisting`:
+- `{ provide: TOKEN, useClass: Adapter }` when only the token is needed (`CHAT_REPOSITORY`, `MESSAGE_REPOSITORY`, `ATTACHMENT_STORAGE_PORT`, `POST_LIKE_REPOSITORY`, `USER_DIRECTORY_PORT`, `FileStoragePortKey`, `OUTBOX_PORT`, `EVENT_BUS`).
+- `{ provide: TOKEN, useExisting: Adapter }` plus the adapter class as its own provider when the same instance must be reachable both ways. `CHAT_REALTIME_PORT` → `ChatsGateway` needs this: Nest must instantiate the gateway as a gateway, and services must reach that same instance through the port. Repositories bound this way (`POST_REPOSITORY`, `COMMENT_REPOSITORY`, `FollowRepositoryKey`, `UserProfileRepositoryKey`) are still injected by token.
 
-  @Post('user-created')
-  async handleUserCreated(@Body() event: UserCreatedEvent): Promise<void> {
-    await this.profilesService.createProfile(
-      event.userId,
-      event.email.split('@')[0],   // derive initial handle from email
-    );
-  }
+Use `Symbol.for('IName')` for new tokens. Export the token (not the adapter) when another module needs the port, as `PostsModule` exports `POST_REPOSITORY`.
+
+In tests the token makes faking trivial: `{ provide: POST_REPOSITORY, useValue: { findById: jest.fn(), save: jest.fn() } }` plus `{ provide: LoggerKey, useValue: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() } }`.
+
+Two older services still inject a concrete repository class: `ProfilesService` (`UserProfileRepository`) and `AssetsService` (`AssetRepository`). Don't copy that. `InternalEventsController` calls `ProfilesService` directly; `ChatsGateway` is injected as a class by `SessionRevocationListener` (same module). Everything else goes through tokens.
+
+### 3.4 Module Map and Cross-Module Ports
+
+| Module | Owns | Exposes to other modules |
+|---|---|---|
+| `profiles` | `UserProfile`, profile search, by-ids lookup, lazy profile creation | `ProfilesService`, `USER_DIRECTORY_PORT` |
+| `posts` | `Post`, `PostLike` and `PostAsset` entities, feed, search | `POST_REPOSITORY` |
+| `comments` | `Comment`, `CommentLike` entities | `COMMENT_REPOSITORY` |
+| `likes` | like/unlike routes and the like repositories (entities belong to posts/comments) | — |
+| `follows` | `Follow` | `FollowsService`, `FollowRepositoryKey` |
+| `assets` | `Asset`, S3 storage (SeaweedFS locally), private bucket presigning | `AssetsService` |
+| `chats` | `Chat`, `ChatParticipant`, `Message`, `MessageAttachment`, `ChatsGateway` | `CHAT_REALTIME_PORT` |
+| `internal-events` | `POST /internal/events/user-created` | — |
+| `notifications-relay` | AMQP consumer for `notification.*` → sockets | — |
+
+Global infrastructure (no import needed): `AppConfigModule` (`AppConfigService`), `RedisModule` (`REDIS_CLIENT`), `CommonAuthModule` (`ACCESS_TOKEN_VERIFIER`), `MessagingModule` (`OUTBOX_PORT`, `EVENT_BUS`, `AMQP_CONNECTION`).
+
+**`USER_DIRECTORY_PORT`** is how other modules read user profiles without touching profile tables:
+
+```typescript
+// apps/core_microservice/src/modules/profiles/domain/interfaces/user-directory.port.ts
+export interface IUserDirectoryPort {
+  /** Unknown ids are simply absent from the returned map. */
+  getUsers(userIds: string[]): Promise<Map<string, IChatUser>>;
+  /** @throws UserNotFoundError listing the ids that have no profile. */
+  assertUsersExist(userIds: string[]): Promise<void>;
+}
+export const USER_DIRECTORY_PORT = Symbol.for('IUserDirectoryPort');
+```
+
+`UserDirectoryAdapter` (`apps/core_microservice/src/modules/profiles/infrastructure/user-directory.adapter.ts`) does one `IN` query per call. Chats uses it for participant snapshots and member validation, comments/likes/follows/messages for the actor snapshot in broker events, and the gateway for the typing user. A module that needs it imports `ProfilesModule`.
+
+The same idea applies to storage: chats never touches `Asset` directly. `ATTACHMENT_STORAGE_PORT` is bound to `AttachmentStorageAdapter` (`apps/core_microservice/src/modules/chats/infrastructure/storage/attachment-storage.adapter.ts`), which wraps the exported `AssetsService`.
+
+### 3.5 Transactional Repository Ports
+
+When a use case writes several rows that must commit together (a message plus its attachments plus outbox rows; a like plus its outbox row), the port exposes `runInTransaction` and each write takes an optional transaction handle:
+
+```typescript
+// apps/core_microservice/src/modules/chats/domain/interfaces/chat-repository.port.ts
+/** Opaque transaction handle passed between the chat and message ports. */
+export type ChatTransaction = EntityManager;
+
+export interface IChatRepository {
+  save(chat: Chat, tx?: ChatTransaction): Promise<Chat>;
+  advanceReadSeq(chatId: string, userId: string, seq: number, tx?: ChatTransaction): Promise<number>;
+  runInTransaction<T>(work: (tx: ChatTransaction) => Promise<T>): Promise<T>;
+  // ...
 }
 ```
 
-**Architectural rationale:**
-
-- `InternalEventsModule` is a **routing layer** — it receives events via HTTP and fans them out to the appropriate domain service. It contains no business logic.
-- This decouples `ProfilesModule` from external system concerns. `ProfilesService` has no awareness that profiles are created as a side-effect of user registration — it simply exposes `createProfile(authUserId, handle)`.
-- The controller path `internal/events` is **not publicly exposed** — it is reachable only within the Docker network via the service name `core_microservice`.
-- A message broker (RabbitMQ) will be introduced in the future exclusively for the `notifications_consumer_microservice` — not for Auth → Core profile creation, which remains event-driven over HTTP. The delegation pattern in this module (controller → domain service) stays identical regardless of transport.
-
-### 3.4 Security & Authentication
-
-`core_microservice` now independently validates JWTs issued by `auth_microservice` without requiring a database connection or an API call back to the Auth service. This is achieved through shared secrets and NestJS guard/decorator patterns.
-
-#### `JwtAuthGuard`
-
-A NestJS guard that extracts the Bearer token from the `Authorization` header, verifies it using the shared `JWT_ACCESS_SECRET` (from `.env`), and attaches the decoded payload to the request context:
+The service opens the transaction through the port and passes `tx` to every write, including `IOutboxPort.add(routingKey, payload, tx)`, which **requires** the caller's transaction:
 
 ```typescript
-// common/guards/jwt-auth.guard.ts
-@Injectable()
-export class JwtAuthGuard implements CanActivate {
-  canActivate(context: ExecutionContext): boolean {
-    const request = context.switchToHttp().getRequest();
-    const token = this.extractToken(request);
-    if (!token) throw new UnauthorizedError('Missing access token');
-
-    try {
-      const payload = jwt.verify(token, env.jwt.accessSecret) as JwtPayload;
-      request.user = payload;   // attach to request for @CurrentUser()
-      return true;
-    } catch {
-      throw new UnauthorizedError('Invalid or expired access token');
-    }
+// apps/core_microservice/src/modules/likes/likes.service.ts
+await this.postLikes.runInTransaction(async (tx) => {
+  const { inserted } = await this.postLikes.like(postId, userId, tx);
+  if (inserted && post.notifiesAuthorOfLikeBy(userId)) {
+    await this.outbox.add(RoutingKeys.POST_LIKED, payload, tx);
   }
+});
+```
 
-  private extractToken(request: Request): string | null {
-    const header = request.headers.authorization;
-    if (!header?.startsWith('Bearer ')) return null;
-    return header.slice(7);
+The same shape is used by `ICommentRepository` (`CommentTransaction`), `IFollowRepository`, `IPostLikeRepository` and `ICommentLikeRepository`; `IMessageRepository` has no `runInTransaction` of its own and takes the chat repository's `tx` in every write. Adapters implement `save(e, tx?)` as "`tx.getRepository(E).save(e)` when given, else the base `save`"; inside a transaction raw errors propagate and the service's wrapper maps non-domain errors to `DatabaseQueryError`.
+
+**Why `EntityManager` in a domain port is accepted.** The handle type is TypeORM's, so the domain layer technically knows its ORM. The alternative, a unit-of-work abstraction over every adapter plus the outbox, would add a layer for no practical gain: TypeORM is the only persistence used, entities are already TypeORM entities, and the domain code only passes the handle along and never calls it. The alias (`ChatTransaction`, `CommentTransaction`) keeps call sites readable and gives one place to change if that ever stops being true.
+
+Rules for chats sequence and read-pointer columns: never persist `chats.lastSeq` or a participant's `lastReadSeq`/`joinedSeq` through a cascading `chats.save(chat)`, because the graph was loaded outside the row lock and a save can rewind a concurrent `allocateSeq`. Use the narrow writes on the port: `allocateSeq` (also for `changeSeq`), `advanceReadSeq`, `findByIdForUpdate`, `upsertActiveMember`, `markParticipantLeft`, `setParticipantRole`, `setTitle`.
+
+### 3.6 Authentication, `@CurrentUser` and IDOR
+
+**Guard.** `JwtAuthGuard` (`apps/core_microservice/src/common/guards/jwt-auth.guard.ts`) delegates to the shared `AccessTokenVerifier`, injected by the `ACCESS_TOKEN_VERIFIER` token from the global `CommonAuthModule` (`apps/core_microservice/src/common/auth/common-auth.module.ts`):
+
+```typescript
+// apps/core_microservice/src/common/guards/jwt-auth.guard.ts
+const result = await this.verifier.verify(this.extractTokenFromHeader(request));
+if (!result.ok) {
+  switch (result.reason) {
+    case 'missing':     throw new UnauthorizedException('Authentication token is missing');
+    case 'revoked':     throw new UnauthorizedException('Token has been revoked');
+    case 'unavailable': throw new ServiceUnavailableException('Unable to verify token status, try again later');
+    default:            throw new UnauthorizedException('Invalid or expired authentication token');
   }
 }
+request['user'] = result.payload; // { sub, email, jti, sid?, exp }
 ```
 
-**Key design decisions:**
-- No database call on every request — the JWT is self-contained and cryptographically verifiable.
-- The guard throws `UnauthorizedError` (mapped to HTTP 401 by `DomainExceptionFilter`) on missing or invalid tokens.
-- The decoded `JwtPayload` is attached to `request.user` for downstream consumers.
+`AccessTokenVerifier` (`packages/shared/src/auth/access-token.verifier.ts`) verifies HS256 with `JWT_ACCESS_SECRET` (falling back to `JWT_SECRET`, the name auth signs with), requires `jti`, `sub` and `exp`, then checks Redis `blacklist:access:<jti>`. If Redis throws, the result is `unavailable` and the guard **fails closed with 503**. The provider (`apps/core_microservice/src/common/auth/access-token-verifier.provider.ts`) throws at startup when no secret is configured. Because `CommonAuthModule` and `RedisModule` are global, any module can use `@UseGuards(JwtAuthGuard)` without extra imports.
 
-#### `@CurrentUser` Decorator
+`OptionalJwtAuthGuard` (`apps/core_microservice/src/common/auth/optional-jwt-auth.guard.ts`) is for public routes that personalise the response (`GET /posts/:id`, `/posts/search`, `/comments/post/:postId` compute `likedByMe`): any failure leaves `request.user` unset and the request continues anonymously.
 
-A custom parameter decorator that extracts the authenticated user from the request, enabling type-safe access in controller methods:
+**`@CurrentUser()`** (`apps/core_microservice/src/common/decorators/current-user.decorator.ts`) returns `request.user`, or one field: `@CurrentUser('sub') userId: string`.
 
-```typescript
-// common/decorators/current-user.decorator.ts
-export const CurrentUser = createParamDecorator(
-  (data: unknown, ctx: ExecutionContext): JwtPayload => {
-    const request = ctx.switchToHttp().getRequest();
-    return request.user as JwtPayload;
-  },
-);
-```
+**IDOR.** Every mutating route uses `JwtAuthGuard` and passes `user.sub` into the service; the check that the caller owns or may touch the resource happens before the mutation. Where it lives today:
 
-Usage: `@CurrentUser() user: JwtPayload` — the controller receives a typed `{ sub: string; email: string }` without manual request inspection.
+| Module | Check | Throws |
+|---|---|---|
+| chats | entity methods: `Chat.assertCanRead/assertCanPost` (non-members get 404, so chat ids don't leak), `Chat` admin checks, `Message.edit/delete` | `ChatNotFoundError` (404), `NotChatAdminError` / `NotMessageAuthorError` (`AccessDeniedError`, 403) |
+| likes | `Post.assertLikeableBy`, `Comment.assertLikeableBy` (an unpublished post is visible to its author only) | `EntityByIdNotFoundError` (404) |
+| follows | scoped by construction: the follower is always `user.sub` | — |
+| posts, comments | service compares `authorId !== userId` | Nest `ForbiddenException` (403) |
+| profiles | `ProfilesController.updateProfile` compares `profile.authUserId` with `sub` | Nest `ForbiddenException` (403) |
 
-#### IDOR Protection in Profiles
+New code follows the chats pattern: an entity method such as `assertOwnedBy(userId)` throwing an `AccessDeniedError` subclass, called from the service (§8 steps 3, 4 and 8).
 
-The `PATCH /profiles/:id` endpoint combines `JwtAuthGuard` + `@CurrentUser` to enforce ownership validation:
-
-1. `JwtAuthGuard` validates the token and attaches `{ sub, email }` to the request.
-2. `@CurrentUser()` decorator extracts `user.sub` (the authenticated user's ID).
-3. `ProfilesService.updateOwnProfile()` compares `user.sub` to the profile's `authUserId`. If they don't match, it throws `UnauthorizedError`.
-
-This prevents **Insecure Direct Object Reference (IDOR)** attacks: even with a valid JWT, User A cannot modify User B's profile by guessing their profile UUID.
-
-### 3.5 App-Level Security Middleware
-
-The NestJS application (`core_microservice`) applies HTTP security headers and CORS restrictions at bootstrap:
+### 3.7 App-Level Bootstrap (`main.ts`)
 
 ```typescript
 // apps/core_microservice/src/main.ts (excerpt)
-import helmet from 'helmet';
+const app = await NestFactory.create(AppModule, { logger: new WinstonLogger('CoreSystem') });
+app.use(helmet());
+app.use(cookieParser());
+app.enableCors({
+  origin: process.env.CLIENT_URL || 'http://localhost:3000',
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+});
+const appConfig = app.get(AppConfigService);
+app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+app.useGlobalFilters(new DomainExceptionFilter());
+// Swagger at /api
+app.enableShutdownHooks(); // runs onModuleDestroy/onApplicationShutdown (outbox relay, AMQP, Redis)
+await app.listen(appConfig.port); // CORE_PORT, default 3001
+```
 
-async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+The gateway reads `CLIENT_URL` lazily for its own CORS (decorator options are evaluated before config loads). Everything else reads configuration through `AppConfigService` (`apps/core_microservice/src/config/app-config.service.ts`: `port`, `postgres`, `redis`, `rabbitmq`, `outbox`, `s3`), never `process.env`.
 
-  // HTTP security headers (XSS protection, MIME-sniffing prevention, etc.)
-  app.use(helmet());
+### 3.8 Realtime: `ChatsGateway` as an Inbound and Outbound Adapter
 
-  // CORS: restrict to trusted origins from .env
-  app.enableCors({
-    origin: env.cors.origin,   // e.g. "http://localhost:3000" or comma-separated list
-    credentials: true,
-  });
+`ChatsGateway` (`apps/core_microservice/src/modules/chats/infrastructure/realtime/chats.gateway.ts`) is the Socket.IO adapter on the `/realtime` namespace (`REALTIME_NAMESPACE`). Like a controller it is an **inbound** adapter for client-to-server events; it is also the **outbound** adapter behind `CHAT_REALTIME_PORT`.
 
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-  app.useGlobalFilters(new DomainExceptionFilter());
-  await app.listen(env.app.port);
+**Handshake.** `afterInit` installs `createSocketAuthMiddleware(verifier)` (`apps/core_microservice/src/modules/chats/infrastructure/realtime/socket-auth.middleware.ts`). It reads the token from `handshake.auth.token` only (a query-string token would end up in logs), verifies it with the same `AccessTokenVerifier`, and fills `socket.data`:
+
+```typescript
+socket.data = { userId: sub, sid: sid ?? null, jti, exp, viewingChatId: null };
+```
+
+A rejected handshake gets an `unauthorized` or `unavailable` connect error. On connect the socket joins `user:{userId}` and `chat:{chatId}` for every active participation (`userRoom()` / `chatRoom()` helpers), and an expiry timer emits `session:expired { reason: 'expired' }` and disconnects at `exp`. `auth:renew` swaps in a fresh token and reschedules the timer; it is rejected when `sub` changes or when the socket has a `sid` and the new token's differs.
+
+**Inbound handlers.** `chat:view`, `typing:start`, `typing:stop`, `auth:renew`. **Every client-to-server handler calls `ensureSessionActive` first**, so a revocation missed on pub/sub is still caught:
+
+```typescript
+@SubscribeMessage('typing:start')
+async handleTypingStart(@ConnectedSocket() socket: RealtimeSocket, @MessageBody() body: unknown) {
+  if (!(await this.ensureSessionActive(socket))) return; // EXISTS blacklist:access:<jti>
+  // ...
 }
 ```
 
-| Middleware | Purpose |
-|---|---|
-| `helmet()` | Sets 11+ HTTP security headers (X-DNS-Prefetch-Control, X-Frame-Options, X-Content-Type-Options, Strict-Transport-Security, etc.) to mitigate XSS, clickjacking, and MIME-sniffing attacks. |
-| `app.enableCors()` | Restricts cross-origin requests to trusted origins defined in `env.cors.origin`. Prevents unauthorized domains from accessing the API. |
+`ensureSessionActive` emits `session:expired` and disconnects a revoked socket, and acks `unavailable` when Redis is down (fail closed). Membership for typing is `socket.rooms.has(chat:{id})`, with no DB query.
+
+**Outbound port.** Services never import the gateway:
+
+```typescript
+// apps/core_microservice/src/modules/chats/domain/interfaces/chat-realtime.port.ts
+export interface IChatRealtimePort {
+  emitToChat<E extends ChatRealtimeEvent>(chatId: string, event: E, payload: ChatRealtimePayload<E>): void;
+  emitToUser<E extends ChatRealtimeEvent>(userId: string, event: E, payload: ChatRealtimePayload<E>): void;
+  joinUserToChat(userId: string, chatId: string): void;
+  removeUserFromChat(userId: string, chatId: string): void;
+  isUserViewingChat(userId: string, chatId: string): boolean;
+  emitTypingStopped(chatId: string, user: IChatUser): void;
+}
+export const CHAT_REALTIME_PORT = Symbol.for('IChatRealtimePort');
+
+// chats.module.ts
+ChatsGateway,
+{ provide: CHAT_REALTIME_PORT, useExisting: ChatsGateway },
+```
+
+**Emit after commit.** Services emit only after `runInTransaction` resolves, inside a try/catch that logs a warning: a failed emit never fails the request, and clients recover through `GET /chats/:chatId/messages/changes` on reconnect.
+
+```typescript
+// apps/core_microservice/src/modules/chats/messages.service.ts (edit)
+const message = await this.chats.runInTransaction(async (tx) => {
+  const found = await this.loadOwnVisible(me, chatId, messageId, tx);
+  const changeSeq = await this.messages.allocateSeq(chatId, tx);
+  found.edit(me, dto.content, changeSeq);
+  return this.messages.update(found, tx);
+});
+const [response] = await this.toResponses([message]);
+this.emitToChat(chatId, 'message:updated', { message: response }); // post-commit, guarded
+```
+
+Single-instance limitation: rooms live in the in-memory adapter (no socket.io Redis adapter), and `isUserViewingChat` only sees local sockets.
+
+### 3.9 Error Flow on the Socket
+
+Domain errors thrown from a gateway handler go through `WsDomainExceptionFilter` (Layer 3 table, last paragraph). Handlers that ack use the `IRealtimeAckError` shape from `@repo/contracts`.
+
+### 3.10 Session Revocation: `auth:session-revoked`
+
+On logout, auth blacklists the tokens and then publishes a `SessionRevokedEvent { userId, sid | null, jti | null, revokedAt }` on the Redis channel `RedisKeys.sessionRevokedChannel` (`'auth:session-revoked'`). Core's `SessionRevocationListener` (`apps/core_microservice/src/common/redis/session-revocation.listener.ts`) subscribes on a duplicated connection (subscriber mode can't run other commands), validates the message with `class-validator`, and closes the matching sockets in the user's room:
+
+```typescript
+const sockets = await this.gateway.server.in(userRoom(userId)).fetchSockets();
+for (const socket of sockets) {
+  const matches = sid ? socket.data.sid === sid : socket.data.jti === jti;
+  if (!matches) continue;
+  socket.emit('session:expired', { reason: 'revoked' });
+  socket.disconnect(true);
+}
+```
+
+Pub/sub is not durable. A lost message is bounded by `ensureSessionActive` on the next client event and by the expiry timer. A failed subscribe at boot is logged and boot continues. The listener is registered in `ChatsModule`.
+
+### 3.11 Outbox → RabbitMQ → Notifications → Relay
+
+Core never publishes to the broker inside a request. It writes an **outbox row** in the same transaction as the business change, and a relay publishes it later (at-least-once).
+
+```
+service tx ──▶ outbox_events row ──▶ OutboxRelay ──▶ EVENT_BUS (AmqpEventBus, confirm channel)
+                                                       │  exchange innogram.events (topic)
+                                                       ▼
+                    notifications.events (social.#, chat.message.alerted) ──▶ notifications service
+                                                       │  notification.created / notification.seen
+                                                       ▼
+                    core.realtime-relay (notification.#) ──▶ NotificationsRelayConsumer ──▶ emitToUser(user:{id})
+```
+
+Files, all under `apps/core_microservice/src/common/messaging/`:
+
+| Piece | File | Role |
+|---|---|---|
+| `IOutboxPort` / `OUTBOX_PORT` | `outbox.port.ts` | `add(routingKey, payload, tx)` for services; `claimPending`, `markPublished`, `markFailed`, `recordError`, `markDead`, `purgePublished` for the relay |
+| `TypeOrmOutboxAdapter` | `typeorm-outbox.adapter.ts` | `FOR UPDATE SKIP LOCKED` claim, post-commit wake signal |
+| `OutboxEvent` | `outbox-event.entity.ts` | table `outbox_events` (`attempts`, `lastError`, `publishedAt`, `deadLetteredAt`) |
+| `EventBusPort` / `EVENT_BUS`, `EventRejectedError` | `event-bus.port.ts` | publish an `EventEnvelope`; resolves on broker confirm |
+| `AmqpEventBus` | `amqp-event-bus.ts` | amqp-connection-manager confirm channel, 10 s timeout |
+| `OutboxRelay` | `outbox-relay.ts` | 500 ms poll + wake, batch 100, backoff 1 s → 30 s, hourly purge of rows published over 7 days ago |
+| `MessagingModule` | `messaging.module.ts` | `@Global()`; exports `OUTBOX_PORT`, `EVENT_BUS`, `AMQP_CONNECTION` |
+
+**Failure rules in the relay.** A broker-side failure (broker down, nack, confirm timeout, closed channel) only records `lastError` (`recordError`) and backs off; it never counts toward dead-lettering, so an outage of any length can't kill healthy rows. Only `EventRejectedError` (the event itself can't be published, e.g. its payload can't be serialized) counts: `markFailed` bumps `attempts`, and at `OUTBOX_MAX_ATTEMPTS` (env, default 10, `AppConfigService.outbox.maxAttempts`) the row is `markDead` (sets `deadLetteredAt`), logged at error level and skipped. The relay lives in the non-global `OutboxRelayModule` so it stops and finishes its drain before the AMQP providers close.
+
+**Envelope and payloads** come from `@repo/shared` (`packages/shared/src/events/event-envelope.ts`): `EventEnvelope<T> { eventId (= outbox row id), type (= routing key), version: 1, occurredAt, payload }`, `EXCHANGE_NAME = 'innogram.events'`, `RoutingKeys` (`social.post.commented`, `social.post.liked`, `social.comment.liked`, `social.user.followed`, `chat.message.alerted`, `notification.created`, `notification.seen`). Payload classes carry `class-validator` decorators because consumers validate them.
+
+**Producers.** `CommentsService`, `LikesService`, `FollowsService` (social events, one row per notification-worthy action) and `MessagesService.send` (one `chat.message.alerted` row per active participant who isn't the author and isn't viewing the chat; the same set gets a `chat:alert` socket event after commit).
+
+**Back into core.** `NotificationsRelayConsumer` (`apps/core_microservice/src/modules/notifications-relay/notifications-relay.consumer.ts`) binds `core.realtime-relay` to `notification.#` on its own channel of `AMQP_CONNECTION` and turns `notification.created` into `notification:new` and `notification.seen` into `notifications:seen` via `CHAT_REALTIME_PORT.emitToUser`. It stores nothing. `NOTIFICATIONS_RELAY_QUEUE` overrides the queue name (a non-default name is declared non-durable and auto-delete; e2e suites use one per run).
 
 ---
 
 ## 4. Express & Manual DI Architecture — `auth_microservice`
 
-> **Note:** This section describes the architecture of `auth_microservice`, which was migrated from NestJS to bare Express.js and then refactored to follow the same Ports & Adapters (Hexagonal Architecture) pattern as `core_microservice`. For `core_microservice`'s NestJS Hexagonal Architecture, see [Section 3](#3-module-anatomy--hexagonal-architecture--core_microservice-nestjs).
-
 ### 4.1 Folder Structure
 
 ```
 apps/auth_microservice/src/
-├── main.ts                              # Composition Root (bootstrap, graceful shutdown)
-├── app.ts                               # App Factory (Express app creation, manual DI wiring)
-│
-├── config/
-│   ├── env.ts                           # Centralized environment config with fail-fast validation
-│   ├── database.ts                      # DataSource factory (TypeORM)
-│   ├── redis.ts                         # Redis client factory (ioredis)
-│   ├── jwt.ts                           # JWT configuration (delegates to env.ts)
-│   ├── google.ts                        # Google OAuth client configuration
-│   └── swagger.ts                       # Swagger/OpenAPI setup (swagger-jsdoc + swagger-ui-express)
-│
+├── main.ts                       # composition root: env, DB, Redis clients, both listeners, graceful shutdown
+├── app.ts                        # createApp() (public) and createInternalApp() (internal-only)
+├── config/                       # env.ts (fail-fast), database.ts, redis.ts, google.ts, swagger.ts
 ├── domain/
-│   ├── entities/
-│   │   └── auth-user.entity.ts          # Extends TypeormEntityBase (passwordHash nullable, googleId added)
-│   └── interfaces/                      # Port interfaces (contracts the domain depends on)
-│       ├── auth-user-repository.interface.ts  # IAuthUserRepository extends RepositoryPort
-│       ├── cache.service.ts             # ICacheService (port for Redis caching)
-│       ├── crypto.service.interface.ts  # ICryptoService (port for password hashing/comparison)
-│       ├── event-publisher.interface.ts # IEventPublisher (port for inter-service events)
-│       ├── jwt.service.interface.ts     # IJwtService + JwtPayload (port for JWT operations)
-│       └── oauth.service.interface.ts   # IOAuthService + IOAuthPayload (port for OAuth verification)
-│
-├── infrastructure/                      # Adapters implementing domain port interfaces
-│   ├── repositories/
-│   │   └── auth-user.repository.ts      # Implements IAuthUserRepository, extends TypeormRepositoryBase
-│   ├── cache/
-│   │   └── redis.service.ts             # Implements ICacheService (wraps ioredis)
-│   ├── events/
-│   │   └── http-event-publisher.adapter.ts  # Implements IEventPublisher (fire-and-forget HTTP → simulates message broker)
-│   ├── jwt/
-│   │   └── jwt.service.ts              # Implements IJwtService (wraps jsonwebtoken)
-│   ├── crypto/
-│   │   └── crypto.service.ts            # BcryptService implements ICryptoService (wraps bcrypt)
-│   └── oauth/
-│       └── google-oauth.service.ts      # GoogleOAuthService implements IOAuthService (wraps google-auth-library)
-│
-├── services/
-│   ├── auth.service.ts                  # Login, Google OAuth, token refresh/logout, JWT verification
-│   └── users.service.ts                 # User registration, lookup, Google account linking
-│
-├── routes/
-│   ├── auth.routes.ts                   # POST /auth/login, /auth/google, /auth/refresh, /auth/logout; GET /auth/me
-│   └── users.routes.ts                  # POST /users/register, GET /users/:id
-│
-├── middleware/
-│   ├── auth.middleware.ts               # requireAuth() — JWT verification middleware factory
-│   ├── validate.middleware.ts           # validateBody<T>(DtoClass) — class-validator-based validation
-│   └── error-handler.middleware.ts      # DomainError → HTTP status code mapping
-│
-├── types/
-│   └── express.d.ts                     # Global Express Request augmentation (req.user: JwtPayload)
-│
-└── migrations/
-    ├── 1782126100129-InitialAuthSchema.ts
-    └── 1785236513612-AddGoogleOAuthToUsers.ts
+│   ├── entities/auth-user.entity.ts
+│   └── interfaces/               # ports (4.5) + SessionContext
+├── infrastructure/
+│   ├── cache/redis.service.ts                         # RedisService implements ICacheService
+│   ├── crypto/crypto.service.ts                       # BcryptService implements ICryptoService
+│   ├── events/http-event-publisher.ts                 # HttpEventPublisher implements IEventPublisher
+│   ├── events/redis-session-revocation.publisher.ts   # implements ISessionRevocationPublisher
+│   ├── jwt/jwt.service.ts                             # JwtService implements IJwtService
+│   ├── oauth/google-oauth.service.ts                  # GoogleOAuthService implements IOAuthService
+│   └── repositories/auth-user.repository.ts           # AuthUserRepository implements IAuthUserRepository
+├── middleware/                   # auth (requireAuth), validate (validateBody), error-handler, internal-token
+├── routes/                       # auth.routes.ts, users.routes.ts, internal.routes.ts (router factories)
+├── services/                     # AuthService, UsersService (+ auth.service.spec.ts)
+├── migrations/
+└── types/express.d.ts            # req.user augmentation
 ```
 
-### 4.2 Architecture Overview
+Same layering as core, without decorators: services depend on port interfaces from `domain/interfaces/`, adapters in `infrastructure/` implement them, and the composition root wires them with `new`.
 
-The `auth_microservice` follows the **Ports & Adapters (Hexagonal Architecture)** pattern with **manual Dependency Injection**. The structure mirrors `core_microservice`'s layering: domain ports in `domain/interfaces/`, adapter implementations in `infrastructure/`, entities in `domain/entities/`, and application services in `services/`.
+### 4.2 Composition Root
 
-The architecture has five distinct layers of responsibility:
-
-```
-┌──────────────────────────────────────────────────────┐
-│  main.ts — Composition Root                          │
-│  • Imports reflect-metadata                          │
-│  • Loads env.ts (centralized config with fail-fast)  │
-│  • Initializes DB (TypeORM DataSource)               │
-│  • Initializes Redis (ioredis → RedisService)        │
-│  • Creates WinstonLogger                             │
-│  • Calls app factory: createApp(dataSource, logger,  │
-│    redisService)                                     │
-│  • Registers SIGINT/SIGTERM for Graceful Shutdown    │
-└────────────┬─────────────────────────────────────────┘
-             │
-             ▼
-┌──────────────────────────────────────────────────────┐
-│  app.ts — App Factory / Composition Root (cont.)     │
-│  • Creates Express Application                       │
-│  • Registers global middleware (cors, json parser)   │
-│  • Constructs infrastructure adapters:               │
-│    new BcryptService(env.crypto.saltRounds)           │
-│    new AuthUserRepository(dataSource)                 │
-│    new JwtService()                                   │
-│    new GoogleOAuthService()                           │
-│  • Constructs services with port interfaces injected:│
-│    new UsersService(authUserRepository, logger,       │
-│                     cryptoService)                    │
-│    new AuthService(usersService, redisService,        │
-│                    logger, cryptoService,              │
-│                    jwtService, oauthService)           │
-│  • Mounts routers by injecting services into factory:│
-│    app.use('/users', createUsersRouter(usersService)) │
-│    app.use('/auth', createAuthRouter(authService))    │
-│  • Registers error handler middleware                │
-│  • Sets up Swagger                                   │
-└────────────┬─────────────────────────────────────────┘
-             │
-             ▼
-┌──────────────────────────────────────────────────────┐
-│  routes/*.ts — Router Factories                      │
-│  • createAuthRouter(authService) → Router             │
-│  • createUsersRouter(usersService) → Router           │
-│  • Each route:                                       │
-│    1. validateBody(DtoClass) middleware               │
-│    2. Async handler → calls service                   │
-│    3. Sends JSON response                            │
-│    4. Forwards errors via next(error)                 │
-└────────────┬─────────────────────────────────────────┘
-             │
-             ▼
-┌──────────────────────────────────────────────────────┐
-│  services/*.ts — Application Services                │
-│  • Plain classes (no decorators)                     │
-│  • Depend on port interfaces, not concrete adapters  │
-│  • UsersService: IAuthUserRepository, ICryptoService │
-│  • AuthService: ICacheService, ICryptoService,        │
-│    IJwtService, IOAuthService                        │
-│  • Orchestrate domain logic + persistence            │
-└────────────┬─────────────────────────────────────────┘
-             │
-             ▼
-┌──────────────────────────────────────────────────────┐
-│  infrastructure/*.ts — Adapters (Port Implementations)│
-│  • AuthUserRepository: TypeormRepositoryBase adapter  │
-│  • RedisService: ICacheService adapter (ioredis)     │
-│  • JwtService: IJwtService adapter (jsonwebtoken)    │
-│  • BcryptService: ICryptoService adapter (bcrypt)    │
-│  • GoogleOAuthService: IOAuthService adapter          │
-│    (google-auth-library)                              │
-│  • All implement domain port interfaces              │
-└──────────────────────────────────────────────────────┘
-```
-
-**Key design principle:** Services depend on **port interfaces** (abstractions defined in `domain/interfaces/`), never on concrete adapters. This means:
-- `UsersService` depends on `IAuthUserRepository`, not `AuthUserRepository`
-- `AuthService` depends on `ICacheService`, not `RedisService`
-- `AuthService` depends on `ICryptoService`, not `BcryptService`
-- `AuthService` depends on `IJwtService`, not JWT library directly
-- `AuthService` depends on `IOAuthService`, not `google-auth-library` directly
-
-This makes services unit-testable — ports can be mocked, and adapter implementations can be swapped (e.g., in-memory cache for tests, Redis for production).
-
-### 4.3 Composition Root (`main.ts`)
-
-The composition root is the single place where the application's dependency graph is assembled. It is the entry point for the process:
+`main.ts` imports `./config/env` first, so a missing variable fails the process before anything connects:
 
 ```typescript
-// apps/auth_microservice/src/main.ts
-import 'reflect-metadata';
-import { env } from './config/env';
-
-import { WinstonLogger } from '@repo/shared';
-import { initDatabase } from './config/database';
-import { createApp } from './app';
-import { createRedisClient } from './config/redis';
-import { RedisService } from './infrastructure/cache/redis.service';
-
-async function bootstrap() {
-  const logger = new WinstonLogger('AuthMicroservice');
-
-  try {
-    // 1. Initialize database (TypeORM DataSource)
-    const dataSource = await initDatabase();
-    logger.debug('Database connected successfully');
-
-    const redisClient = createRedisClient();
-    const redisService = new RedisService(redisClient, logger);
-
-    // 2. Initialize Express app with injected dependencies
-    const app = createApp(dataSource, logger, redisService);
-    const port = env.app.port;
-
-    // 3. Start server
-    const server = app.listen(port, () => {
-      logger.info(`Auth Microservice is running on port ${port}`);
-    });
-
-    // Graceful Shutdown
-    const shutdown = async (signal: string) => {
-      logger.info(`${signal} received, shutting down gracefully...`);
-      server.close();
-      try {
-        await redisClient.quit();
-        logger.debug('Redis disconnected');
-      } catch (err) {
-        logger.error('Error disconnecting Redis', { error: err });
-      }
-      try {
-        await dataSource.destroy();
-        logger.debug('Database disconnected');
-      } catch (err) {
-        logger.error('Error disconnecting database', { error: err });
-      }
-      logger.info('Graceful shutdown complete');
-      process.exit(0);
-    };
-
-    process.on('SIGINT', () => shutdown('SIGINT'));
-    process.on('SIGTERM', () => shutdown('SIGTERM'));
-  } catch (error) {
-    logger.error('Failed to start Auth Microservice', { error });
-    process.exit(1);
-  }
-}
-
-bootstrap();
+// apps/auth_microservice/src/main.ts (excerpt)
+const dataSource = await initDatabase();
+const redisClient = createRedisClient();
+const redisService = new RedisService(redisClient, logger);
+const sessionRedisClient = createRedisClient(); // dedicated connection for revocation publishing
+const app = createApp(dataSource, logger, redisService, sessionRedisClient);
+const internalApp = createInternalApp(dataSource, logger);
+const server = app.listen(env.app.port);
+const internalServer = internalApp.listen(internalPort, internalHost);
+// SIGINT/SIGTERM: close both servers, quit both Redis clients, destroy the DataSource
 ```
 
-**Key responsibilities:**
-
-- **`import 'reflect-metadata'`** — Must be the first import. Required by TypeORM for entity decorator metadata and by `class-transformer` (used in `validateBody` middleware).
-- **`env.ts` centralized config** — Environment variables are loaded and validated once via `config/env.ts` (fail-fast validation), eliminating scattered `process.env` reads and `dotenv.config` calls in `main.ts`. The `env` object provides typed, validated configuration for `app`, `db`, `redis`, `jwt`, `google`, and `crypto`.
-- **Infrastructure initialization** — Database (`DataSource`), Redis (`ioredis` → wrapped in `RedisService`), and logger (`WinstonLogger`) are constructed before the Express app exists.
-- **App factory call** — Passes the infrastructure dependencies into `createApp()`, which wires them into services.
-- **Graceful Shutdown** — Listens for `SIGINT` (Ctrl+C) and `SIGTERM` (Docker stop). Closes the HTTP server first, then disconnects Redis, then destroys the TypeORM `DataSource`. Ensures no in-flight requests are dropped abruptly.
-
-### 4.4 App Factory (`app.ts`)
-
-The app factory is a pure function that creates and configures the Express application. This is the central wiring point for manual DI — where **port interfaces are bound to their adapter implementations**:
+`createApp()` is where the dependency graph is built:
 
 ```typescript
-// apps/auth_microservice/src/app.ts
-import express, { Application } from 'express';
-import cors from 'cors';
-import helmet from 'helmet';
-import { DataSource } from 'typeorm';
-import type { WinstonLogger } from '@repo/shared';
-import { BcryptService } from './infrastructure/crypto/crypto.service';
-import { AuthUserRepository } from './infrastructure/repositories/auth-user.repository';
-import { JwtService } from './infrastructure/jwt/jwt.service';
-import { GoogleOAuthService } from './infrastructure/oauth/google-oauth.service';
-import { HttpEventPublisher } from './infrastructure/events/http-event-publisher.adapter';
-
-import { createUsersRouter } from './routes/users.routes';
-import { createAuthRouter } from './routes/auth.routes';
-import { errorHandler } from './middleware/error-handler.middleware';
-import { UsersService } from './services/users.service';
-import { AuthService } from './services/auth.service';
-import { setupSwagger } from './config/swagger';
-import { RedisService } from './infrastructure/cache/redis.service';
-import { env } from './config/env';
-
-export function createApp(
-  dataSource: DataSource,
-  logger: WinstonLogger,
-  redisService: RedisService,
-): Application {
-  const app = express();
-
-  // Global security middleware
-  app.use(helmet());                           // HTTP security headers
-  app.use(cors({
-    origin: env.cors.origin,                   // trusted origins from .env
-    credentials: true,
-  }));
-  app.use(express.json());
-
-  setupSwagger(app);
-
-  // Infrastructure adapters (implement domain ports)
-  const cryptoService = new BcryptService(env.crypto.saltRounds);
-  const authUserRepository = new AuthUserRepository(dataSource);
-  const jwtService = new JwtService();
-  const oauthService = new GoogleOAuthService();
-  const eventPublisher = new HttpEventPublisher(env.coreService.url, logger);
-
-  // Application services (depend on port interfaces, not concrete adapters)
-  const usersService = new UsersService(
-    authUserRepository,
-    logger,
-    cryptoService,
-    eventPublisher,                            // ← IEventPublisher injected
-  );
-  const authService = new AuthService(
-    usersService,
-    redisService,
-    logger,
-    cryptoService,
-    jwtService,
-    oauthService,
-  );
-
-  // Mount routers by injecting services into router factories
-  app.use('/users', createUsersRouter(usersService));
-  app.use('/auth', createAuthRouter(authService));
-
-  // Global error handler (must be registered last)
-  app.use(errorHandler);
-
-  return app;
-}
+// apps/auth_microservice/src/app.ts (excerpt)
+const cryptoService = new BcryptService(env.crypto.saltRounds);
+const authUserRepository = new AuthUserRepository(dataSource);
+const usersService = new UsersService(authUserRepository, logger, cryptoService, new HttpEventPublisher(logger));
+const authService = new AuthService(
+  usersService, redisService, logger, cryptoService,
+  new JwtService(), new GoogleOAuthService(),
+  new RedisSessionRevocationPublisher(sessionRedisClient, logger),
+);
+app.use('/users', createUsersRouter(usersService));
+app.use('/auth', createAuthRouter(authService));
+app.use(errorHandler); // last
 ```
 
-**Key design decisions:**
+Before the routers it applies `helmet()`, `express.json()`, CORS from `env.app.allowedOrigins` (`AUTH_ALLOWED_ORIGINS`) and Swagger (`swagger-jsdoc` over the `@openapi` JSDoc blocks in `routes/`).
 
-- **`createApp` is a factory function, not a class.** There is no need for an `AppModule` or a NestJS bootstrap. The function takes infrastructure dependencies, creates the Express app, and returns it.
-- **Adapters are constructed first**, then injected into services that depend on port interfaces:
-  - `UsersService` depends on `IAuthUserRepository` — receives `AuthUserRepository`
-  - `UsersService` depends on `ICryptoService` — receives `BcryptService`
-  - `UsersService` depends on `IEventPublisher` — receives `HttpEventPublisher`
-  - `AuthService` depends on `ICacheService` — receives `RedisService`
-  - `AuthService` depends on `ICryptoService` — receives `BcryptService`
-  - `AuthService` depends on `IJwtService` — receives `JwtService`
-  - `AuthService` depends on `IOAuthService` — receives `GoogleOAuthService`
-- **Routers are factory functions** (`createUsersRouter(usersService)`), not classes. They receive their dependency (the service) via closure and return an Express `Router`.
-- **`env` import** — The centralized `env.ts` provides typed configuration (e.g., `env.crypto.saltRounds`, `env.cors.origin`, `env.coreService.url`) instead of scattered `process.env` reads.
-- **`helmet()` is registered globally** to set security HTTP headers (XSS protection, MIME-sniffing prevention, clickjacking protection, etc.) for every response.
-- **CORS is configured from environment** (`env.cors.origin`) to restrict cross-origin requests to trusted origins — preventing unauthorized domains from accessing the API.
+Configuration lives only in `apps/auth_microservice/src/config/env.ts`: `requireEnv(key, default?)` throws on a missing variable, and the rest of the code reads the exported `env` object, never `process.env`. Add new variables there and to `.env.example`. Specs that import anything loading `env` set the required variables (`CORE_SERVICE_URL`, `AUTH_ALLOWED_ORIGINS`, `INTERNAL_API_TOKEN`, ...) before the import.
 
-### 4.5 Routing & Validation
+### 4.3 Routes, Validation and Errors
 
-#### Router Factories
-
-Instead of NestJS `@Controller` and `@Get`/`@Post` decorators, routes are defined using Express `Router` factory functions:
+Routers are factories that receive their service:
 
 ```typescript
-// apps/auth_microservice/src/routes/auth.routes.ts
-import { Router } from 'express';
-import { AuthService } from '../services/auth.service';
-import { validateBody } from '../middleware/validate.middleware';
-import { GoogleLoginDto, LoginDto, RefreshTokenDto } from '@repo/shared';
-import { requireAuth } from '../middleware/auth.middleware';
-
+// apps/auth_microservice/src/routes/auth.routes.ts (excerpt)
 export function createAuthRouter(authService: AuthService): Router {
   const router = Router();
-
-  /**
-   * @openapi
-   * /auth/login:
-   *   post:
-   *     summary: Authenticate user using email and password
-   *     tags: [Auth]
-   *     requestBody:
-   *       required: true
-   *       content:
-   *         application/json:
-   *           schema:
-   *             type: object
-   *             required: [email, password]
-   *             properties:
-   *               email:
-   *                 type: string
-   *                 format: email
-   *               password:
-   *                 type: string
-   *                 minLength: 8
-   *     responses:
-   *       200:
-   *         description: Login successful
-   *       400:
-   *         description: Bad Request (validation errors)
-   *       401:
-   *         description: Invalid credentials
-   */
   router.post('/login', validateBody(LoginDto), async (req, res, next) => {
     try {
-      const { email, password } = req.body;
-      const result = await authService.login(email, password);
+      const { email, password } = req.body as LoginDto;
+      const result = await authService.login(email, password, sessionContext(req)); // { ipAddress, userAgent }
       res.status(200).json(result);
     } catch (error) {
-      next(error);
+      next(error); // → errorHandler
     }
   });
-
-  /**
-   * @openapi
-   * /auth/google:
-   *   post:
-   *     summary: Authenticate or register user using Google ID Token
-   *     tags: [Auth]
-   *     requestBody:
-   *       required: true
-   *       content:
-   *         application/json:
-   *           schema:
-   *             type: object
-   *             required: [idToken]
-   *             properties:
-   *               idToken:
-   *                 type: string
-   *                 description: The JWT ID token issued by Google
-   *     responses:
-   *       200:
-   *         description: Login successful
-   *       400:
-   *         description: Bad Request (missing token)
-   *       401:
-   *         description: Invalid or expired Google token
-   */
-  router.post('/google', validateBody(GoogleLoginDto), async (req, res, next) => {
-    try {
-      const { idToken } = req.body;
-      const result = await authService.loginWithGoogle(idToken);
-      res.status(200).json(result);
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  /**
-   * @openapi
-   * /auth/refresh:
-   *   post:
-   *     summary: Refresh access token
-   *     tags: [Auth]
-   *     requestBody:
-   *       required: true
-   *       content:
-   *         application/json:
-   *           schema:
-   *             $ref: '#/components/schemas/RefreshTokenDto'
-   *     responses:
-   *       200:
-   *         description: New tokens generated
-   *       401:
-   *         description: Invalid or expired refresh token
-   */
-  router.post('/refresh', validateBody(RefreshTokenDto), async (req, res, next) => {
-    try {
-      const { refreshToken } = req.body;
-      const result = await authService.refreshToken(refreshToken);
-      res.status(200).json(result);
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  /**
-   * @openapi
-   * /auth/logout:
-   *   post:
-   *     summary: Logout user and invalidate refresh token
-   *     tags: [Auth]
-   *     requestBody:
-   *       required: true
-   *       content:
-   *         application/json:
-   *           schema:
-   *             $ref: '#/components/schemas/RefreshTokenDto'
-   *     responses:
-   *       200:
-   *         description: Logged out successfully
-   */
-  router.post('/logout', validateBody(RefreshTokenDto), async (req, res, next) => {
-    try {
-      const { refreshToken } = req.body;
-      await authService.logout(refreshToken);
-      res.status(200).json({ message: 'Logged out successfully' });
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  /**
-   * @openapi
-   * /auth/me:
-   *   get:
-   *     summary: Get current authenticated user's JWT payload
-   *     tags: [Auth]
-   *     security:
-   *       - bearerAuth: []
-   *     responses:
-   *       200:
-   *         description: Returns the user payload extracted from JWT
-   *       401:
-   *         description: Unauthorized (missing or invalid token)
-   */
-  router.get('/me', requireAuth(authService), (req, res) => {
-    res.status(200).json({
-      statusCode: 200,
-      user: req.user,
-    });
-  });
-
+  router.get('/me', requireAuth(authService), (req, res) => { /* req.user */ });
   return router;
 }
 ```
 
-```typescript
-// apps/auth_microservice/src/routes/users.routes.ts
-import { Router } from 'express';
-import { UsersService } from '../services/users.service';
-import { validateBody } from '../middleware/validate.middleware';
-import { CreateUserDto } from '@repo/shared';
+Routes: `POST /users/register`, `GET /users/:id`, `POST /auth/login`, `POST /auth/google`, `GET /auth/me`, `POST /auth/refresh`, `POST /auth/logout`, and on the internal listener `GET /internal/users/:id/contact`.
 
-export function createUsersRouter(usersService: UsersService): Router {
-  const router = Router();
+- `validateBody(DtoClass)` (`apps/auth_microservice/src/middleware/validate.middleware.ts`) runs `plainToInstance` + `validate` and answers 400 `{ statusCode, error: 'Bad Request', message: string[] }`; on success `req.body` is the DTO instance. DTOs come from `@repo/shared` (`LoginDto`, `CreateUserDto`, `GoogleLoginDto`, `RefreshTokenDto`).
+- `requireAuth(authService)` (`apps/auth_microservice/src/middleware/auth.middleware.ts`) reads the Bearer token, calls `authService.verifyToken` (signature + access blacklist) and sets `req.user`; failures are `UnauthorizedError` → 401.
+- `errorHandler` maps errors with the table in §3.2 Layer 3.
 
-  /**
-   * @openapi
-   * /users/register:
-   *   post:
-   *     summary: Register a new user
-   *     tags: [Users]
-   *     requestBody:
-   *       required: true
-   *       content:
-   *         application/json:
-   *           schema:
-   *             type: object
-   *             properties:
-   *               email:
-   *                 type: string
-   *               password:
-   *                 type: string
-   *     responses:
-   *       201:
-   *         description: User created successfully
-   *       409:
-   *         description: Email already in use
-   */
-  router.post('/register', validateBody(CreateUserDto), async (req, res, next) => {
-    try {
-      const { email, password } = req.body;
-      const result = await usersService.registerUser(email, password);
-      res.status(201).json(result);
-    } catch (error) {
-      next(error);
-    }
-  });
+### 4.4 Services
 
-  router.get('/:id', async (req, res, next) => {
-    try {
-      const result = await usersService.getUserById(req.params.id);
-      res.status(200).json(result);
-    } catch (error) {
-      next(error);
-    }
-  });
-
-  return router;
-}
-```
-
-**Key patterns:**
-
-- The service is injected into the factory function via **closure**, not via an IoC container.
-- Every async handler wraps its body in `try/catch` and forwards errors via `next(error)` to the global `errorHandler` middleware.
-- Route handlers are plain Express `(req, res, next)` callbacks — no parameter decorators, no `@Body()`, no `@Param()`.
-- **DTOs are destructured** in route handlers (`const { email, password } = req.body`) before passing primitive values to services — services receive typed primitives, not raw DTOs. This keeps services decoupled from HTTP concerns.
-- **Swagger docs** are inlined as JSDoc `@openapi` comments (rendered by `swagger-jsdoc`) — this replaces NestJS `@ApiTags()`/`@ApiProperty()` decorators.
-- **Auth middleware**: `GET /auth/me` is protected by `requireAuth(authService)`, a factory middleware that extracts the Bearer token, calls `authService.verifyToken()`, and attaches the decoded `JwtPayload` to `req.user`. Express's `Request` type is globally augmented in `types/express.d.ts` to include `user?: JwtPayload`.
-
-#### Custom `validateBody` Middleware
-
-Instead of NestJS's global `ValidationPipe`, we use a custom middleware built on the same underlying libraries (`class-transformer` + `class-validator`):
-
-```typescript
-// apps/auth_microservice/src/middleware/validate.middleware.ts
-import { NextFunction, Request, Response } from 'express';
-import { plainToInstance } from 'class-transformer';
-import { validate } from 'class-validator';
-
-export function validateBody<T extends object>(dtoClass: new () => T) {
-  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    const dtoInstance = plainToInstance(dtoClass, req.body);
-
-    const errors = await validate(dtoInstance);
-
-    if (errors.length > 0) {
-      const messages = errors
-        .map((err) => Object.values(err.constraints || {}))
-        .flat();
-      res.status(400).json({
-        statusCode: 400,
-        error: 'Bad Request',
-        message: messages,
-      });
-      return;
-    }
-
-    req.body = dtoInstance;  // Replace raw JSON with transformed, validated instance
-    next();
-  };
-}
-```
-
-**Comparison with NestJS `ValidationPipe`:**
-
-| Feature | NestJS `ValidationPipe` | Express `validateBody` |
-|---|---|---|
-| Underlying libraries | `class-transformer` + `class-validator` | `class-transformer` + `class-validator` (same) |
-| Registration | Global: `app.useGlobalPipes(new ValidationPipe(...))` | Per-route: `router.post('/x', validateBody(Dto), handler)` |
-| Whitelisting (`whitelist: true`) | Built-in | Not implemented (strips nothing) |
-| Transformation (`transform: true`) | Built-in | `req.body` is replaced with the transformed instance |
-| Error format | NestJS `BadRequestException` JSON | Custom `{ statusCode: 400, error: 'Bad Request', message: [...] }` |
-
-The trade-off: `validateBody` is simpler but less featureful than `ValidationPipe`. For `auth_microservice`'s narrow DTO surface, this is sufficient. If whitelisting or nested object validation becomes necessary, those features can be added incrementally.
-
-#### Error Handler Middleware
-
-The global error handler translates framework-agnostic `DomainError` subclasses into HTTP status codes — the same mapping used by `DomainExceptionFilter` in NestJS:
-
-```typescript
-// apps/auth_microservice/src/middleware/error-handler.middleware.ts
-import {
-  DomainError,
-  EntityNotFoundError,
-  UniqueConstraintViolationError,
-  DatabaseQueryError,
-  UnauthorizedError,
-} from '@repo/shared';
-import { NextFunction, Request, Response } from 'express';
-
-export function errorHandler(err: Error, req: Request, res: Response, next: NextFunction): void {
-  if (!(err instanceof DomainError)) {
-    console.error('Unhandled Server Error:', err);
-    res.status(500).json({ statusCode: 500, message: 'Internal Server Error' });
-    return;
-  }
-
-  let status = 400;
-  if (err instanceof EntityNotFoundError) status = 404;
-  else if (err instanceof UniqueConstraintViolationError) status = 409;
-  else if (err instanceof DatabaseQueryError) status = 500;
-  else if (err instanceof UnauthorizedError) status = 401;
-
-  res.status(status).json({
-    statusCode: status,
-    error: err.name,
-    message: err.message,
-  });
-}
-```
-
-| DomainError subclass | HTTP status | Example trigger |
-|---|---|---|
-| `EntityNotFoundError` | 404 | `GET /users/:id` with unknown id |
-| `UniqueConstraintViolationError` | 409 | `POST /users/register` with duplicate email |
-| `UnauthorizedError` | 401 | `POST /auth/login` with wrong password |
-| `DatabaseQueryError` | 500 | Unexpected database failure |
-| Any other `DomainError` | 400 | Default fallback |
-
-### 4.6 Services
-
-Services are plain TypeScript classes — no `@Injectable()`, no decorators, no NestJS DI tokens. Dependencies are received through the constructor, passed explicitly by the app factory. **Crucially, services depend on port interfaces (abstractions), not concrete adapters.**
-
-#### `UsersService`
-
-Handles user registration, lookup, password hashing, Google account linking, and **event emission** upon successful registration. Depends on `IAuthUserRepository` (port), `ICryptoService` (port), and `IEventPublisher` (port) — not on `DataSource`, `bcrypt`, or HTTP directly:
-
-```typescript
-// apps/auth_microservice/src/services/users.service.ts
-import type { WinstonLogger, UserCreatedEvent } from '@repo/shared';
-import { UniqueConstraintViolationError } from '@repo/shared';
-import { ICryptoService } from '../domain/interfaces/crypto.service.interface';
-import { AuthUser } from '../domain/entities/auth-user.entity';
-import { IAuthUserRepository } from '../domain/interfaces/auth-user-repository.interface';
-import { IEventPublisher } from '../domain/interfaces/event-publisher.interface';
-
-export class UsersService {
-  constructor(
-    private readonly userRepository: IAuthUserRepository,
-    private readonly logger: WinstonLogger,
-    private readonly cryptoService: ICryptoService,
-    private readonly eventPublisher: IEventPublisher,
-  ) {}
-
-  async registerUser(
-    email: string,
-    password: string,
-  ): Promise<Omit<AuthUser, 'passwordHash'>> {
-    const existing = await this.userRepository.findByEmail(email);
-    if (existing) {
-      throw new UniqueConstraintViolationError(
-        'User with this email already exists',
-        email,
-      );
-    }
-
-    const passwordHash = await this.cryptoService.hash(password);
-
-    const user = new AuthUser();
-    user.email = email;
-    user.passwordHash = passwordHash;
-    user.isEmailVerified = false;
-
-    const savedUser = await this.userRepository.save(user);
-    this.logger.debug('User registered', { props: { userId: savedUser.id } });
-
-    // Fire-and-forget: notify core_microservice to create a profile
-    this.eventPublisher.publish('user.created', {
-      userId: savedUser.id,
-      email: savedUser.email,
-    } as UserCreatedEvent);
-
-    const { passwordHash: _, ...safeUser } = savedUser;
-    return safeUser;
-  }
-
-  // ... getUserById, findByEmailWithPassword remain unchanged ...
-
-  async findOrCreateByGoogle(email: string, googleId: string): Promise<AuthUser> {
-    let user = await this.userRepository.findByEmail(email);
-
-    if (user) {
-      // Link Google account to existing email user
-      if (!user.googleId) {
-        user.googleId = googleId;
-        user.isEmailVerified = true;
-        user = await this.userRepository.save(user);
-        this.logger.debug('Linked Google account to existing user', {
-          props: { userId: user.id },
-        });
-      }
-      return user;
-    }
-
-    // Create new Google-authenticated user (no password)
-    const newUser = new AuthUser();
-    newUser.email = email;
-    newUser.googleId = googleId;
-    newUser.isEmailVerified = true;
-
-    const savedUser = await this.userRepository.save(newUser);
-    this.logger.debug('Created new user via Google login', {
-      props: { userId: savedUser.id },
-    });
-
-    // Also emit event for Google-created users (first time only)
-    this.eventPublisher.publish('user.created', {
-      userId: savedUser.id,
-      email: savedUser.email,
-    } as UserCreatedEvent);
-
-    return savedUser;
-  }
-}
-```
-
-**Key changes from the previous design:**
-- **`IAuthUserRepository` instead of raw `DataSource`** — The `UsersService` no longer calls `dataSource.getRepository(AuthUser)`. Instead, it depends on the `IAuthUserRepository` port interface, which is implemented by `AuthUserRepository` (extending `TypeormRepositoryBase`). This brings `auth_microservice` in line with `core_microservice`'s repository pattern and makes the service unit-testable with a mock repository.
-- **`ICryptoService` instead of direct `bcrypt`** — Password hashing and comparison are delegated to the `ICryptoService` port (implemented by `BcryptService`), not called directly via `bcrypt.hash()`.
-- **`IEventPublisher` for inter-service communication** — After persisting the user, the service emits a `UserCreatedEvent` via the `IEventPublisher` port. The event is published in a **fire-and-forget** manner — if `core_microservice` is temporarily unreachable, the registration still succeeds (the Auth service does not block or roll back). This is the final production pattern, not a temporary placeholder. See [Section 6](#6-inter-service-communication-auth--core) for the architectural rationale.
-- **`findOrCreateByGoogle()`** — Finds an existing user by email and links the `googleId`, or creates a new user without a password. Google-authenticated users also trigger a `UserCreatedEvent` (only on first-time creation, not on subsequent logins).
-
-#### `AuthService`
-
-Handles login, Google OAuth, token refresh, logout, and JWT verification. Depends on four port interfaces: `ICacheService`, `ICryptoService`, `IJwtService`, `IOAuthService`:
+`UsersService` registers users (bcrypt hash through `ICryptoService`, persistence through `IAuthUserRepository`) and then calls `IEventPublisher.publishUserCreatedEvent` without awaiting (§7). `AuthService` handles login, Google login, refresh, logout and token verification, and depends only on ports plus `UsersService`:
 
 ```typescript
 // apps/auth_microservice/src/services/auth.service.ts
-import { ICryptoService } from '../domain/interfaces/crypto.service.interface';
-import { UnauthorizedError, WinstonLogger } from '@repo/shared';
-import { UsersService } from './users.service';
-import { AuthUser } from '../domain/entities/auth-user.entity';
-import { ICacheService } from '../domain/interfaces/cache.service';
-import { IJwtService, JwtPayload } from '../domain/interfaces/jwt.service.interface';
-import { env } from '../config/env';
-import { IOAuthService } from '../domain/interfaces/oauth.service.interface';
-
-export interface LoginResult {
-  accessToken: string;
-  refreshToken: string;
-  user: Omit<AuthUser, 'passwordHash'>;
-}
-
-export class AuthService {
-  constructor(
-    private readonly usersService: UsersService,
-    private readonly cacheService: ICacheService,
-    private readonly logger: WinstonLogger,
-    private readonly cryptoService: ICryptoService,
-    private readonly jwtService: IJwtService,
-    private readonly oauthService: IOAuthService,
-  ) {}
-
-  async login(email: string, password: string): Promise<LoginResult> {
-    const user = await this.usersService.findByEmailWithPassword(email);
-
-    if (!user || !user.passwordHash) {
-      this.logger.debug('Login failed: user not found', { props: { email } });
-      throw new UnauthorizedError('Invalid email or password');
-    }
-
-    const isValid = await this.cryptoService.compare(password, user.passwordHash);
-    if (!isValid) {
-      this.logger.debug('Login failed: invalid password', { props: { userId: user.id } });
-      throw new UnauthorizedError('Invalid email or password');
-    }
-
-    this.logger.debug('User logged in', { props: { userId: user.id } });
-    return this.generateTokensAndSession(user);
-  }
-
-  async loginWithGoogle(idToken: string): Promise<LoginResult> {
-    try {
-      const payload = await this.oauthService.verifyIdToken(idToken);
-
-      const user = await this.usersService.findOrCreateByGoogle(
-        payload.email,
-        payload.sub,
-      );
-
-      this.logger.debug('User logged in with Google', { props: { userId: user.id } });
-      return this.generateTokensAndSession(user);
-    } catch (error) {
-      this.logger.error('Google OAuth verification failed', { error });
-      throw new UnauthorizedError('Invalid Google token');
-    }
-  }
-
-  async verifyToken(token: string): Promise<JwtPayload> {
-    try {
-      return this.jwtService.verifyAccessToken(token);
-    } catch (error) {
-      throw new UnauthorizedError('Invalid or expired access token');
-    }
-  }
-
-  async refreshToken(oldRefreshToken: string): Promise<LoginResult> {
-    const redisKey = `refresh_token:${oldRefreshToken}`;
-    const userId = await this.cacheService.get(redisKey);
-
-    if (!userId) {
-      this.logger.debug('Refresh token failed: token not found or expired in Redis');
-      throw new UnauthorizedError('Invalid or expired refresh token');
-    }
-
-    const user = await this.usersService.getUserById(userId);
-
-    // Rotate: delete old token, issue new pair
-    await this.cacheService.delete(redisKey);
-    return this.generateTokensAndSession(user as AuthUser);
-  }
-
-  async logout(refreshToken: string): Promise<void> {
-    const redisKey = `refresh_token:${refreshToken}`;
-    const deletedCount = await this.cacheService.delete(redisKey);
-
-    if (deletedCount > 0) {
-      this.logger.debug('User logged out successfully, refresh token removed');
-    }
-  }
-
-  private async generateTokensAndSession(user: AuthUser): Promise<LoginResult> {
-    const accessToken = this.jwtService.signAccessToken({
-      sub: user.id,
-      email: user.email,
-    });
-
-    const refreshToken = this.jwtService.generateRefreshToken();
-    const refreshTtlSeconds = this.jwtService.parseExpiryToSeconds(
-      env.jwt.refreshTokenExpiry,
-    );
-
-    const redisKey = `refresh_token:${refreshToken}`;
-    await this.cacheService.setWithExpiry(redisKey, String(user.id), refreshTtlSeconds);
-
-    const { passwordHash: _, ...safeUser } = user;
-    return { accessToken, refreshToken, user: safeUser };
-  }
-}
+constructor(
+  private readonly usersService: UsersService,
+  private readonly cacheService: ICacheService,
+  private readonly logger: WinstonLogger,
+  private readonly cryptoService: ICryptoService,
+  private readonly jwtService: IJwtService,
+  private readonly oauthService: IOAuthService,
+  private readonly sessionRevocationPublisher: ISessionRevocationPublisher,
+) {}
 ```
 
-**Security design:**
+### 4.5 Ports and Adapters
 
-- **Passwords** are hashed via `ICryptoService.hash()` (bcrypt, cost factor from `env.crypto.saltRounds`) — the raw password is never stored or logged.
-- **`passwordHash` is nullable** — Google-authenticated users have no password (`passwordHash` is `undefined`). The `login` method checks `!user.passwordHash` and rejects passwordless users with a vague error.
-- **`passwordHash` is stripped** from the returned `AuthUser` object using destructuring (`const { passwordHash: _, ...safeUser } = user`) — both in `UsersService` and `AuthService`.
-- **Tokens flow through port interfaces**: JWT signing/verification delegates to `IJwtService`; Google OAuth verification delegates to `IOAuthService`; refresh token storage delegates to `ICacheService`. `AuthService` contains no direct imports of `jsonwebtoken`, `google-auth-library`, or `ioredis`.
-- **Access tokens** are signed JWTs with short expiry (`env.jwt.accessTokenExpiry`).
-- **Refresh token rotation**: `refreshToken()` validates the old refresh token against Redis, then **deletes it and issues a new pair** — this limits the window for stolen refresh tokens.
-- **Logout** removes the refresh token from Redis, making it unusable immediately.
-- **Login error messages** are intentionally vague (`"Invalid email or password"`) — never distinguish between "user not found" and "wrong password" to prevent email enumeration.
-- **Token generation is extracted** to a private `generateTokensAndSession()` method shared by `login()`, `loginWithGoogle()`, and `refreshToken()`, eliminating code duplication.
-
-#### `RedisService` (infrastructure adapter)
-
-A thin wrapper around `ioredis` with logging and a cache-aside helper. Now located in `infrastructure/cache/` and implements the `ICacheService` port interface:
-
-```typescript
-// apps/auth_microservice/src/infrastructure/cache/redis.service.ts
-import { WinstonLogger } from '@repo/shared';
-import { Redis } from 'ioredis';
-import { ICacheService } from '../../domain/interfaces/cache.service';
-
-export class RedisService implements ICacheService {
-  constructor(
-    private readonly client: Redis,
-    private readonly logger: WinstonLogger,
-  ) {
-    this.registerEventHandlers();
-  }
-
-  private registerEventHandlers(): void {
-    this.client.on('connect', () => this.logger.info('Redis connected'));
-    this.client.on('error', (err: Error) =>
-      this.logger.error('Redis error', { error: err }),
-    );
-    this.client.on('reconnecting', () =>
-      this.logger.warn('Redis reconnecting...'),
-    );
-  }
-
-  async get(key: string): Promise<string | null> {
-    return this.client.get(key);
-  }
-
-  async setWithExpiry(key: string, value: string, ttlSeconds: number): Promise<void> {
-    await this.client.set(key, value, 'EX', ttlSeconds);
-  }
-
-  async delete(key: string): Promise<number> {
-    return this.client.del(key);
-  }
-
-  async has(key: string): Promise<boolean> {
-    const result = await this.client.exists(key);
-    return result === 1;
-  }
-
-  async getOrSet(
-    key: string,
-    factory: () => Promise<string>,
-    ttlSeconds: number,
-  ): Promise<string> {
-    const cached = await this.client.get(key);
-    if (cached !== null) {
-      return cached;
-    }
-    const value = await factory();
-    await this.client.set(key, value, 'EX', ttlSeconds);
-    return value;
-  }
-}
-```
-
-The `getOrSet` method implements the **cache-aside** pattern: check cache → miss → call factory → write to cache → return. This is available for future use cases (e.g., rate limiting, session caching) even though the current login flow uses explicit `setWithExpiry`.
-
-### 4.7 Domain Ports (`domain/interfaces/`)
-
-The `domain/interfaces/` directory defines **port interfaces** — contracts that the domain depends on, implemented by infrastructure adapters. This is the same Ports & Adapters pattern used by `core_microservice`:
-
-#### `ICacheService` — Cache port
-
-```typescript
-// apps/auth_microservice/src/domain/interfaces/cache.service.ts
-export interface ICacheService {
-  get(key: string): Promise<string | null>;
-  setWithExpiry(key: string, value: string, ttlSeconds: number): Promise<void>;
-  delete(key: string): Promise<number>;
-  has(key: string): Promise<boolean>;
-  getOrSet(key: string, factory: () => Promise<string>, ttlSeconds: number): Promise<string>;
-}
-```
-
-Implemented by `RedisService` in `infrastructure/cache/`.
-
-#### `IJwtService` — JWT port
-
-```typescript
-// apps/auth_microservice/src/domain/interfaces/jwt.service.interface.ts
-export interface JwtPayload {
-  sub: string;
-  email: string;
-}
-
-export interface IJwtService {
-  signAccessToken(payload: JwtPayload): string;
-  verifyAccessToken(token: string): JwtPayload;
-  generateRefreshToken(): string;
-  parseExpiryToSeconds(expiry: string): number;
-}
-```
-
-Implemented by `JwtService` in `infrastructure/jwt/`.
-
-#### `ICryptoService` — Crypto port
-
-```typescript
-// apps/auth_microservice/src/domain/interfaces/crypto.service.interface.ts
-export interface ICryptoService {
-  hash(data: string, saltOrRounds?: number): Promise<string>;
-  compare(data: string, encrypted: string): Promise<boolean>;
-}
-```
-
-Implemented by `BcryptService` in `infrastructure/crypto/`. Previously co-located with `BcryptService`, now extracted to a separate domain port file following the Ports & Adapters pattern.
-
-#### `IOAuthService` — OAuth port
-
-```typescript
-// apps/auth_microservice/src/domain/interfaces/oauth.service.interface.ts
-export interface IOAuthPayload {
-  email: string;
-  sub: string;
-}
-
-export interface IOAuthService {
-  verifyIdToken(token: string): Promise<IOAuthPayload>;
-}
-```
-
-Implemented by `GoogleOAuthService` in `infrastructure/oauth/`. Extracting Google OAuth verification behind a port interface makes `AuthService` agnostic to the OAuth provider — swapping Google for another provider (Apple, GitHub, etc.) requires only a new adapter implementation.
-
-#### `IAuthUserRepository` — Repository port
-
-```typescript
-// apps/auth_microservice/src/domain/interfaces/auth-user-repository.interface.ts
-import { AuthUser } from '../entities/auth-user.entity';
-import { RepositoryPort } from '@repo/shared';
-
-export interface IAuthUserRepository extends RepositoryPort<AuthUser, any> {
-  findByEmail(email: string): Promise<AuthUser | null>;
-}
-```
-
-Implemented by `AuthUserRepository` in `infrastructure/repositories/`, which extends `TypeormRepositoryBase<AuthUser, any>`.
-
-#### `IEventPublisher` — Event publisher port
-
-```typescript
-// apps/auth_microservice/src/domain/interfaces/event-publisher.interface.ts
-export interface IEventPublisher {
-  publish(eventType: string, payload: Record<string, unknown>): void;
-}
-```
-
-Implemented by `HttpEventPublisher` in `infrastructure/events/`. This port abstracts the inter-service communication mechanism — the production implementation uses HTTP fire-and-forget to `core_microservice`. The port abstraction ensures that if the transport layer changes, `UsersService` remains untouched.
-
-### 4.8 Infrastructure Adapters (`infrastructure/`)
-
-Each port interface has a corresponding adapter implementation:
-
-| Port (domain/interfaces/) | Adapter (infrastructure/) | Technology |
+| Port (`domain/interfaces/`) | File | Adapter |
 |---|---|---|
-| `ICacheService` | `cache/redis.service.ts` (RedisService) | ioredis |
-| `IJwtService` | `jwt/jwt.service.ts` (JwtService) | jsonwebtoken |
-| `ICryptoService` | `crypto/crypto.service.ts` (BcryptService) | bcrypt |
-| `IOAuthService` | `oauth/google-oauth.service.ts` (GoogleOAuthService) | google-auth-library |
-| `IEventPublisher` | `events/http-event-publisher.adapter.ts` (HttpEventPublisher) | HTTP (Node.js `fetch`) |
-| `IAuthUserRepository` | `repositories/auth-user.repository.ts` | TypeORM + TypeormRepositoryBase |
+| `IAuthUserRepository` (extends `RepositoryPort`) | `auth-user-repository.interface.ts` | `AuthUserRepository` (`TypeormRepositoryBase`, `super(dataSource.getRepository(AuthUser))`) |
+| `ICacheService` (`get`, `setWithExpiry`, `delete`, `has`, `getOrSet`) | `cache.service.ts` | `RedisService` (ioredis) |
+| `ICryptoService` | `crypto.service.interface.ts` | `BcryptService` |
+| `IJwtService` (+ `JwtPayload`, `RefreshTokenPayload`) | `jwt.service.interface.ts` | `JwtService` (jsonwebtoken) |
+| `IOAuthService` | `oauth.service.interface.ts` | `GoogleOAuthService` (google-auth-library) |
+| `IEventPublisher` | `event-publisher.interface.ts` | `HttpEventPublisher` |
+| `ISessionRevocationPublisher` | `session-revocation-publisher.ts` | `RedisSessionRevocationPublisher` |
+| `SessionContext { ipAddress?, userAgent? }` (value type, not a port) | `session-context.ts` | built by the routes from the request |
 
-#### `AuthUserRepository`
+Service specs replace adapters with fakes that implement the port (`FakeCache implements ICacheService` in `apps/auth_microservice/src/services/auth.service.spec.ts`).
 
-Extends `TypeormRepositoryBase` from `@repo/shared` — the same pattern used by `core_microservice` repositories:
+Gotcha: `http-event-publisher.ts` imports its port as `'src/domain/interfaces/event-publisher.interface'` (non-relative). Prefer relative imports in new files, and keep that path resolution in mind when moving files.
 
-```typescript
-// apps/auth_microservice/src/infrastructure/repositories/auth-user.repository.ts
-import { TypeormRepositoryBase } from '@repo/shared';
-import { DataSource } from 'typeorm';
-import { AuthUser } from '../../domain/entities/auth-user.entity';
-import { IAuthUserRepository } from '../../domain/interfaces/auth-user-repository.interface';
+### 4.6 Sessions, Tokens and Revocation
 
-export class AuthUserRepository
-  extends TypeormRepositoryBase<AuthUser, any>
-  implements IAuthUserRepository
-{
-  public static readonly entity = AuthUser;
-  protected relations: string[] = [];
+Key layout is shared with core through `RedisKeys` (`packages/shared/src/redis/redis-keys.ts`):
 
-  constructor(dataSource: DataSource) {
-    super(dataSource.getRepository(AuthUser));
-  }
-
-  async findByEmail(email: string): Promise<AuthUser | null> {
-    return this.repository.findOne({ where: { email } });
-  }
-}
-```
-
-Unlike `core_microservice` repositories (which use NestJS `@InjectRepository()`), the Express constructor takes `DataSource` directly and passes the native TypeORM repository to the base class via `super(dataSource.getRepository(AuthUser))`.
-
-#### `BcryptService`
-
-```typescript
-// apps/auth_microservice/src/infrastructure/crypto/crypto.service.ts
-import bcrypt from 'bcrypt';
-import { ICryptoService } from '../../domain/interfaces/crypto.service.interface';
-
-export class BcryptService implements ICryptoService {
-  constructor(private readonly defaultSaltRounds: number = 10) {}
-
-  async hash(data: string, saltOrRounds?: number): Promise<string> {
-    const rounds = saltOrRounds || this.defaultSaltRounds;
-    return bcrypt.hash(data, rounds);
-  }
-
-  async compare(data: string, encrypted: string): Promise<boolean> {
-    return bcrypt.compare(data, encrypted);
-  }
-}
-```
-
-Note: `ICryptoService` is now defined in its own domain port file (`domain/interfaces/crypto.service.interface.ts`) rather than co-located with the adapter — a cleaner separation following the Ports & Adapters pattern. If another microservice needs it, promote the interface to `@repo/shared`.
-
-#### `HttpEventPublisher`
-
-The HTTP-based event publisher adapter implements `IEventPublisher` using a **fire-and-forget** HTTP pattern. This is the final, production-ready architectural choice for Auth → Core communication:
-
-```typescript
-// apps/auth_microservice/src/infrastructure/events/http-event-publisher.adapter.ts
-import { IEventPublisher } from '../../domain/interfaces/event-publisher.interface';
-import type { WinstonLogger } from '@repo/shared';
-
-export class HttpEventPublisher implements IEventPublisher {
-  constructor(
-    private readonly coreServiceUrl: string,   // e.g. "http://core_microservice:3001"
-    private readonly logger: WinstonLogger,
-  ) {}
-
-  publish(eventType: string, payload: Record<string, unknown>): void {
-    const url = `${this.coreServiceUrl}/internal/events/${eventType}`;
-
-    // Fire-and-forget: do NOT await — do not block or fail if Core is down
-    fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    })
-      .then(() => {
-        this.logger.debug(`Event "${eventType}" published to Core`, {
-          props: { url, payload },
-        });
-      })
-      .catch((error) => {
-        this.logger.warn(`Failed to publish event "${eventType}" to Core (non-blocking)`, {
-          error,
-          props: { url },
-        });
-      });
-  }
-}
-```
-
-**Architectural rationale:**
-- The `publish()` method returns `void` (not `Promise<void>`) — it intentionally does not expose a return value or error to the caller. The HTTP request is fired and immediately forgotten.
-- If `core_microservice` is temporarily down, the `.catch()` handler logs a warning and the Auth service continues normally. User registration succeeds regardless.
-- The `coreServiceUrl` (e.g., `http://core_microservice:3001`) is resolved via Docker DNS within the internal network. It is configured in `env.coreService.url`.
-- **Future message broker usage:** A message broker (RabbitMQ) will be introduced in the future exclusively for the `notifications_consumer_microservice` — it will not replace the HTTP fire-and-forget pattern for Auth → Core profile creation. The `IEventPublisher` port abstraction ensures that if the communication mechanism ever changes, `UsersService` requires zero modifications.
-
-### 4.9 Entities
-
-`auth_microservice` has a single entity living in `domain/entities/`. The `AuthSession` table was removed — refresh token management is now entirely handled by Redis, making the database simpler and session state more ephemeral:
-
-```typescript
-// apps/auth_microservice/src/domain/entities/auth-user.entity.ts
-import { Column, Entity } from 'typeorm';
-import { TypeormEntityBase } from '@repo/shared';
-
-@Entity('auth_users')
-export class AuthUser extends TypeormEntityBase {
-  @Column({ unique: true })
-  email!: string;
-
-  @Column({ nullable: true })
-  passwordHash?: string;
-
-  @Column({ nullable: true, unique: true })
-  googleId?: string;
-
-  @Column({ default: false })
-  isEmailVerified!: boolean;
-
-  @Column({ type: 'simple-array', nullable: true })
-  roles?: string[];
-}
-```
-
-`AuthUser` extends `TypeormEntityBase` (inherits `id`, `createdAt`, `updatedAt`, `deletedAt`).
-
-**Key design notes:**
-- **`passwordHash` is nullable** — Google-authenticated users don't have a password.
-- **`googleId` column** — stores the Google account identifier for OAuth users. Unique constraint ensures one Google account maps to one user.
-- **`isEmailVerified`** — set to `true` automatically for Google-authenticated users (Google has already verified the email), `false` for email/password registrations.
-- **`AuthSession` entity was removed** — sessions were previously stored in a database table, but refresh tokens are now managed exclusively in Redis (via `ICacheService`). This is simpler, faster (no DB round-trip on every refresh), and aligns with the principle that session state should be ephemeral. Redis TTL (`EX` flag) handles automatic cleanup — no cron job needed for expired sessions.
-
-### 4.10 Summary: NestJS vs. Express Mapping
-
-| Concern | NestJS (`core_microservice`) | Express (`auth_microservice`) |
+| Key | Written by | Meaning |
 |---|---|---|
-| **Entry point** | `main.ts` → `NestFactory.create(AppModule)` | `main.ts` → `createApp(dataSource, logger, redisService)` |
-| **Module wiring** | `@Module({ imports, controllers, providers })` | Manual construction in `createApp()` |
-| **DI** | NestJS IoC container (`@Injectable`, constructor injection) | Manual constructor injection via `new()` in `createApp()` |
-| **Layering** | `domain/entities/`, `domain/interfaces/`, `infrastructure/`, `dto/` | `domain/entities/`, `domain/interfaces/`, `infrastructure/`, `services/`, `routes/` |
-| **Controllers** | `@Controller('path')` + `@Get`/`@Post` decorators | `Router` factory functions with `router.post(...)` |
-| **Validation** | Global `ValidationPipe` (whitelist, transform) | Per-route `validateBody(DtoClass)` middleware |
-| **Error mapping** | `DomainExceptionFilter` (global NestJS exception filter) | `errorHandler` (global Express middleware) |
-| **Services** | `@Injectable()` classes injected by NestJS | Plain classes with explicit `new()` construction |
-| **Repository pattern** | `TypeormRepositoryBase` + `@InjectRepository()` | `TypeormRepositoryBase` via `super(dataSource.getRepository())` |
-| **Port interfaces** | Domain interfaces + NestJS DI tokens | Domain interfaces + manual binding in `createApp()` |
-| **Auth middleware** | NestJS `@UseGuards(AuthGuard)` or Passport strategies | `requireAuth(authService)` factory middleware + `req.user` augmentation |
-| **Graceful shutdown** | NestJS lifecycle hooks (`onApplicationShutdown`) | Manual `process.on('SIGINT'/'SIGTERM')` handlers |
-| **Swagger** | `@nestjs/swagger` decorators | `swagger-jsdoc` + `swagger-ui-express` with JSDoc comments |
+| `refresh_tokens:{jti}` | auth | refresh session JSON `{ userId, sid, ipAddress, userAgent, expiresAt }`, TTL = refresh lifetime |
+| `blacklist:refresh:{jti}` | auth | rotated or revoked refresh token |
+| `blacklist:access:{jti}` | auth (read by core) | revoked access token, TTL = time left |
+| `auth:session-revoked` (channel) | auth (consumed by core) | `SessionRevokedEvent` JSON |
+
+- Login and Google login create a session id `sid` (`randomUUID()`); access and refresh tokens both carry it, along with a `jti`.
+- `POST /auth/refresh` checks the refresh blacklist and the `refresh_tokens:{jti}` record, blacklists the old refresh token (rotation) and issues a new pair with the **same** `sid`.
+- `POST /auth/logout` deletes the session, blacklists the refresh token and (if given) the access token, and only then publishes `SessionRevokedEvent` (`sid` from the refresh token, else the access token). A publish failure is logged and does not fail logout. Core's reaction is in §3.10.
+
+### 4.7 The Internal Listener
+
+`createInternalApp(dataSource, logger)` serves `/internal` on its own listener, `AUTH_INTERNAL_HOST`:`AUTH_INTERNAL_PORT` (default `127.0.0.1:3012`); the public app never mounts `/internal`. It has no CORS and no Swagger.
+
+```typescript
+// apps/auth_microservice/src/app.ts
+app.use(
+  '/internal',
+  createInternalTokenMiddleware(logger), // X-Internal-Token vs INTERNAL_API_TOKEN, timing-safe → 401
+  createInternalRouter(new AuthUserRepository(dataSource)),
+);
+```
+
+`GET /internal/users/:id/contact` returns `{ userId, email }`, or 404 (a non-UUID id short-circuits without a query). The notifications service calls it through `AUTH_INTERNAL_URL` to address emails. `INTERNAL_API_TOKEN` is required (32+ characters) and must match on both sides. In containers set `AUTH_INTERNAL_HOST=0.0.0.0` and never publish port 3012.
+
+### 4.8 NestJS vs. Express Mapping
+
+| Concern | NestJS (core, notifications) | Express (auth) |
+|---|---|---|
+| Entry point | `main.ts` → `NestFactory.create(AppModule)` | `main.ts` → `createApp(...)` + `createInternalApp(...)` |
+| Wiring | `@Module({ imports, controllers, providers })` | `new` in `createApp()` |
+| Port binding | `{ provide: TOKEN, useClass/useExisting }` + `@Inject(TOKEN)` | constructor argument typed as the interface |
+| Controllers | `@Controller` + route decorators | router factories |
+| Validation | global `ValidationPipe` (`whitelist`, `transform`) | per-route `validateBody(Dto)` |
+| Auth | `@UseGuards(JwtAuthGuard)` + `@CurrentUser()` | `requireAuth(authService)` + `req.user` |
+| Error mapping | `DomainExceptionFilter` | `errorHandler` (table in §3.2 Layer 3) |
+| Config | `AppConfigService` over `@nestjs/config` | `env` from `config/env.ts` |
+| Shutdown | `enableShutdownHooks()` + lifecycle hooks | `SIGINT`/`SIGTERM` handlers in `main.ts` |
+| Swagger | `@nestjs/swagger` decorators | `swagger-jsdoc` over `@openapi` comments |
 
 ---
 
-## 5. Request Lifecycle — `core_microservice` (NestJS)
+## 5. `notifications_consumer_microservice`
 
-Let's trace a `PATCH /profiles/:id` request end-to-end, demonstrating the full security stack (JWT validation, ownership verification) and the domain-driven update flow.
-
-### Step 0: Precondition
-
-A profile already exists in `core_db` with `authUserId = "user-abc-123"`. The client has a valid JWT with payload `{ sub: "user-abc-123", email: "john@example.com" }`.
-
-### Step 1: HTTP Entry Point
+A NestJS service with its own database (`innogram_notifications`) and port (`NOTIFICATIONS_PORT`, 3003). It owns notifications and email preferences, consumes core's events and sends email over SMTP (Mailpit locally).
 
 ```
-PATCH /profiles/550e8400-e29b-41d4-a716-446655440000
-Authorization: Bearer <valid-jwt>
-Body: { "bio": "Software developer from Berlin." }
+apps/notifications_consumer_microservice/src/
+├── config/              # global AppConfigModule / AppConfigService (port, postgres, rabbitmq, redis, jwtSecret, internalApiToken, authInternalUrl, clientUrl, smtp)
+├── common/
+│   ├── auth/            # JwtAuthGuard, CurrentUser, access-token verifier (same AccessTokenVerifier)
+│   ├── messaging/       # MessagingModule (EVENT_BUS, CONSUMER_REGISTRY), amqp-topology.ts, retry policy, consumer host
+│   └── redis/
+└── modules/
+    ├── notifications/   # domain/ (entities, ports, errors), application/ (handlers, email worker, purge scheduler), infrastructure/ (repositories, mail, auth directory)
+    └── preferences/     # domain/, infrastructure/, controller + service
 ```
 
-### Step 2: JwtAuthGuard Validates the Token
+Modules split into `domain/` (entities, ports with `Symbol` tokens, errors), `application/` (message handlers and workers) and `infrastructure/` (TypeORM repositories, `NodemailerAdapter` behind `MAILER`, `AuthDirectoryAdapter` behind `RECIPIENT_DIRECTORY`). The REST surface is `GET /notifications`, `GET /notifications/unseen-count`, `POST /notifications/seen`, `GET|PUT /notifications/preferences`, all scoped to `user.sub`, with Swagger at `/api`. `main.ts` registers the same `ValidationPipe` and `DomainExceptionFilter` as core, and CORS from `AppConfigService.clientUrl`.
 
-Before the controller method executes, NestJS invokes the `JwtAuthGuard` (registered via `@UseGuards(JwtAuthGuard)`):
+**Queues** (`apps/notifications_consumer_microservice/src/common/messaging/amqp-topology.ts`):
 
-1. Extracts the Bearer token from the `Authorization` header.
-2. Verifies the JWT using `jwt.verify(token, JWT_ACCESS_SECRET)` — **no database call required**.
-3. On success: attaches `{ sub: "user-abc-123", email: "john@example.com" }` to `request.user`.
-4. On failure: throws `UnauthorizedError` → HTTP 401.
+| Queue | Bindings | Retry | Dead letter |
+|---|---|---|---|
+| `notifications.events` | `social.#`, `chat.message.alerted` | `.retry` (10 s), 5 attempts | `.dlq` |
+| `notifications.email` | email jobs | `.retry` (30 s), 3 attempts | none (dropped) |
 
-### Step 3: Global Validation Pipe
+A failed message is re-published to its retry queue with an incremented `x-attempts` and then acked. Invalid payloads, unknown types and `PoisonMessageError` skip retries.
 
-`main.ts` registers a global `ValidationPipe`:
-
-```typescript
-// apps/core_microservice/src/main.ts
-app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-```
-
-The pipe intercepts the `@Body()` parameter. It:
-1. **Transforms** plain JSON into an instance of `UpdateProfileDto`.
-2. **Validates** against `@IsString()`, `@MaxLength(160)` decorators.
-3. **Strips** unknown properties (`whitelist: true`).
-4. If validation fails, throws `BadRequestException` (HTTP 400).
-
-### Step 4: @CurrentUser Extracts Authenticated Context
-
-```typescript
-@Patch(':id')
-@UseGuards(JwtAuthGuard)
-async updateProfile(
-  @Param('id', ParseUUIDPipe) id: string,        // "550e8400-..."
-  @Body() updateProfileDto: UpdateProfileDto,    // { bio: "Software developer..." }
-  @CurrentUser() user: JwtPayload,               // { sub: "user-abc-123", email: "..." }
-): Promise<ProfileResponseDto>
-```
-
-The `@CurrentUser()` decorator extracts `request.user` from the request context, providing type-safe access to the authenticated user's JWT payload.
-
-### Step 5: Service Enforces IDOR Protection
-
-```typescript
-// ProfilesService.updateOwnProfile()
-const profile = await this.getProfile(profileId);
-
-// IDOR protection: ensure the JWT subject owns this profile
-if (profile.authUserId !== authUserId) {
-  throw new UnauthorizedError('You can only update your own profile');
-}
-```
-
-If User A tries to PATCH User B's profile, `profile.authUserId !== "user-abc-456"` evaluates to `true`, and an `UnauthorizedError` (→ HTTP 401) is thrown. This prevents Insecure Direct Object Reference (IDOR) attacks.
-
-### Step 6: Entity Domain Method Applies Business Rules
-
-```typescript
-profile.editBio(updateProfileDto.bio ?? null);
-```
-
-The `editBio()` method enforces the domain rule (max 160 characters). If violated, it throws `InvalidProfileBioError` (→ HTTP 400 via `DomainExceptionFilter`).
-
-### Step 7: Repository Persists
-
-```typescript
-return this.userProfileRepository.save(profile);
-```
-
-Inherited from `TypeormRepositoryBase`: saves the entity, catches unique violations, logs the operation.
-
-### Step 8: Controller Maps Entity to Response DTO
-
-```typescript
-return new ProfileResponseDto(profile);
-```
-
-Converts Dates → ISO strings, normalizes `undefined` → `null`, omits internal fields (`deletedAt`).
-
-### What Happens on Error
-
-| Error class | HTTP status | Trigger |
-|---|---|---|
-| `UnauthorizedError` (missing/invalid JWT) | 401 | No token, expired token, wrong secret |
-| `UnauthorizedError` (IDOR) | 401 | User A tries to modify User B's profile |
-| `EntityByIdNotFoundError` | 404 | Profile UUID doesn't exist |
-| `InvalidProfileBioError` | 400 | Bio exceeds 160 characters |
-| `UniqueConstraintViolationError` | 409 | (not applicable to PATCH, but caught for other endpoints) |
-
-### Visual Summary
-
-```
-HTTP Request (PATCH /profiles/:id + Bearer token)
-    │
-    ▼
-┌─────────────────────────────────────────────────────────┐
-│  JwtAuthGuard (@UseGuards)                              │
-│  Extract Bearer token → jwt.verify() → attach to req    │
-│  On failure: HTTP 401 (UnauthorizedError)               │
-└─────────────────────────────────────────────────────────┘
-    │ (valid JWT, req.user populated)
-    ▼
-┌─────────────────────────────────────────────────────────┐
-│  ValidationPipe (global)                                │
-│  JSON body → UpdateProfileDto → validate                │
-│  On failure: HTTP 400 (BadRequestException)             │
-└─────────────────────────────────────────────────────────┘
-    │ (valid)
-    ▼
-┌─────────────────────────────────────────────────────────┐
-│  @CurrentUser() decorator                               │
-│  Extracts JwtPayload from request context               │
-└─────────────────────────────────────────────────────────┘
-    │
-    ▼
-┌─────────────────────────────────────────────────────────┐
-│  ProfilesController.updateProfile()                     │
-│  Thin: extract params, call service, map to ResponseDto │
-└─────────────────────────────────────────────────────────┘
-    │
-    ▼
-┌─────────────────────────────────────────────────────────┐
-│  ProfilesService.updateOwnProfile()                     │
-│  1. getProfile(id) → fetch entity or 404                │
-│  2. IDOR check: authUserId === user.sub?                │
-│  3. profile.editBio(bio) ← domain rules                 │
-│  4. repository.save(profile) ← persistence              │
-└─────────────────────────────────────────────────────────┘
-    │
-    ▼
-┌─────────────────────────────────────────────────────────┐
-│  ProfileResponseDto constructor                         │
-│  Entity → wire format: ISO dates, null normalization    │
-└─────────────────────────────────────────────────────────┘
-    │
-    ▼
-  JSON Response
-    │
-    ▼
-  (if any DomainError was thrown along the way)
-    │
-    ▼
-┌─────────────────────────────────────────────────────────┐
-│  DomainExceptionFilter (global)                         │
-│  DomainError → HTTP status code + JSON error body       │
-└─────────────────────────────────────────────────────────┘
-```
-
-**Note:** The `POST /profiles` endpoint has been **removed**. Profiles are now created exclusively via the inter-service event flow: `auth_microservice` emits `UserCreatedEvent` → `core_microservice` `InternalEventsModule` calls `ProfilesService.createProfile()`. See [Section 6](#6-inter-service-communication-auth--core) for details. The request lifecycle for user registration is documented there as the "End-to-End Flow."
+**Handlers.** `SocialEventHandler` stores a notification (idempotent on the envelope's `eventId` through processed-event records and unique keys), publishes `notification.created` after commit and enqueues an email job when the recipient's preferences allow it. `MessageAlertHandler` stores no notification and only enqueues an email linking to `/messages/{chatId}`. `EmailWorker` sends through `MAILER`, with `email_deliveries` as the source of truth for attempts; recipient addresses come from auth's internal endpoint, cached in `recipient_contacts`. `POST /notifications/seen` publishes `notification.seen`. Both `notification.*` events reach browsers through core's relay (§3.11).
 
 ---
 
-## 6. Inter-Service Communication (Auth → Core)
+## 6. Request Lifecycle — `core_microservice`
 
-This section describes how `auth_microservice` notifies `core_microservice` of domain events — specifically, that a new user has been created and needs a profile.
+Tracing `PATCH /chats/:chatId/messages/:messageId` (edit own message):
 
-### 6.1 Architectural Pattern: Event-Driven HTTP (Internal Webhooks)
-
-The project uses an **event-driven HTTP pattern** (internal webhooks) for Auth → Core communication. This is the final, production-ready strategy — not a temporary placeholder. The pattern guarantees asynchronous behavior: Auth does not block or fail if Core is down, minimizing latency during user registration and adhering to loose coupling principles. The entire mechanism is hidden behind a port interface:
-
-```
-┌──────────────────────────┐         HTTP POST (non-blocking)       ┌──────────────────────────┐
-│   auth_microservice      │ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ▶  │   core_microservice      │
-│                          │    /internal/events/user.created       │                          │
-│  UsersService            │                                        │  InternalEventsController│
-│    ↓                     │                                        │    ↓                     │
-│  IEventPublisher (port)  │                                        │  ProfilesService         │
-│    ↓                     │                                        │    ↓                     │
-│  HttpEventPublisher      │                                        │  UserProfileRepository   │
-│  (adapter)               │                                        │                          │
-└──────────────────────────┘                                        └──────────────────────────┘
-```
-
-### 6.2 Auth Side: Port & Adapter
-
-The `UsersService` depends on the `IEventPublisher` port (see [Section 4.7](#47-domain-ports-domaininterfaces)), not on a concrete HTTP or message broker implementation:
-
-```typescript
-// domain/interfaces/event-publisher.interface.ts
-export interface IEventPublisher {
-  publish(eventType: string, payload: Record<string, unknown>): void;
-}
-```
-
-The `HttpEventPublisher` adapter (see [Section 4.8](#48-infrastructure-adapters-infrastructure)) implements this port using Node.js `fetch()` in fire-and-forget mode. The `publish()` method is synchronous from the caller's perspective — it `return`s `void` immediately, and the HTTP request completes in the background:
-
-```typescript
-// UsersService.registerUser() — excerpt
-const savedUser = await this.userRepository.save(user);
-
-// Fire-and-forget: does NOT block registration, does NOT throw
-this.eventPublisher.publish('user.created', {
-  userId: savedUser.id,
-  email: savedUser.email,
-} as UserCreatedEvent);
-```
-
-**Guarantees and tradeoffs:**
-
-| Aspect | Behavior |
-|---|---|
-| Registration succeeds if Core is down? | **Yes** — the event is best-effort. Registration returns 201 regardless. |
-| Event delivery guarantee | **At-most-once** — if the HTTP request fails, the event is lost (logged as a warning). |
-| Profile creation guarantee | **Not guaranteed** at registration time — see "Lazy Initialization" fallback below. |
-| Future broker integration | RabbitMQ will be introduced exclusively for `notifications_consumer_microservice`. The Auth → Core HTTP event-driven pattern remains the final architecture. |
-
-#### 6.2.1 Delivery Trade-Off & Lazy Initialization Fallback
-
-The HTTP fire-and-forget pattern provides **at-most-once** delivery: if `core_microservice` is unreachable exactly when the `UserCreatedEvent` is sent, the event is lost and the profile is never pre-created.
-
-To mitigate this, `core_microservice` implements a **Lazy Initialization** fallback strategy in `ProfilesService`:
-
-- When `core_microservice` receives an authenticated request (valid JWT via `JwtAuthGuard`) for a profile that does not exist in its database, `ProfilesService` **creates the profile on-the-fly** before returning the response.
-- This means the first time a user interacts with `core_microservice` (e.g., viewing their profile page, posting content), their profile is created lazily if it doesn't already exist.
-- Profile data (handle, display name) is derived from the JWT payload (e.g., `email.split('@')[0]` as the initial handle).
-
-This ensures that profile existence is **eventually consistent** — even if the initial `UserCreatedEvent` was lost, the user will still be able to use the application without experiencing a "profile not found" error. The `HttpEventPublisher` fast path optimizes for the common case (profile created before the user's first request); lazy initialization guarantees correctness for the edge case (event delivery failure).
-
-### 6.3 Core Side: InternalEventsModule
-
-In `core_microservice`, a dedicated `InternalEventsModule` (see [Section 3.3](#33-internaleventsmodule--event-driven-profile-creation)) exposes an internal-only HTTP endpoint to receive events:
+1. **HTTP entry.** Helmet, cookie-parser and CORS run, then Nest routes to `MessagesController.edit`.
+2. **Guard.** The class-level `@UseGuards(JwtAuthGuard)` verifies the Bearer token through `AccessTokenVerifier`: missing/invalid/revoked → 401, Redis down → 503. On success `request.user = { sub, email, jti, sid?, exp }`.
+3. **Pipes.** `ParseUUIDPipe` rejects malformed ids (400). The global `ValidationPipe` turns the body into `EditMessageDto`, strips undecorated fields and rejects invalid ones (400).
+4. **`@CurrentUser('sub')`** hands the caller's auth user id to the controller, which calls `messagesService.edit(userId, chatId, messageId, dto)`.
+5. **Service.** Opens `runInTransaction`; inside it locks the chat (`findByIdForUpdate`), checks membership through `chat.assertCanPost(me)` (non-member → `ChatNotFoundError` → 404), loads the message visible to the caller (`MessageNotFoundError` → 404), and allocates a `changeSeq`.
+6. **Entity.** `message.edit(me, content, changeSeq)` enforces the rules: system messages are immutable (400), only the author may edit (`NotMessageAuthorError` → 403), deleted messages can't be edited (400), length and emptiness limits (400).
+7. **Repository.** `messages.update(found, tx)` issues a narrow `UPDATE`; the transaction commits.
+8. **Response and emit.** The service maps the entity with the chats mapper (presigning attachment URLs), emits `message:updated` to `chat:{chatId}` through `CHAT_REALTIME_PORT` (post-commit, failures logged), and returns the DTO; the controller sends 200.
+9. **On error.** A `DomainError` anywhere in steps 5–7 rolls the transaction back and `DomainExceptionFilter` answers with the table in §3.2 Layer 3; nothing is emitted.
 
 ```
-POST /internal/events/user.created
-Body: { "userId": "uuid-123", "email": "user@example.com" }
+Client ─▶ helmet/CORS ─▶ JwtAuthGuard ─▶ ParseUUIDPipe/ValidationPipe ─▶ Controller
+      ─▶ Service (tx: lock, load, allocate) ─▶ Entity rule ─▶ Repository (UPDATE) ─▶ commit
+      ─▶ response DTO ─▶ emit message:updated ─▶ 200
+   (DomainError ─▶ rollback ─▶ DomainExceptionFilter ─▶ 4xx/5xx JSON)
 ```
-
-This endpoint is:
-- **Not publicly exposed** — it is reachable only within the Docker internal network via the container name `core_microservice`.
-- **Routed by event type** — each event type maps to a dedicated handler. `user.created` → `ProfilesService.createProfile()`.
-- **Decoupled from domain modules** — `ProfilesService` has no knowledge of HTTP events, event types, or that profile creation is triggered by an external service. It simply exposes `createProfile(authUserId, handle)`.
-
-### 6.4 End-to-End Flow: User Registration
-
-```
-1. Client: POST /users/register { email, password }
-        ↓
-2. auth_microservice: UsersService.registerUser()
-   → Persists AuthUser to auth_db
-   → Returns 201 with user data (no profile yet)
-        ↓ (fire-and-forget)
-3. auth_microservice: HttpEventPublisher.publish('user.created', { userId, email })
-   → HTTP POST to http://core_microservice:3001/internal/events/user.created
-   → If Core is down: warn log, registration already succeeded
-        ↓
-4. core_microservice: InternalEventsController.handleUserCreated()
-   → Delegates to ProfilesService.createProfile(authUserId, handle)
-   → Persists UserProfile to core_db
-        ↓
-5. Profile exists in core_db, ready for client to query via GET /profiles/:id
-```
-
-The same flow applies to Google OAuth registration — `UsersService.findOrCreateByGoogle()` emits `UserCreatedEvent` only on first-time user creation, not on subsequent logins.
 
 ---
 
-## 7. Developer Cookbook: Adding a New Feature Module
+## 7. Auth → Core: User Creation
 
-> **This section applies to `core_microservice` (NestJS Hexagonal Architecture).** For adding features to `auth_microservice`, follow the Express patterns in [Section 4](#4-express--manual-di-architecture--auth_microservice).
+Registration in auth is followed by a fire-and-forget HTTP call to core; there is no broker on this path.
 
-This section is a step-by-step checklist for adding a completely new domain module — for example, a **"Bookmarks"** feature where users can bookmark posts.
+**Auth side.** `UsersService` builds a `UserCreatedEvent(authUserId, email, handle, timestamp)` (handle = email local part) and calls `IEventPublisher.publishUserCreatedEvent`. The adapter does not await:
 
-### Checklist
+```typescript
+// apps/auth_microservice/src/infrastructure/events/http-event-publisher.ts (excerpt)
+const url = `${coreUrl}/internal/events/user-created`; // coreUrl = CORE_SERVICE_URL
+fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
+  .then((res) => { if (!res.ok) this.logger.warn(`Failed to publish event to Core. Status: ${res.status}`); })
+  .catch((err) => this.logger.error('Network error while publishing event to Core', { error: err }));
+```
 
-#### Step 1: Plan the Module Folder Structure
+**Core side.** `InternalEventsModule` imports `ProfilesModule`; its controller is a routing layer with no business logic:
 
-Create the folder tree inside `apps/core_microservice/src/modules/bookmarks/`:
+```typescript
+// apps/core_microservice/src/modules/internal-events/internal-events.controller.ts
+@ApiExcludeController()
+@Controller('internal/events')
+export class InternalEventsController {
+  constructor(private readonly profilesService: ProfilesService) {}
+
+  @Post('user-created')
+  @HttpCode(HttpStatus.OK)
+  async handleUserCreated(@Body() event: UserCreatedEvent): Promise<void> {
+    await this.profilesService.createProfile(event.authUserId, event.handle);
+  }
+}
+```
+
+`UserCreatedEvent` (`packages/shared/src/events/user-created.event.ts`) carries `class-validator` decorators; without them the global `ValidationPipe` would strip every field. `createProfile` is idempotent (an existing profile for the `authUserId` is returned) and retries a username collision with a random suffix. The route is excluded from Swagger and must stay internal (Docker network only, never exposed publicly).
+
+**Lazy-init fallback.** Failures are logged, never retried, so a profile can be missing. `GET /profiles/me` calls `ProfilesService.getOrCreateProfileByAuthUserId(sub, email)` (`apps/core_microservice/src/modules/profiles/profiles.service.ts`), which creates the profile on first read when it doesn't exist. The client loads its own profile through that route (`getMyProfile` in `apps/client_app/src/lib/api/profile.ts`), which closes the gap.
+
+---
+
+## 8. Developer Cookbook: Adding a Feature Module (Bookmarks)
+
+Example: users bookmark posts. `POST /bookmarks` (create), `GET /bookmarks` (mine), `DELETE /bookmarks/:id` (only the owner). Everything lives in `modules/bookmarks/`.
+
+### Step 1: Folder structure
 
 ```
-bookmarks/
+modules/bookmarks/
 ├── bookmarks.module.ts
 ├── bookmarks.controller.ts
 ├── bookmarks.service.ts
+├── bookmarks.service.spec.ts
 ├── domain/
-│   ├── entities/
-│   │   ├── bookmark.entity.ts
-│   │   └── bookmark.entity.spec.ts
-│   ├── interfaces/
-│   │   ├── bookmark.props.ts
-│   │   └── bookmark-repository.port.ts
-│   └── errors/
-│       └── bookmark.errors.ts
-├── dto/
-│   ├── create-bookmark.dto.ts
-│   └── bookmark-response.dto.ts
-├── infrastructure/
-│   └── repository/
-│       └── bookmark.repository.ts
-└── __tests__/
-    └── fakers/
-        ├── index.ts
-        └── bookmark.faker.ts
+│   ├── entities/{bookmark.entity.ts, bookmark.entity.spec.ts}
+│   ├── interfaces/{bookmark.props.ts, bookmark-repository.port.ts}
+│   └── errors/bookmark.errors.ts
+├── dto/{create-bookmark.dto.ts, bookmark-response.dto.ts}
+├── infrastructure/repository/bookmark.repository.ts
+└── __tests__/fakers/{index.ts, bookmark.faker.ts}
 ```
 
-#### Step 2: Define the Domain Props Interface
+### Step 2: Contracts
+
+Add `ICreateBookmarkRequest { postId: string }` and `IBookmarkResponse { id, postId, createdAt }` under a new `bookmarks/` area in `packages/contracts/src/`, re-export from its `index.ts` and from `packages/contracts/src/index.ts`, then `npm run build -w @repo/contracts`.
+
+### Step 3: Props and entity
 
 ```typescript
-// bookmarks/domain/interfaces/bookmark.props.ts
+// domain/interfaces/bookmark.props.ts
 export interface BookmarkProps {
-  userId: string;
+  userId: string; // auth user id (JWT sub)
   postId: string;
 }
 ```
 
-#### Step 3: Create the Domain Entity
-
 ```typescript
-// bookmarks/domain/entities/bookmark.entity.ts
-import { Entity, Column, Index, ManyToOne, JoinColumn, Unique } from 'typeorm';
-import { TypeormEntityBase } from '@repo/shared';
-import type { Post } from '../../../posts/domain/entities/post.entity';
-import type { UserProfile } from '../../../profiles/domain/entities/user-profile.entity';
-
+// domain/entities/bookmark.entity.ts
 @Entity('bookmarks')
-@Unique(['userId', 'postId'])   // One bookmark per user per post
-export class Bookmark extends TypeormEntityBase {
-  @Index()
+@Unique('UQ_bookmarks_userId_postId', ['userId', 'postId'])
+export class Bookmark extends TypeormEntityBase implements BookmarkProps {
+  @Index('IDX_bookmarks_userId')
   @Column({ type: 'uuid' })
   userId!: string;
 
   @ManyToOne('UserProfile')
-  @JoinColumn({ name: 'userId' })
-  user!: UserProfile;
+  @JoinColumn({ name: 'userId', referencedColumnName: 'authUserId', foreignKeyConstraintName: 'FK_bookmarks_userId_authUserId' })
+  user!: UserProfile; // import type
 
-  @Index()
   @Column({ type: 'uuid' })
   postId!: string;
 
-  @ManyToOne('Post')
-  @JoinColumn({ name: 'postId' })
-  post!: Post;
+  @ManyToOne('Post', { onDelete: 'CASCADE' })
+  @JoinColumn({ name: 'postId', foreignKeyConstraintName: 'FK_bookmarks_postId' })
+  post!: Post; // import type
 
-  static create(props: { userId: string; postId: string }): Bookmark {
+  static create(props: BookmarkProps): Bookmark {
     const bookmark = new Bookmark();
     bookmark.userId = props.userId;
     bookmark.postId = props.postId;
     return bookmark;
   }
-}
-```
 
-**Rules to follow:**
-- Always extend `TypeormEntityBase` for entities that need `id`, `createdAt`, `updatedAt`, `deletedAt`.
-- Use `type`-only imports for cross-module references to keep modules decoupled at runtime.
-- Provide a `static create()` factory that enforces construction invariants.
-
-#### Step 4: Define Domain Errors (if the entity has business rules)
-
-```typescript
-// bookmarks/domain/errors/bookmark.errors.ts
-import { DomainError } from '@repo/shared';
-
-export class DuplicateBookmarkError extends DomainError {
-  constructor(userId: string, postId: string) {
-    super(`User ${userId} has already bookmarked post ${postId}.`);
+  /** Ownership is a domain rule: only the owner may remove a bookmark. */
+  assertOwnedBy(userId: string): void {
+    if (this.userId !== userId) throw new NotBookmarkOwnerError();
   }
 }
 ```
 
-#### Step 5: Define the Repository Port
+### Step 4: Domain errors
 
 ```typescript
-// bookmarks/domain/interfaces/bookmark-repository.port.ts
+// domain/errors/bookmark.errors.ts
+import { AccessDeniedError, DomainError } from '@repo/shared';
+
+export class NotBookmarkOwnerError extends AccessDeniedError {      // → 403
+  constructor() { super('You can only remove your own bookmarks.'); }
+}
+export class PostNotBookmarkableError extends DomainError {         // → 400
+  constructor(postId: string) { super(`Post ${postId} cannot be bookmarked.`); }
+}
+```
+
+A missing bookmark comes from the base `findOneByIdOrThrow` (`EntityByIdNotFoundError` → 404); a duplicate from the unique constraint (`UniqueConstraintViolationError` → 409). Statuses follow the table in §3.2 Layer 3; no `HttpException` anywhere below the controller.
+
+### Step 5: Port and token
+
+```typescript
+// domain/interfaces/bookmark-repository.port.ts
 import type { RepositoryPort } from '@repo/shared';
-import type { Bookmark } from '../../domain/entities/bookmark.entity';
+import type { Bookmark } from '../entities/bookmark.entity';
 import type { BookmarkProps } from './bookmark.props';
 
 export interface IBookmarkRepository extends RepositoryPort<Bookmark, BookmarkProps> {
-  findByUserId(userId: string): Promise<Bookmark[]>;
-  findByUserAndPost(userId: string, postId: string): Promise<Bookmark | null>;
+  findByUser(userId: string): Promise<Bookmark[]>;
 }
+
+export const BOOKMARK_REPOSITORY = Symbol.for('IBookmarkRepository');
 ```
 
-#### Step 6: Create the Request/Response DTO
+### Step 6: DTOs
 
 ```typescript
-// bookmarks/dto/create-bookmark.dto.ts
-import { ApiProperty } from '@nestjs/swagger';
-import { IsUUID } from 'class-validator';
-
-export class CreateBookmarkDto {
-  @ApiProperty()
+// dto/create-bookmark.dto.ts
+export class CreateBookmarkDto implements ICreateBookmarkRequest {
+  @ApiProperty({ format: 'uuid' })
   @IsUUID()
   postId!: string;
 }
-```
 
-```typescript
-// bookmarks/dto/bookmark-response.dto.ts
-import { ApiProperty } from '@nestjs/swagger';
-import { Bookmark } from '../domain/entities/bookmark.entity';
-
-export class BookmarkResponseDto {
+// dto/bookmark-response.dto.ts
+export class BookmarkResponseDto implements IBookmarkResponse {
   @ApiProperty() id: string;
-  @ApiProperty() userId: string;
   @ApiProperty() postId: string;
   @ApiProperty() createdAt: string;
 
   constructor(bookmark: Bookmark) {
     this.id = bookmark.id;
-    this.userId = bookmark.userId;
     this.postId = bookmark.postId;
     this.createdAt = bookmark.createdAt.toISOString();
   }
 }
 ```
 
-#### Step 7: Implement the Infrastructure Repository
+### Step 7: Repository adapter
 
 ```typescript
-// bookmarks/infrastructure/repository/bookmark.repository.ts
-import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import type { Repository } from 'typeorm';
-import { TypeormRepositoryBase } from '@repo/shared';
-import { Bookmark } from '../../domain/entities/bookmark.entity';
-import type { BookmarkProps } from '../../domain/interfaces/bookmark.props';
-import type { IBookmarkRepository } from '../../domain/interfaces/bookmark-repository.port';
-
+// infrastructure/repository/bookmark.repository.ts
 @Injectable()
 export class BookmarkRepository
   extends TypeormRepositoryBase<Bookmark, BookmarkProps>
   implements IBookmarkRepository
 {
   public static readonly entity = Bookmark;
-  protected relations: string[] = ['post'];
+  protected relations: string[] = [];
 
   constructor(@InjectRepository(Bookmark) repository: Repository<Bookmark>) {
     super(repository);
   }
 
-  async findByUserId(userId: string): Promise<Bookmark[]> {
-    return this.repository.find({ where: { userId }, relations: { post: true } });
-  }
-
-  async findByUserAndPost(userId: string, postId: string): Promise<Bookmark | null> {
-    return this.repository.findOne({ where: { userId, postId } });
+  findByUser(userId: string): Promise<Bookmark[]> {
+    return this.repository.find({ where: { userId }, order: { createdAt: 'DESC' } });
   }
 }
 ```
 
-#### Step 8: Create the Service
+### Step 8: Service (ports by token, ownership before mutation)
 
 ```typescript
-// bookmarks/bookmarks.service.ts
-import { Injectable } from '@nestjs/common';
-import { Bookmark } from './domain/entities/bookmark.entity';
-import { BookmarkRepository } from './infrastructure/repository/bookmark.repository';
-
+// bookmarks.service.ts
 @Injectable()
 export class BookmarksService {
-  constructor(private readonly bookmarkRepository: BookmarkRepository) {}
+  constructor(
+    @Inject(LoggerKey) private readonly logger: Logger,
+    @Inject(BOOKMARK_REPOSITORY) private readonly bookmarks: IBookmarkRepository,
+    @Inject(POST_REPOSITORY) private readonly posts: IPostRepository,
+  ) {}
 
-  async createBookmark(userId: string, postId: string): Promise<Bookmark> {
-    const existing = await this.bookmarkRepository.findByUserAndPost(userId, postId);
-    if (existing) {
-      return existing; // Idempotent — or throw DuplicateBookmarkError
-    }
-    const bookmark = Bookmark.create({ userId, postId });
-    return this.bookmarkRepository.save(bookmark);
+  async create(userId: string, dto: CreateBookmarkDto): Promise<Bookmark> {
+    const post = await this.posts.findById(dto.postId);
+    if (!post) throw new EntityByIdNotFoundError('Post', dto.postId);
+    // A visibility rule would be a Post method (cf. Post.assertLikeableBy).
+    const saved = await this.bookmarks.save(Bookmark.create({ userId, postId: post.id }));
+    this.logger.debug('Bookmark created', { props: { bookmarkId: saved.id } });
+    return saved;
   }
 
-  async getUserBookmarks(userId: string): Promise<Bookmark[]> {
-    return this.bookmarkRepository.findByUserId(userId);
+  listMine(userId: string): Promise<Bookmark[]> {
+    return this.bookmarks.findByUser(userId);
   }
 
-  async removeBookmark(id: string): Promise<void> {
-    const bookmark = await this.bookmarkRepository.findOneByIdOrThrow(id);
-    await this.bookmarkRepository.delete(bookmark);
+  async remove(userId: string, id: string): Promise<void> {
+    const bookmark = await this.bookmarks.findOneByIdOrThrow(id); // 404
+    bookmark.assertOwnedBy(userId);                               // 403 for anyone else
+    await this.bookmarks.delete(bookmark);
+    this.logger.debug('Bookmark removed', { props: { bookmarkId: id } });
   }
 }
 ```
 
-#### Step 9: Create the Controller
+If creating a bookmark should notify someone, write the outbox row in the same transaction: add `runInTransaction` and `save(e, tx?)` to the port (§3.5) and call `this.outbox.add(routingKey, payload, tx)` with `OUTBOX_PORT`.
+
+### Step 9: Controller (guarded, `user.sub` only)
 
 ```typescript
-// bookmarks/bookmarks.controller.ts
-import { Controller, Get, Post, Delete, Param, ParseUUIDPipe, Body } from '@nestjs/common';
-import { BookmarksService } from './bookmarks.service';
-import { CreateBookmarkDto } from './dto/create-bookmark.dto';
-import { BookmarkResponseDto } from './dto/bookmark-response.dto';
-
+// bookmarks.controller.ts
+@ApiTags('Bookmarks')
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 @Controller('bookmarks')
 export class BookmarksController {
   constructor(private readonly bookmarksService: BookmarksService) {}
 
   @Post()
-  async create(
-    @Body() dto: CreateBookmarkDto,
-    // TODO: extract userId from JWT when auth is wired up
-  ): Promise<BookmarkResponseDto> {
-    const bookmark = await this.bookmarksService.createBookmark('temp-user-id', dto.postId);
-    return new BookmarkResponseDto(bookmark);
+  @ApiOperation({ summary: 'Bookmark a post' })
+  async create(@CurrentUser('sub') userId: string, @Body() dto: CreateBookmarkDto): Promise<BookmarkResponseDto> {
+    return new BookmarkResponseDto(await this.bookmarksService.create(userId, dto));
   }
 
-  @Get('user/:userId')
-  async getUserBookmarks(
-    @Param('userId', ParseUUIDPipe) userId: string,
-  ): Promise<BookmarkResponseDto[]> {
-    const bookmarks = await this.bookmarksService.getUserBookmarks(userId);
-    return bookmarks.map(b => new BookmarkResponseDto(b));
+  @Get()
+  @ApiOperation({ summary: 'List my bookmarks' })
+  async listMine(@CurrentUser('sub') userId: string): Promise<BookmarkResponseDto[]> {
+    return (await this.bookmarksService.listMine(userId)).map((b) => new BookmarkResponseDto(b));
   }
 
   @Delete(':id')
-  async remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
-    return this.bookmarksService.removeBookmark(id);
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Remove one of my bookmarks' })
+  remove(@CurrentUser('sub') userId: string, @Param('id', ParseUUIDPipe) id: string): Promise<void> {
+    return this.bookmarksService.remove(userId, id);
   }
 }
 ```
 
-#### Step 10: Create the Module
+The user id always comes from the verified token, never from the body or a route parameter.
+
+### Step 10: Module and registration
 
 ```typescript
-// bookmarks/bookmarks.module.ts
-import { Module } from '@nestjs/common';
-import { TypeOrmModule } from '@nestjs/typeorm';
-import { Bookmark } from './domain/entities/bookmark.entity';
-import { BookmarksService } from './bookmarks.service';
-import { BookmarksController } from './bookmarks.controller';
-import { BookmarkRepository } from './infrastructure/repository/bookmark.repository';
-
+// bookmarks.module.ts
 @Module({
-  imports: [TypeOrmModule.forFeature([Bookmark])],
+  imports: [
+    TypeOrmModule.forFeature([Bookmark]),
+    LoggerModule.forFeature('BookmarksService'),
+    PostsModule, // exports POST_REPOSITORY
+  ],
   controllers: [BookmarksController],
-  providers: [BookmarksService, BookmarkRepository],
+  providers: [
+    BookmarksService,
+    { provide: BOOKMARK_REPOSITORY, useClass: BookmarkRepository },
+  ],
 })
 export class BookmarksModule {}
 ```
 
-#### Step 11: Register the Module in AppModule
+Add `BookmarksModule` to the imports in `apps/core_microservice/src/app.module.ts` and, optionally, `.addTag('Bookmarks')` to the Swagger `DocumentBuilder` in `main.ts`.
 
-```typescript
-// app.module.ts — add the import
-import { BookmarksModule } from './modules/bookmarks/bookmarks.module';
+### Step 11: Migration
 
-@Module({
-  imports: [
-    // ... existing imports ...
-    BookmarksModule,   // ← add this
-  ],
-})
-export class AppModule {}
-```
-
-#### Step 12: Create the Migration
-
-Generate a TypeORM migration for the new `bookmarks` table:
+`synchronize` is off; every schema change is a migration in `apps/core_microservice/src/migrations/`. The CLI uses `apps/core_microservice/data-source.ts` at the app root, which loads the root `.env` and globs `src/**/*.entity{.ts,.js}` (so the file must be named `*.entity.ts`):
 
 ```bash
 cd apps/core_microservice
-npx typeorm migration:create src/migrations/AddBookmarks -d src/data-source.ts
+npm run migration:generate -- src/migrations/AddBookmarks
+npm run migration:run      # migration:revert to undo
 ```
 
-Write the SQL for the `bookmarks` table with columns `id`, `userId`, `postId`, the `@Unique` constraint, and the standard audit columns.
+Check that the generated SQL contains only your table, and that the constraint names match the entity (`UQ_bookmarks_userId_postId`, `IDX_bookmarks_userId`, `FK_bookmarks_*`). A hand-written migration uses an epoch-ms prefix larger than the latest existing one and a full inverse `down()`.
 
-#### Step 13: Write Tests
+### Step 12: Tests
 
-1. **Domain unit test** (`bookmark.entity.spec.ts`) — test the `create()` factory.
-2. **Service spec** (`bookmarks.service.spec.ts`) — mock the repository and test orchestration.
-3. **Controller spec** (`bookmarks.controller.spec.ts`) — mock the service and test HTTP mapping.
-4. **Faker** (`__tests__/fakers/bookmark.faker.ts`) — a factory function returning a fully-populated `Bookmark` with sensible defaults.
+- Entity spec without Nest: `expect(() => fakeBookmark({ userId: 'a' }).assertOwnedBy('b')).toThrow(NotBookmarkOwnerError)`.
+- Service spec: `Test.createTestingModule` with `{ provide: BOOKMARK_REPOSITORY, useValue: fake }`, `{ provide: POST_REPOSITORY, useValue: fake }` and a `LoggerKey` fake; assert that `remove` by another user throws and never calls `delete`.
+- Run `cd apps/core_microservice && npx jest bookmarks` and `npx tsc --noEmit -p apps/core_microservice/tsconfig.json` from the root.
 
-### Key Rules to Remember
+### Key rules
 
-| Rule | Rationale |
-|------|-----------|
-| Business logic lives in entity methods, not services | Entities stay unit-testable without mocking NestJS |
-| Entity construction uses a `static create()` factory | Prevents inconsistent object construction |
-| Mutations go through domain methods (e.g. `profile.editBio()`) | Domain rules execute on every mutation path |
-| Domain errors extend `DomainError` from `@repo/shared` | Mapped to HTTP by the global exception filter |
-| Repository extends `TypeormRepositoryBase<Entity, Props>` | All CRUD operations inherited for free |
-| Response DTOs have a constructor that takes the entity | Single, auditable mapping from domain → wire |
-| Use `type`-only imports for cross-module entities | No runtime circular dependency between modules |
-| `@Unique` decorator at the entity level | Maps to a database unique constraint and is caught by `UniqueConstraintViolationError` |
-| Response DTOs use ISO strings, not `Date` objects | Dates in JSON are always strings |
-| Response DTOs normalize optional fields to `null` | `undefined` is not valid JSON |
+1. Rules live on entities and throw `DomainError` subclasses; pick the base class by status (§3.2 Layer 3).
+2. Ports are interfaces with `Symbol` tokens; modules bind them, services inject them by token, controllers inject services only.
+3. Every mutating route is guarded, takes the user from `@CurrentUser('sub')`, and the service checks ownership before mutating.
+4. Multi-row writes go through `runInTransaction`; broker events go through the outbox in that transaction; realtime emits happen after the commit.
+5. Wire types in `@repo/contracts`, request DTOs `implements` them, responses are DTOs, never entities.
+6. Schema changes are migrations with explicit constraint names.
 
 ---
 
 ## Appendix: Project-Wide Pattern Reference
 
-### A.1 All Module Folders in `core_microservice`
+### A.1 Modules in `core_microservice`
 
-| Module | Domain Entities | Has Repository? | Notes |
-|--------|----------------|-----------------|-------|
-| `profiles` | `UserProfile`, `ProfileToProfileConfiguration` | Yes (`UserProfileRepository`) | Canonical reference module; `POST` removed — profiles created via `InternalEventsModule` |
-| `internal-events` | (none — routing layer) | No | Receives events from `auth_microservice`, delegates to domain modules |
-| `common` | (none — infrastructure) | No | `JwtAuthGuard`, `@CurrentUser` decorator |
-| `posts` | `Post`, `PostLike`, `PostAsset` | Yes (`PostRepository`) | Demonstrates `publish()` state machine pattern |
-| `comments` | `Comment`, `CommentLike` | Yes (`CommentRepository`) | Demonstrates self-referencing `parentId` for nested comments |
-| `chats` | `Chat`, `ChatParticipant`, `Message`, `MessageAsset` | No (uses raw TypeORM) | To be refactored to the repository pattern |
-| `follows` | `Follow` | No (uses raw TypeORM) | To be refactored to the repository pattern |
-| `assets` | `Asset` | No (uses raw TypeORM) | To be refactored to the repository pattern |
+| Module | Ports and tokens (in `domain/interfaces/`) | Adapters | Notes |
+|---|---|---|---|
+| `profiles` | `UserProfileRepositoryKey`, `USER_DIRECTORY_PORT` | `UserProfileRepository`, `UserDirectoryAdapter` | reference layout; `ProfilesService` still injects the concrete repository |
+| `posts` | `POST_REPOSITORY` | `PostRepository` | `getLikeStats`; ownership checked in the service |
+| `comments` | `COMMENT_REPOSITORY` (`CommentTransaction`) | `CommentRepository` | outbox `social.post.commented` |
+| `likes` | `POST_LIKE_REPOSITORY`, `COMMENT_LIKE_REPOSITORY` | `PostLikeRepository`, `CommentLikeRepository` | entities owned by posts/comments; outbox `social.*.liked` |
+| `follows` | `FollowRepositoryKey` | `FollowRepository` | outbox `social.user.followed` |
+| `assets` | `FileStoragePortKey` | `S3StorageAdapter`, `AssetRepository` (concrete) | public and private buckets, presigned GETs |
+| `chats` | `CHAT_REPOSITORY`, `MESSAGE_REPOSITORY`, `ATTACHMENT_STORAGE_PORT`, `CHAT_REALTIME_PORT` | `ChatRepository`, `MessageRepository`, `AttachmentStorageAdapter`, `ChatsGateway` | three services (chats, messages, membership); `SessionRevocationListener` registered here |
+| `internal-events` | — | — | `POST /internal/events/user-created` |
+| `notifications-relay` | — | `NotificationsRelayConsumer` | `core.realtime-relay` → `emitToUser` |
 
-### A.2 All Modules in `auth_microservice`
+`common/`: `auth/` (verifier provider, `CommonAuthModule`, `OptionalJwtAuthGuard`), `guards/jwt-auth.guard.ts`, `decorators/current-user.decorator.ts`, `redis/` (`RedisModule`, `SessionRevocationListener`), `messaging/` (§3.11), `typeorm/bigint-number.transformer.ts`.
 
-| Area | Source files | Description |
-|------|-------------|-------------|
-| Domain entities | `domain/entities/auth-user.entity.ts` | Single TypeORM entity (AuthUser with nullable passwordHash + googleId; AuthSession removed) |
-| Domain ports | `domain/interfaces/auth-user-repository.interface.ts`, `domain/interfaces/cache.service.ts`, `domain/interfaces/crypto.service.interface.ts`, `domain/interfaces/event-publisher.interface.ts`, `domain/interfaces/jwt.service.interface.ts`, `domain/interfaces/oauth.service.interface.ts` | Port interfaces: IAuthUserRepository, ICacheService, ICryptoService, IEventPublisher, IJwtService, IOAuthService |
-| Infrastructure adapters | `infrastructure/repositories/auth-user.repository.ts`, `infrastructure/cache/redis.service.ts`, `infrastructure/events/http-event-publisher.adapter.ts`, `infrastructure/jwt/jwt.service.ts`, `infrastructure/crypto/crypto.service.ts`, `infrastructure/oauth/google-oauth.service.ts` | Adapters: AuthUserRepository, RedisService, HttpEventPublisher, JwtService, BcryptService, GoogleOAuthService |
-| Services | `services/auth.service.ts`, `services/users.service.ts` | Application services depending on port interfaces |
-| Routes | `routes/auth.routes.ts` (login, Google OAuth, refresh, logout, me), `routes/users.routes.ts` | Router factory functions |
-| Middleware | `middleware/auth.middleware.ts`, `middleware/validate.middleware.ts`, `middleware/error-handler.middleware.ts` | requireAuth (JWT), validateBody (class-validator), errorHandler |
-| Types | `types/express.d.ts` | Global Express Request augmentation (`req.user: JwtPayload`) |
-| Config | `config/env.ts`, `config/database.ts`, `config/redis.ts`, `config/jwt.ts`, `config/google.ts`, `config/swagger.ts` | Centralized env.ts + infrastructure configuration |
-| Migrations | `migrations/1782126100129-InitialAuthSchema.ts`, `migrations/1785236513612-AddGoogleOAuthToUsers.ts` | DB schema migrations |
+### A.2 `auth_microservice` at a glance
 
-### A.3 Global Infrastructure Register in `main.ts`
+| Layer | Contents |
+|---|---|
+| Composition | `main.ts`, `app.ts` (`createApp`, `createInternalApp`) |
+| Routes | `/users` (`users.routes.ts`), `/auth` (`auth.routes.ts`), `/internal` (`internal.routes.ts`, internal listener only) |
+| Middleware | `requireAuth`, `validateBody`, `errorHandler`, `createInternalTokenMiddleware` |
+| Services | `UsersService`, `AuthService` |
+| Ports / adapters | table in §4.5 |
+| Entity | `AuthUser` (`domain/entities/auth-user.entity.ts`) |
+| Migrations | `src/migrations/`, CLI via `apps/auth_microservice/data-source.ts` |
 
-**`core_microservice` (NestJS):**
-```typescript
-// HTTP security headers (helmet)
-app.use(helmet());
+### A.3 Global Infrastructure in core `main.ts`
 
-// CORS: restrict to trusted origins from .env
-app.enableCors({ origin: env.cors.origin, credentials: true });
-
-// Global validation pipe — runs before every controller method
-app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-
-// Global domain error → HTTP translation
-app.useGlobalFilters(new DomainExceptionFilter());
-```
-
-**`auth_microservice` (Express):**
-```typescript
-// HTTP security headers (helmet)
-app.use(helmet());
-
-// CORS: restrict to trusted origins from .env
-app.use(cors({ origin: env.cors.origin, credentials: true }));
-
-// Validation is per-route: router.post('/path', validateBody(Dto), handler)
-// Error mapping is a global middleware: app.use(errorHandler)
-// Port bindings happen in createApp():
-//   - ICryptoService → BcryptService
-//   - IAuthUserRepository → AuthUserRepository
-//   - ICacheService → RedisService
-//   - IJwtService → JwtService
-//   - IOAuthService → GoogleOAuthService
-//   - IEventPublisher → HttpEventPublisher
-```
-
-These globals are the backbone of the hexagonal architecture's outer layer — they handle cross-cutting concerns so individual modules never need to think about validation syntax or HTTP status codes.
+| Setting | Value |
+|---|---|
+| Logger | `new WinstonLogger('CoreSystem')` |
+| `helmet()` | security headers |
+| `cookieParser()` | cookie parsing |
+| CORS | origin `CLIENT_URL` (default `http://localhost:3000`), `credentials: true`, methods GET/POST/PUT/PATCH/DELETE/OPTIONS, headers `Content-Type`, `Authorization`, `Accept` |
+| Pipe | `ValidationPipe({ whitelist: true, transform: true })` |
+| Filter | `DomainExceptionFilter` |
+| Swagger | `DocumentBuilder` → `/api` |
+| Shutdown | `enableShutdownHooks()` |
+| Port | `AppConfigService.port` (`CORE_PORT`, 3001) |
 
 ### A.4 TypeORM Entity Registration
 
-**`core_microservice` (NestJS):**
-- Each module registers its entities via `TypeOrmModule.forFeature([Entity1, Entity2])`.
-- The root `AppModule` uses `autoLoadEntities: true` — TypeORM discovers them automatically.
+- Runtime: each module's `TypeOrmModule.forFeature([...])`; the root `TypeOrmModule.forRootAsync` uses `autoLoadEntities: true` with `AppConfigService.postgres` (`synchronize: false`).
+- CLI: `apps/core_microservice/data-source.ts` globs `src/**/*.entity{.ts,.js}` and `src/migrations/*{.ts,.js}`. The same layout holds for `apps/auth_microservice/data-source.ts` and `apps/notifications_consumer_microservice/data-source.ts`.
 
-**`auth_microservice` (Express):**
-- Entities are listed explicitly in the `DataSource` configuration's `entities: [AuthUser]` array in `config/database.ts` (AuthSession removed — sessions are Redis-only).
-- A single entity lives in `domain/entities/` (not a top-level `entities/` directory), reflecting the DDD layering.
-- No `autoLoadEntities` — the list is maintained manually.
+### A.5 DTOs in `@repo/shared`
 
-### A.5 Shared DTOs That Live in `@repo/shared`
+| DTO | File | Used by |
+|---|---|---|
+| `CreateUserDto` | `packages/shared/src/dtos/auth/create-user.dto.ts` | auth `POST /users/register` |
+| `LoginDto` | `packages/shared/src/dtos/auth/login.dto.ts` | auth `POST /auth/login` |
+| `GoogleLoginDto` | `packages/shared/src/dtos/auth/google-login.dto.ts` | auth `POST /auth/google` |
+| `RefreshTokenDto` | `packages/shared/src/dtos/auth/refresh-token.dto.ts` | auth `POST /auth/refresh`, `/auth/logout` |
+| `UpdateProfileDto` | `packages/shared/src/dtos/core/update-profile.dto.ts` | core `PATCH /profiles/:id` |
+| `CreateCommentDto` | `packages/shared/src/dtos/core/create-comment.dto.ts` | core comments |
+| `UpdateCommentDto` | `packages/shared/src/dtos/core/update-comment.dto.ts` | core comments |
 
-| DTO | Used by |
-|-----|---------|
-| `CreateUserDto` | `auth_microservice` |
-| `LoginDto` | `auth_microservice` |
-| `GoogleLoginDto` | `auth_microservice` |
-| `RefreshTokenDto` | `auth_microservice` |
-| `CreatePostDto` | `core_microservice` |
-| `UpdatePostDto` | `core_microservice` |
-| `CreateCommentDto` | `core_microservice` |
-| `UpdateCommentDto` | `core_microservice` |
-| `UpdateProfileDto` | `core_microservice` |
+Every other request DTO is module-local (`modules/<module>/dto/`).
 
-If a new DTO is only needed by one module, it belongs in the module's `dto/` folder. If two or more services need it, promote it to `@repo/shared/dtos/`.
+### A.6 Domain Errors in `@repo/shared`
 
-### A.6 Shared Domain Errors in `@repo/shared`
+| Class | File | Base |
+|---|---|---|
+| `DomainError` | `packages/shared/src/errors/domain.error.ts` | abstract |
+| `EntityNotFoundError`, `EntityByIdNotFoundError`, `UniqueConstraintViolationError`, `DatabaseQueryError`, `UnauthorizedError` | `packages/shared/src/errors/database.errors.ts` | `DomainError` |
+| `AccessDeniedError` | `packages/shared/src/errors/access-denied.error.ts` | `DomainError` |
 
-| Error class | Used by | Mapped to HTTP |
-|-------------|---------|----------------|
-| `DomainError` (abstract) | Both | (base class) |
-| `EntityByIdNotFoundError` | `core_microservice` | 404 |
-| `EntityNotFoundError` | Both | 404 |
-| `UniqueConstraintViolationError` | Both | 409 |
-| `UnauthorizedError` | Both | 401 |
-| `DatabaseQueryError` | Both | 500 |
+HTTP statuses: the table in §3.2 Layer 3.
 
-### A.7 Contracts Currently Defined in `@repo/contracts`
+### A.7 Contracts in `@repo/contracts`
 
-| Contract | Kind |
-|----------|------|
-| `ICreateProfileRequest` | Request |
-| `IUpdateProfileRequest` | Request |
-| `IProfileResponse` | Response |
-| `IPaginatedResponse<T>` | Common response envelope |
-| `IPaginationMeta` | Common pagination metadata |
-| `PAGINATION_DEFAULTS` | Common constants |
-
-When adding a new feature, consider whether the frontend needs a contract. If yes, add the interface to `@repo/contracts` and have the backend DTO `implements` it.
+| Area | Exports |
+|---|---|
+| `common` | `IPaginatedResponse`, `IPaginationMeta`, `IProfileListResponse`, `PAGINATION_DEFAULTS` |
+| `auth` | `ILoginRequest`, `IRegisterRequest`, `IGoogleLoginRequest`, `IAuthUserResponse`, `ILoginResponse`, `IRegisterResponse` |
+| `profiles` | `ICreateProfileRequest`, `IUpdateProfileRequest`, `ISearchProfilesQuery`, `IProfileResponse` |
+| `posts` | `PostStatus`, `IPostResponse`, `IPostAssetResponse`, `IFeedResponse` |
+| `comments` | `ICommentResponse` |
+| `likes` | `ILikeState` |
+| `follows` | `ICreateFollowRequest`, `IFollowResponse` |
+| `chats` | requests: `ICreateDirectChatRequest`, `ICreateGroupChatRequest`, `IListChatsQuery`, `IRenameGroupRequest`, `IAddMembersRequest`, `IListMessagesQuery`, `IMessageChangesQuery`, `ISendMessageRequest`, `IEditMessageRequest`, `IMarkReadRequest`; responses: `IMessage`, `IMessageResponse`, `IChatUser`, `IChatParticipant`, `IAttachment`, `IConversationSummary`, `IConversationDetail`, `ICursorPage`, `IReadState`, `IUploadedAttachment`, `IAttachmentUrl`, `ChatType`, `ParticipantRole`, `SystemEventType`; constants `MESSAGE_MAX_ATTACHMENTS`, `ATTACHMENT_MAX_BYTES` |
+| `notifications` | `IListNotificationsQuery`, `IMarkSeenRequest`, `NotificationKind`, `INotification`, `INotificationPreferences`, `INotificationsPage`, `IUnseenCount` |
+| `realtime` | `REALTIME_NAMESPACE`, `ServerToClientEvents` (`message:new`, `message:updated`, `message:deleted`, `chat:upsert`, `chat:removed`, `chat:read`, `chat:alert`, `typing`, `notification:new`, `notifications:seen`, `session:expired`), `ClientToServerEvents` (`chat:view`, `typing:start`, `typing:stop`, `auth:renew`), `IRealtimeAckError` |
 
 ---
 
-*This guide reflects the architecture as of August 2026. If you find discrepancies between the guide and the code, the code is authoritative — please update the guide accordingly.*
+*This guide reflects the architecture as of 2026-10-14. If you find discrepancies between the guide and the code, the code is authoritative: update the guide.*

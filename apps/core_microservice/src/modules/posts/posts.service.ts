@@ -3,7 +3,11 @@ import { type Logger, LoggerKey } from '@repo/shared';
 import { CreatePostDto } from './dto/create-post.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 import { Post } from './domain/entities/post.entity';
-import { PostRepository } from './infrastructure/repository/post.repository';
+import {
+  POST_REPOSITORY,
+  type IPostRepository,
+  type LikeStats,
+} from './domain/interfaces/post-repository.port';
 import { PostAsset } from './domain/entities/post-asset.entity';
 import { FollowRepositoryKey } from '../follows/domain/interfaces/follow-repository.port';
 import type { IFollowRepository } from '../follows/domain/interfaces/follow-repository.port';
@@ -12,7 +16,8 @@ import type { IFollowRepository } from '../follows/domain/interfaces/follow-repo
 export class PostsService {
   constructor(
     @Inject(LoggerKey) private readonly logger: Logger,
-    private readonly postRepository: PostRepository,
+    @Inject(POST_REPOSITORY)
+    private readonly postRepository: IPostRepository,
     @Inject(FollowRepositoryKey)
     private readonly followRepository: IFollowRepository,
   ) {}
@@ -148,5 +153,13 @@ export class PostsService {
     });
 
     return { items, total };
+  }
+
+  /** Like count and the viewer's own like per post (one query); viewer optional. */
+  async getLikeStats(
+    postIds: string[],
+    viewerId?: string,
+  ): Promise<Map<string, LikeStats>> {
+    return this.postRepository.getLikeStats(postIds, viewerId);
   }
 }

@@ -3,7 +3,7 @@ import { env } from './config/env';
 
 import { WinstonLogger } from '@repo/shared';
 import { initDatabase } from './config/database';
-import { createApp } from './app';
+import { createApp, createInternalApp } from './app';
 import { createRedisClient } from './config/redis';
 import { RedisService } from './infrastructure/cache/redis.service';
 
@@ -19,7 +19,10 @@ async function bootstrap() {
     const redisService = new RedisService(redisClient, logger);
 
     // 2. Inicjalizacja aplikacji Express z wstrzykniętymi zależnościami
-    const app = createApp(dataSource, logger, redisService);
+    // Dedicated connection for session-revocation pub/sub (publishing needs no subscriber mode)
+    const sessionRedisClient = createRedisClient();
+    const app = createApp(dataSource, logger, redisService, sessionRedisClient);
+    const internalApp = createInternalApp(dataSource, logger);
     const port = env.app.port;
 
     // 3. Uruchomienie serwera
@@ -27,15 +30,23 @@ async function bootstrap() {
       logger.info(`Auth Microservice is running on port ${port}`);
     });
 
+    const { internalHost, internalPort } = env.app;
+    const internalServer = internalApp.listen(internalPort, internalHost, () => {
+      logger.info(`Auth internal listener is running on ${internalHost}:${internalPort}`);
+    });
+
     // Wdrożenie "Graceful Shutdown"
     const shutdown = async (signal: string) => {
       logger.info(`${signal} recieved, shutting down gracefully...`);
       server.close();
-      try {
-        await redisClient.quit();
-        logger.debug('Redis disconnected');
-      } catch (err) {
-        logger.error('Error disconnecting Redis', { error: err });
+      internalServer.close();
+      for (const client of [redisClient, sessionRedisClient]) {
+        try {
+          await client.quit();
+          logger.debug('Redis disconnected');
+        } catch (err) {
+          logger.error('Error disconnecting Redis', { error: err });
+        }
       }
       try {
         await dataSource.destroy();
@@ -47,12 +58,12 @@ async function bootstrap() {
       process.exit(0);
     };
 
-    process.on('SIGINT', () => shutdown('SIGINT'));
-    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => void shutdown('SIGINT'));
+    process.on('SIGTERM', () => void shutdown('SIGTERM'));
   } catch (error) {
     logger.error('Failed to start Auth Microservice', { error });
     process.exit(1);
   }
 }
 
-bootstrap();
+void bootstrap();

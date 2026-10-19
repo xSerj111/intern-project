@@ -4,10 +4,18 @@ import { In, Repository, ILike } from 'typeorm';
 
 import { TypeormRepositoryBase } from '@repo/shared';
 import { Post, PostStatus } from '../../domain/entities/post.entity';
+import { PostLike } from '../../domain/entities/post-like.entity';
 import type { PostProps } from '../../domain/interfaces/post.props';
+import type {
+  IPostRepository,
+  LikeStats,
+} from '../../domain/interfaces/post-repository.port';
 
 @Injectable()
-export class PostRepository extends TypeormRepositoryBase<Post, PostProps> {
+export class PostRepository
+  extends TypeormRepositoryBase<Post, PostProps>
+  implements IPostRepository
+{
   public static readonly entity = Post;
   // Joined by default so reads include the post's author profile.
   protected relations: string[] = ['author', 'assets'];
@@ -17,6 +25,10 @@ export class PostRepository extends TypeormRepositoryBase<Post, PostProps> {
     repository: Repository<Post>,
   ) {
     super(repository);
+  }
+
+  async findById(id: string): Promise<Post | null> {
+    return this.repository.findOne({ where: { id } });
   }
 
   async getFeedForAuthors(
@@ -59,5 +71,46 @@ export class PostRepository extends TypeormRepositoryBase<Post, PostProps> {
       skip,
       take: limit,
     });
+  }
+
+  /**
+   * Like count and the viewer's own like for each post, in one grouped
+   * query over active likes (`deletedAt IS NULL`). Every requested id gets an
+   * entry; `viewerId` is undefined for anonymous requests (`likedByMe: false`).
+   */
+  async getLikeStats(
+    postIds: string[],
+    viewerId?: string,
+  ): Promise<Map<string, LikeStats>> {
+    const stats = new Map<string, LikeStats>(
+      postIds.map((id) => [id, { likeCount: 0, likedByMe: false }]),
+    );
+    if (postIds.length === 0) return stats;
+
+    const query = this.repository.manager
+      .createQueryBuilder(PostLike, 'l')
+      .select('l."postId"', 'postId')
+      .addSelect('COUNT(*)::int', 'likeCount')
+      .where('l."postId" IN (:...postIds)', { postIds })
+      .andWhere('l."deletedAt" IS NULL')
+      .groupBy('l."postId"');
+    if (viewerId) {
+      query
+        .addSelect('BOOL_OR(l."userId" = :viewerId)', 'likedByMe')
+        .setParameter('viewerId', viewerId);
+    }
+
+    const rows = await query.getRawMany<{
+      postId: string;
+      likeCount: number;
+      likedByMe?: boolean;
+    }>();
+    for (const row of rows) {
+      stats.set(row.postId, {
+        likeCount: Number(row.likeCount),
+        likedByMe: row.likedByMe === true,
+      });
+    }
+    return stats;
   }
 }

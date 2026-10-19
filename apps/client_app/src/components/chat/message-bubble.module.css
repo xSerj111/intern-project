@@ -1,0 +1,167 @@
+.row {
+  display: flex;
+  flex-direction: column;
+  max-width: 80%;
+  align-items: flex-start;
+}
+
+.rowOwn {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.bubble {
+  margin: 0;
+  padding: 0.5rem 0.8rem;
+  border-radius: 14px;
+  background: var(--innogram-bg);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.bubbleOwn {
+  background: var(--innogram-primary);
+  color: #fff;
+}
+
+.bubbleSending {
+  opacity: 0.6;
+}
+
+.bubbleFailed {
+  background: var(--innogram-danger-bg);
+  color: var(--innogram-danger);
+  border: 1px solid var(--innogram-danger);
+}
+
+.meta {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-top: 0.15rem;
+  font-size: 0.75rem;
+  color: var(--innogram-muted);
+}
+
+.failed {
+  color: var(--innogram-danger);
+}
+
+.linkButton {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--innogram-primary);
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.bubbleDeleted {
+  background: transparent;
+  color: var(--innogram-muted);
+  font-style: italic;
+  border: 1px dashed var(--innogram-border);
+}
+
+.bubbleLine {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.25rem;
+}
+
+.rowOwn .bubbleLine {
+  flex-direction: row-reverse;
+}
+
+.actions {
+  position: relative;
+}
+
+.menuButton {
+  background: none;
+  border: none;
+  padding: 0.1rem 0.4rem;
+  font: inherit;
+  line-height: 1;
+  color: var(--innogram-muted);
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.menuButton:hover,
+.menuButton:focus-visible {
+  background: var(--innogram-border);
+  color: var(--innogram-text);
+}
+
+.menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 7rem;
+  padding: 0.25rem;
+  background: var(--innogram-surface);
+  border: 1px solid var(--innogram-border);
+  border-radius: 8px;
+  box-shadow: var(--innogram-shadow);
+}
+
+.menuItem {
+  background: none;
+  border: none;
+  padding: 0.35rem 0.6rem;
+  font: inherit;
+  text-align: left;
+  color: var(--innogram-text);
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.menuItem:hover,
+.menuItem:focus-visible {
+  background: var(--innogram-bg);
+}
+
+.menuItemDanger {
+  color: var(--innogram-danger);
+}
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  width: min(32rem, 70vw);
+}
+
+.editorTextarea {
+  resize: vertical;
+  min-height: 2.5rem;
+}
+
+.editorButtons {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.error {
+  color: var(--innogram-danger);
+  font-size: 0.75rem;
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.rowOwn .content {
+  align-items: flex-end;
+}

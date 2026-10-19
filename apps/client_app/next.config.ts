@@ -24,6 +24,8 @@ const nextConfig: NextConfig = {
     // never backend secrets (JWT secret, Google client *secret*, DB, Redis, ...).
     NEXT_PUBLIC_AUTH_SERVICE_URL: process.env.AUTH_SERVICE_URL ?? '',
     NEXT_PUBLIC_CORE_SERVICE_URL: process.env.CORE_SERVICE_URL ?? '',
+    NEXT_PUBLIC_NOTIFICATIONS_SERVICE_URL:
+      process.env.NOTIFICATIONS_SERVICE_URL ?? '',
     NEXT_PUBLIC_CLIENT_PORT: process.env.CLIENT_PORT ?? '3000',
     // Google OAuth *client* id is a public identifier, not a secret.
     NEXT_PUBLIC_GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID ?? '',

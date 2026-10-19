@@ -1,6 +1,8 @@
 import {
   DomainError,
   EntityNotFoundError,
+  EntityByIdNotFoundError,
+  AccessDeniedError,
   UniqueConstraintViolationError,
   DatabaseQueryError,
   UnauthorizedError,
@@ -11,6 +13,8 @@ export function errorHandler(
   err: Error,
   req: Request,
   res: Response,
+  // Express identifies error middleware by its 4-argument arity, so `next` must stay.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- required for Express arity
   next: NextFunction,
 ): void {
   if (!(err instanceof DomainError)) {
@@ -20,7 +24,9 @@ export function errorHandler(
   }
 
   let status = 400;
-  if (err instanceof EntityNotFoundError) status = 404;
+  if (err instanceof EntityNotFoundError || err instanceof EntityByIdNotFoundError)
+    status = 404;
+  else if (err instanceof AccessDeniedError) status = 403;
   else if (err instanceof UniqueConstraintViolationError) status = 409;
   else if (err instanceof DatabaseQueryError) status = 500;
   else if (err instanceof UnauthorizedError) status = 401;

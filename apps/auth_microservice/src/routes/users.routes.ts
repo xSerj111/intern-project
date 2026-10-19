@@ -31,7 +31,7 @@ export function createUsersRouter(usersService: UsersService): Router {
    */
   router.post('/register', validateBody(CreateUserDto), async (req, res, next) => {
     try {
-      const { email, password } = req.body;
+      const { email, password } = req.body as CreateUserDto;
       const result = await usersService.registerUser(email, password);
       res.status(201).json(result);
     } catch (error) {

@@ -5,6 +5,9 @@ import { ProfileToProfileConfiguration } from './domain/entities/profile-to-prof
 import { ProfilesService } from './profiles.service';
 import { ProfilesController } from './profiles.controller';
 import { UserProfileRepository } from './infrastructure/repository/user-profile.repository';
+import { UserDirectoryAdapter } from './infrastructure/user-directory.adapter';
+import { USER_DIRECTORY_PORT } from './domain/interfaces/user-directory.port';
+import { UserProfileRepositoryKey } from './domain/interfaces/user-profile-repository.port';
 import { LoggerModule } from '@repo/shared';
 
 @Module({
@@ -13,7 +16,12 @@ import { LoggerModule } from '@repo/shared';
     LoggerModule.forFeature('ProfilesService'),
   ],
   controllers: [ProfilesController],
-  providers: [ProfilesService, UserProfileRepository],
-  exports: [ProfilesService],
+  providers: [
+    ProfilesService,
+    UserProfileRepository,
+    { provide: UserProfileRepositoryKey, useExisting: UserProfileRepository },
+    { provide: USER_DIRECTORY_PORT, useClass: UserDirectoryAdapter },
+  ],
+  exports: [ProfilesService, USER_DIRECTORY_PORT],
 })
 export class ProfilesModule {}

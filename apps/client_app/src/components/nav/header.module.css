@@ -35,6 +35,32 @@
   white-space: nowrap;
 }
 
+.bell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  padding: 0.35rem;
+  color: var(--innogram-muted);
+}
+
+.bell:hover {
+  color: var(--innogram-text);
+}
+
+.bellBadge {
+  position: absolute;
+  top: -0.2rem;
+  right: -0.35rem;
+  min-width: 1.1rem;
+  padding: 0 0.3rem;
+  font-size: 0.7rem;
+  line-height: 1.1rem;
+  text-align: center;
+  color: #fff;
+  background: var(--innogram-accent);
+  border-radius: 999px;
+}
+
 @media (max-width: 480px) {
   .user {
     display: none;

@@ -19,3 +19,13 @@ export interface IUpdateProfileRequest {
   /** New avatar image URL, or `null` to clear it */
   avatarUrl?: string | null;
 }
+
+/**
+ * Query for searching users by username prefix (starting conversations).
+ */
+export interface ISearchProfilesQuery {
+  /** Username prefix, 2-50 chars */
+  q: string;
+  /** Max results, 1-20 (default 10) */
+  limit?: number;
+}

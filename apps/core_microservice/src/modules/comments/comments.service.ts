@@ -1,18 +1,46 @@
 import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import {
+  type ActorSnapshot,
   CreateCommentDto,
+  DatabaseQueryError,
+  DomainError,
+  EntityByIdNotFoundError,
   LoggerKey,
   type Logger,
+  type PostCommentedPayload,
+  RoutingKeys,
   UpdateCommentDto,
 } from '@repo/shared';
+import {
+  OUTBOX_PORT,
+  type IOutboxPort,
+} from '../../common/messaging/outbox.port';
+import {
+  POST_REPOSITORY,
+  type IPostRepository,
+  type LikeStats,
+} from '../posts/domain/interfaces/post-repository.port';
+import {
+  USER_DIRECTORY_PORT,
+  type IUserDirectoryPort,
+} from '../profiles/domain/interfaces/user-directory.port';
 import { Comment } from './domain/entities/comment.entity';
-import { CommentRepository } from './infrastructure/repository/comment.repository';
+import {
+  COMMENT_REPOSITORY,
+  type CommentTransaction,
+  type ICommentRepository,
+} from './domain/interfaces/comment-repository.port';
 
 @Injectable()
 export class CommentsService {
   constructor(
     @Inject(LoggerKey) private readonly logger: Logger,
-    private readonly commentRepository: CommentRepository,
+    @Inject(COMMENT_REPOSITORY)
+    private readonly commentRepository: ICommentRepository,
+    @Inject(POST_REPOSITORY) private readonly postRepository: IPostRepository,
+    @Inject(OUTBOX_PORT) private readonly outbox: IOutboxPort,
+    @Inject(USER_DIRECTORY_PORT)
+    private readonly userDirectory: IUserDirectoryPort,
   ) {}
 
   async createComment(
@@ -25,7 +53,30 @@ export class CommentsService {
       parentId: createCommentDto.parentId,
       content: createCommentDto.content,
     });
-    const savedComment = await this.commentRepository.save(comment);
+    const post = await this.postRepository.findById(comment.postId);
+    if (!post) {
+      throw new EntityByIdNotFoundError('Post', comment.postId);
+    }
+
+    const actor = comment.notifiesPostAuthor(post)
+      ? await this.loadActor(authorId)
+      : null;
+
+    // The outbox row shares the comment's transaction: both commit or neither.
+    const savedComment = await this.runInTransaction(async (tx) => {
+      const saved = await this.commentRepository.save(comment, tx);
+      if (actor) {
+        const payload: PostCommentedPayload = {
+          actor,
+          recipientId: post.authorId,
+          postId: post.id,
+          commentId: saved.id,
+          excerpt: saved.excerpt(),
+        };
+        await this.outbox.add(RoutingKeys.POST_COMMENTED, payload, tx);
+      }
+      return saved;
+    });
     this.logger.debug('Comment created', {
       props: { commentId: savedComment.id },
     });
@@ -64,6 +115,14 @@ export class CommentsService {
     return comments;
   }
 
+  /** Like count and the viewer's own like per comment (one query); viewer optional. */
+  async getLikeStats(
+    commentIds: string[],
+    viewerId?: string,
+  ): Promise<Map<string, LikeStats>> {
+    return this.commentRepository.getLikeStats(commentIds, viewerId);
+  }
+
   async softDeleteComment(userId: string, id: string): Promise<void> {
     const comment = await this.commentRepository.findOneByIdOrThrow(id);
 
@@ -77,5 +136,30 @@ export class CommentsService {
     this.logger.debug('Comment soft-deleted', {
       props: { commentId: comment.id },
     });
+  }
+
+  /** Snapshot of the acting user for the event; null (event skipped) if they have no profile. */
+  private async loadActor(userId: string): Promise<ActorSnapshot | null> {
+    const users = await this.userDirectory.getUsers([userId]);
+    const user = users.get(userId);
+    if (!user) {
+      this.logger.warn('Skipping notification: actor has no profile', {
+        props: { userId },
+      });
+      return null;
+    }
+    return { ...user };
+  }
+
+  private async runInTransaction<T>(
+    work: (tx: CommentTransaction) => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await this.commentRepository.runInTransaction(work);
+    } catch (err: unknown) {
+      if (err instanceof DomainError) throw err;
+      this.logger.error(err instanceof Error ? err.message : String(err));
+      throw new DatabaseQueryError();
+    }
   }
 }

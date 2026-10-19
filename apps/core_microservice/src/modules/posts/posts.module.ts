@@ -7,6 +7,7 @@ import { PostLike } from './domain/entities/post-like.entity';
 import { PostAsset } from './domain/entities/post-asset.entity';
 import { PostRepository } from './infrastructure/repository/post.repository';
 import { LoggerModule } from '@repo/shared';
+import { POST_REPOSITORY } from './domain/interfaces/post-repository.port';
 import { FollowsModule } from '../follows/follows.module';
 
 @Module({
@@ -16,6 +17,11 @@ import { FollowsModule } from '../follows/follows.module';
     FollowsModule,
   ],
   controllers: [PostsController],
-  providers: [PostsService, PostRepository],
+  providers: [
+    PostsService,
+    PostRepository,
+    { provide: POST_REPOSITORY, useExisting: PostRepository },
+  ],
+  exports: [POST_REPOSITORY],
 })
 export class PostsModule {}

@@ -1,0 +1,20 @@
+.scroller {
+  height: min(60vh, 32rem);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem;
+  background: var(--innogram-surface);
+  border: 1px solid var(--innogram-border);
+  border-radius: var(--innogram-radius);
+}
+
+.older {
+  align-self: center;
+  font-size: 0.85rem;
+}
+
+.empty {
+  margin: auto;
+}

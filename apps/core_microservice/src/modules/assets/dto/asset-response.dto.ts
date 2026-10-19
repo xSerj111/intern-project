@@ -1,10 +1,9 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { Asset } from '../domain/entities/asset.entity';
 import { AssetProps } from '../domain/interfaces/asset-props';
 
 export class AssetResponseDto {
   @ApiProperty() id!: string;
-  @ApiProperty() url!: string;
+  @ApiProperty({ type: String, nullable: true }) url!: string | null;
   @ApiProperty() mimeType!: string;
   @ApiProperty() size!: number;
   @ApiProperty() createdAt!: string;

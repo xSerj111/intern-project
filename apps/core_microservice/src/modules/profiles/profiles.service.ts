@@ -7,11 +7,19 @@ import {
   UniqueConstraintViolationError,
   UpdateProfileDto,
 } from '@repo/shared';
+import type { IChatUser } from '@repo/contracts';
 import { UserProfile } from './domain/entities/user-profile.entity';
 import { UserProfileRepository } from './infrastructure/repository/user-profile.repository';
 
 /** Max attempts to allocate a non-colliding username before giving up. */
 const MAX_USERNAME_ATTEMPTS = 3;
+
+const toChatUser = (p: UserProfile): IChatUser => ({
+  userId: p.authUserId,
+  username: p.username,
+  displayName: p.displayName,
+  avatarUrl: p.avatarUrl ?? null,
+});
 
 @Injectable()
 export class ProfilesService {
@@ -155,5 +163,27 @@ export class ProfilesService {
   private deriveHandle(email?: string): string {
     const localPart = email?.split('@')[0]?.trim();
     return localPart || 'user';
+  }
+
+  /** Username-prefix search for starting conversations; the caller is left out. */
+  async searchProfiles(
+    q: string,
+    limit: number,
+    callerAuthUserId: string,
+  ): Promise<IChatUser[]> {
+    const profiles = await this.userProfileRepository.searchByUsername(
+      q,
+      limit,
+      callerAuthUserId,
+    );
+    return profiles.map(toChatUser);
+  }
+
+  /** Batch profile lookup by auth user id (one IN query); unknown ids are omitted. */
+  async getUsersByIds(authUserIds: string[]): Promise<IChatUser[]> {
+    const profiles = await this.userProfileRepository.findByAuthUserIds([
+      ...new Set(authUserIds),
+    ]);
+    return profiles.map(toChatUser);
   }
 }

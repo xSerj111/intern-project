@@ -33,6 +33,36 @@ export class AppConfigService {
     };
   }
 
+  /** Redis connection settings (shared with auth_microservice's token blacklist). */
+  get redis() {
+    return {
+      host: this.config.get<string>('REDIS_HOST', 'localhost'),
+      port: parseInt(this.config.get<string>('REDIS_PORT', '6379'), 10),
+      password: this.config.get<string>('REDIS_PASSWORD') || undefined,
+    };
+  }
+
+  /** RabbitMQ (AMQP) connection settings for the realtime event bus. */
+  get rabbitmq() {
+    return {
+      url: this.config.getOrThrow<string>('RABBITMQ_URL'),
+    };
+  }
+
+  /** Outbox relay settings. */
+  get outbox() {
+    const maxAttempts = Number(
+      this.config.get<string>('OUTBOX_MAX_ATTEMPTS', '10'),
+    );
+
+    if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
+      throw new Error('OUTBOX_MAX_ATTEMPTS must be a positive integer');
+    }
+
+    // Failed publishes after which the relay dead-letters a row (skips it).
+    return { maxAttempts };
+  }
+
   get s3() {
     const port = Number(this.config.get<string>('S3_PORT', '9000'));
 
@@ -40,12 +70,17 @@ export class AppConfigService {
       throw new Error('S3_PORT must be a valid port number');
     }
 
+    const endpoint = this.config.getOrThrow<string>('S3_ENDPOINT');
+
     return {
-      endpoint: this.config.getOrThrow<string>('S3_ENDPOINT'),
+      endpoint,
       port,
       accessKey: this.config.getOrThrow<string>('S3_ACCESS_KEY'),
       secretKey: this.config.getOrThrow<string>('S3_SECRET_KEY'),
       bucketName: this.config.get<string>('S3_BUCKET_NAME', 'innogram-assets'),
+      privateBucket: this.config.getOrThrow<string>('S3_PRIVATE_BUCKET_NAME'),
+      // Host used to sign browser-facing URLs; empty counts as unset.
+      publicEndpoint: this.config.get<string>('S3_PUBLIC_ENDPOINT') || endpoint,
       region: this.config.get<string>('S3_REGION', 'us-east-1'),
       useSsl:
         this.config.get<string>('S3_USE_SSL', 'false').toLowerCase() === 'true',

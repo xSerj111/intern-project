@@ -23,6 +23,19 @@
   border-bottom-color: var(--innogram-primary);
 }
 
+.badge {
+  display: inline-block;
+  min-width: 1.25rem;
+  margin-left: 0.4rem;
+  padding: 0 0.35rem;
+  font-size: 0.75rem;
+  line-height: 1.25rem;
+  text-align: center;
+  color: #fff;
+  background: var(--innogram-accent);
+  border-radius: 999px;
+}
+
 @media (min-width: 640px) {
   .nav {
     order: 0;

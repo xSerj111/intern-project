@@ -15,28 +15,18 @@ export class RedisService implements ICacheService {
     this.client.on('error', (err: Error) =>
       this.logger.error('Redis error', { error: err }),
     );
-    this.client.on('reconnecting', () =>
-      this.logger.warn('Redis reconnecting...'),
-    );
+    this.client.on('reconnecting', () => this.logger.warn('Redis reconnecting...'));
   }
 
   async get(key: string): Promise<string | null> {
     return this.client.get(key);
   }
 
-  async setWithExpiry(
-    key: string,
-    value: string,
-    ttlSeconds: number,
-  ): Promise<void> {
+  async setWithExpiry(key: string, value: string, ttlSeconds: number): Promise<void> {
     await this.client.set(key, value, 'EX', ttlSeconds);
   }
 
   async delete(key: string): Promise<number> {
-    return this.client.del(key);
-  }
-
-  async del(key: string): Promise<number> {
     return this.client.del(key);
   }
 

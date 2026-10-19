@@ -1,4 +1,3 @@
-import type { DataSource } from 'typeorm';
 import type { WinstonLogger } from '@repo/shared';
 import { ICryptoService } from '../domain/interfaces/crypto.service.interface';
 import { UniqueConstraintViolationError, UserCreatedEvent } from '@repo/shared';
@@ -38,14 +37,16 @@ export class UsersService {
 
     this.publishUserCreated(savedUser);
 
-    const { passwordHash: _, ...safeUser } = savedUser;
+    const { passwordHash: omittedHash, ...safeUser } = savedUser;
+    void omittedHash;
     return safeUser;
   }
 
   async getUserById(id: string): Promise<Omit<AuthUser, 'passwordHash'>> {
     const user = await this.userRepository.findOneByIdOrThrow(id);
 
-    const { passwordHash: _, ...safeUser } = user;
+    const { passwordHash: omittedHash, ...safeUser } = user;
+    void omittedHash;
     return safeUser;
   }
 

@@ -21,7 +21,6 @@ async function bootstrap() {
 
   // 3. CORS - Konfiguracja pozwalająca frontendowi na dostęp
   app.enableCors({
-
     origin: process.env.CLIENT_URL || 'http://localhost:3000',
 
     // Pozwala na przesyłanie ciasteczek między domenami
@@ -53,7 +52,8 @@ async function bootstrap() {
   // This hosts the UI at http://localhost:3002/api
   SwaggerModule.setup('api', app, document);
 
+  app.enableShutdownHooks();
   await app.listen(appConfig.port);
   console.log(`Core microservice runs on ${appConfig.port}`);
 }
-bootstrap();
+void bootstrap();

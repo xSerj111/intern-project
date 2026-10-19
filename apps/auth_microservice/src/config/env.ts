@@ -12,6 +12,19 @@ const requireEnv = (key: string, defaultValue?: string): string => {
   return value;
 };
 
+const INTERNAL_API_TOKEN_MIN_LENGTH = 32;
+
+// No default on purpose: a guessable fallback would defeat the internal-only check.
+const requireInternalApiToken = (): string => {
+  const token = requireEnv('INTERNAL_API_TOKEN');
+  if (token.length < INTERNAL_API_TOKEN_MIN_LENGTH) {
+    throw new Error(
+      `INTERNAL_API_TOKEN must be at least ${INTERNAL_API_TOKEN_MIN_LENGTH} characters long`,
+    );
+  }
+  return token;
+};
+
 export const env = {
   app: {
     // Auth service domyślnie działa na 3002 (zgodnie z AUTH_SERVICE_URL z .env)
@@ -20,6 +33,10 @@ export const env = {
     port: parseInt(process.env.AUTH_PORT || '3002', 10),
     coreMicroserviceUrl: requireEnv('CORE_SERVICE_URL'),
     allowedOrigins: requireEnv('AUTH_ALLOWED_ORIGINS'),
+    // Separate listener for service-to-service endpoints; never published or proxied.
+    internalPort: parseInt(process.env.AUTH_INTERNAL_PORT || '3012', 10),
+    internalHost: process.env.AUTH_INTERNAL_HOST || '127.0.0.1',
+    internalApiToken: requireInternalApiToken(),
   },
   db: {
     host: requireEnv('POSTGRES_HOST', 'localhost'),
@@ -37,6 +54,10 @@ export const env = {
   },
   jwt: {
     accessTokenSecret: requireEnv('JWT_SECRET', 'your-super-secret-jwt-key-here'),
+    refreshTokenSecret: requireEnv(
+      'JWT_REFRESH_SECRET',
+      'your-super-secret-jwt-refresh-key-here',
+    ),
     accessTokenExpiry: requireEnv('JWT_EXPIRES_IN', '15m'),
     refreshTokenExpiry: requireEnv('JWT_REFRESH_EXPIRES_IN', '7d'),
   },

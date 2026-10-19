@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   postgres:
     image: postgres:15
@@ -42,39 +40,61 @@ services:
     networks:
       - innogram-network
 
-  minio:
-    image: quay.io/minio/minio:latest
+  mailpit:
+    image: axllent/mailpit
+    container_name: innogram-mailpit
     ports:
-      - "9000:9000"
-      - "9001:9001"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-    command: server /data --console-address ":9001"
-    volumes:
-      - minio_data:/data
+      - "1025:1025"
+      - "8025:8025"
+    networks:
+      - innogram-network
 
-  minio-setup:
-    image: quay.io/minio/mc:latest
-    depends_on:
-      - minio
+  # S3-compatible storage for core assets. Host port 9000 is kept so the URLs
+  # stored in the DB (http://localhost:9000/<bucket>/<key>) stay valid.
+  seaweedfs:
+    image: chrislusf/seaweedfs:latest
+    container_name: innogram-seaweedfs
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
     environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-    entrypoint: >
-      /bin/sh -c "
-      echo 'Waiting for MinIO...';
-      sleep 5;
-      mc alias set myminio http://minio:9000 $$MINIO_ROOT_USER $$MINIO_ROOT_PASSWORD;
-      mc mb myminio/innogram-assets || true;
-      mc anonymous set download myminio/innogram-assets;
-      echo 'MinIO setup complete!';
-      exit 0;
-      "
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+      S3_SECRET_KEY: ${S3_SECRET_KEY}
+    ports:
+      - "9000:8333"
+    volumes:
+      - ./docker/seaweedfs/entrypoint.sh:/entrypoint.sh:ro
+      - seaweedfs_data:/data
+    healthcheck:
+      # The master binds to the container IP, not localhost.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://$$(hostname -i):9333/cluster/status"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    networks:
+      - innogram-network
+
+  # One-shot: creates the buckets, then exits. The public-read rule for
+  # innogram-assets lives in the identities file rendered by entrypoint.sh.
+  seaweedfs-setup:
+    image: chrislusf/seaweedfs:latest
+    depends_on:
+      seaweedfs:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    # Creates only the buckets that are missing, so a re-run exits 0.
+    command: >
+      "for b in innogram-assets innogram-private; do
+      if ! printf 's3.bucket.list\n' | weed shell -master=seaweedfs:9333 | grep -qw \"$$b\"; then
+      printf \"s3.bucket.create -name $$b\n\" | weed shell -master=seaweedfs:9333;
+      fi;
+      done;
+      echo 'SeaweedFS buckets ready'"
+    networks:
+      - innogram-network
+
 volumes:
   postgres_data:
   redis_data:
-  minio_data:
+  seaweedfs_data:
 
 networks:
   innogram-network:
