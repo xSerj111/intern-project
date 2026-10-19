@@ -51,9 +51,9 @@ export class ProfileToProfileConfiguration {
   @Column({ type: 'boolean', default: false })
   isCloseFriend!: boolean;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt!: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt!: Date;
 }

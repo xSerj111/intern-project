@@ -35,6 +35,6 @@ export class MessageAttachment {
   @Column({ type: 'int', default: 0 })
   displayOrder!: number;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt!: Date;
 }

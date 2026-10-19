@@ -97,7 +97,7 @@ export class Notification {
   @Column({ type: 'timestamptz', nullable: true })
   seenAt!: Date | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt!: Date;
 
   /**
