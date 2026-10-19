@@ -1,14 +1,12 @@
 'use client';
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { TriangleAlert, MessageCircleOff } from 'lucide-react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 
-import {
-  ErrorState,
-  LoadingState,
-} from '../../../../components/common/async-state';
+import { ChatHeader } from '../../../../components/chat/chat-header';
 import { GroupMembersPanel } from '../../../../components/chat/group-members-panel';
 import {
   MessageComposer,
@@ -16,6 +14,7 @@ import {
   useSendMessage,
 } from '../../../../components/chat/message-composer';
 import { MessageList } from '../../../../components/chat/message-list';
+import { ThreadSkeleton } from '../../../../components/chat/thread-skeleton';
 import { TypingIndicator } from '../../../../components/chat/typing-indicator';
 import { chatKeys, getChat, markRead } from '../../../../lib/api/chats';
 import { ApiError } from '../../../../lib/api/client';
@@ -27,6 +26,9 @@ import {
   useConversationList,
 } from '../../../../lib/realtime/chat-cache';
 import { useSocket } from '../../../../lib/realtime/use-socket-event';
+import { Button, buttonClassName } from '../../../../components/ui/button';
+import { Dialog } from '../../../../components/ui/dialog';
+import { EmptyState } from '../../../../components/ui/empty-state';
 
 import styles from './page.module.css';
 
@@ -142,66 +144,70 @@ export default function ChatPage() {
       (detail.isPending || messages.isPending))
   ) {
     return (
-      <div className={`container ${styles.page}`}>
-        <LoadingState label="Loading conversation…" />
+      <div className={styles.page}>
+        <ThreadSkeleton />
       </div>
     );
   }
 
   if (detail.isError || messages.isError || !detail.data || !messages.data) {
     return (
-      <div className={`container ${styles.page}`}>
-        <ErrorState
-          message="We couldn't load this conversation."
-          onRetry={() => {
-            void detail.refetch();
-            void messages.refetch();
-          }}
+      <div className={`${styles.page} ${styles.state}`}>
+        <EmptyState
+          icon={TriangleAlert}
+          title="Couldn't load this conversation"
+          description="Check your connection and try again."
+          action={
+            <Button
+              onClick={() => {
+                void detail.refetch();
+                void messages.refetch();
+              }}
+            >
+              Try again
+            </Button>
+          }
         />
       </div>
     );
   }
 
   const chat = detail.data;
-  const title =
-    chat.type === 'GROUP'
-      ? (chat.title ?? 'Group chat')
-      : (chat.counterpart?.displayName ?? 'Conversation');
+  const isGroup = chat.type === 'GROUP';
 
   return (
-    <div className={`container ${styles.page}`}>
-      <div className={styles.header}>
-        <Link href="/messages" className="button button--ghost">
-          Back
-        </Link>
-        <h1 className={styles.title}>{title}</h1>
-        {chat.type === 'GROUP' && (
-          <button
-            type="button"
-            className={`button button--ghost ${styles.members}`}
-            aria-expanded={membersOpen}
-            onClick={() => setMembersOpen((open) => !open)}
-          >
-            Members ({chat.participants.length})
-          </button>
-        )}
-      </div>
+    <div className={styles.page}>
+      <ChatHeader
+        chat={chat}
+        membersOpen={membersOpen}
+        onToggleMembers={() => setMembersOpen((open) => !open)}
+      />
 
-      {chat.type === 'GROUP' && membersOpen && (
-        <GroupMembersPanel
-          chat={chat}
-          currentUserId={userId}
-          onLeft={() => {
-            queryClient.removeQueries({ queryKey: chatKeys.detail(chatId) });
-            router.replace('/messages');
-          }}
-        />
+      {isGroup && (
+        <Dialog
+          open={membersOpen}
+          onClose={() => setMembersOpen(false)}
+          title="Group members"
+          description={chat.title ?? undefined}
+          size="sm"
+        >
+          <GroupMembersPanel
+            chat={chat}
+            currentUserId={userId}
+            onLeft={() => {
+              setMembersOpen(false);
+              queryClient.removeQueries({ queryKey: chatKeys.detail(chatId) });
+              router.replace('/messages');
+            }}
+          />
+        </Dialog>
       )}
 
       <MessageList
         messages={messages.data.items}
         currentUserId={userId}
         participants={chat.participants}
+        isGroup={isGroup}
         hasMore={messages.data.hasMore}
         onLoadOlder={() => loadOlderMessages(queryClient, chatId)}
         onRetry={retry}
@@ -219,14 +225,17 @@ export default function ChatPage() {
 
 function NotFound() {
   return (
-    <div className={`container ${styles.page}`}>
-      <h1 className={styles.title}>Conversation not found</h1>
-      <p className="muted">
-        This conversation doesn&apos;t exist or you aren&apos;t a participant.
-      </p>
-      <Link href="/messages" className="button button--ghost">
-        Back to messages
-      </Link>
+    <div className={`${styles.page} ${styles.state}`}>
+      <EmptyState
+        icon={MessageCircleOff}
+        title="Conversation not found"
+        description="This conversation doesn't exist or you aren't a participant."
+        action={
+          <Link href="/messages" className={buttonClassName({ variant: 'secondary' })}>
+            Back to messages
+          </Link>
+        }
+      />
     </div>
   );
 }

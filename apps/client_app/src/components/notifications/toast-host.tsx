@@ -1,12 +1,17 @@
 'use client';
 
+import { MessageCircle, X } from 'lucide-react';
 import Link from 'next/link';
 
 import { dismissToast, useToasts } from '../../lib/realtime/notification-cache';
+import { IconButton } from '../ui/button';
 
 import styles from './toast-host.module.css';
 
-/** Transient new-message toasts (`chat:alert`), mounted once in the root layout. */
+/**
+ * Transient new-message toasts (`chat:alert`), mounted once in the root layout.
+ * Top-centre on phones (clear of the bottom tab bar), bottom-right on desktop.
+ */
 export function ToastHost() {
   const toasts = useToasts();
 
@@ -18,6 +23,9 @@ export function ToastHost() {
     <div className={styles.host} role="status" aria-live="polite">
       {toasts.map((toast) => (
         <div key={toast.id} className={styles.toast}>
+          <span className={styles.icon} aria-hidden="true">
+            <MessageCircle size={16} />
+          </span>
           <Link
             href={toast.href}
             className={styles.link}
@@ -25,14 +33,13 @@ export function ToastHost() {
           >
             {toast.text}
           </Link>
-          <button
-            type="button"
-            className={styles.close}
-            aria-label="Dismiss notification"
+          <IconButton
+            label="Dismiss notification"
+            size="sm"
             onClick={() => dismissToast(toast.id)}
           >
-            &times;
-          </button>
+            <X size={16} />
+          </IconButton>
         </div>
       ))}
     </div>

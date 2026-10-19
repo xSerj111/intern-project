@@ -12,12 +12,28 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: var(--space-10) var(--space-4);
+  gap: var(--space-8);
+  padding: var(--space-8) var(--space-4)
+    calc(var(--space-8) + var(--safe-bottom));
+  background: var(--color-surface);
+}
+
+.mobileLogo {
+  display: flex;
+  justify-content: center;
 }
 
 @media (min-width: 960px) {
   .layout {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .formPanel {
+    padding: var(--space-12) var(--space-8);
+  }
+
+  .mobileLogo {
+    display: none;
   }
 
   .brandPanel {
@@ -26,7 +42,7 @@
     flex-direction: column;
     justify-content: space-between;
     padding: var(--space-10) var(--space-12);
-    color: #ffffff;
+    color: var(--color-on-primary);
     background: var(--gradient-brand);
     overflow: hidden;
   }
@@ -36,7 +52,7 @@
   .brandPanel::after {
     content: '';
     position: absolute;
-    border-radius: 50%;
+    border-radius: var(--radius-full);
     filter: blur(40px);
     opacity: 0.45;
     pointer-events: none;
@@ -60,25 +76,75 @@
 
   .brandPanel > * {
     position: relative;
+    z-index: 1;
   }
 }
 
+/* The wordmark is dark by default; on the gradient it must be white. */
+.brandLogo {
+  color: var(--color-on-primary);
+}
+
 .pitch {
-  max-width: 440px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  max-width: 460px;
 }
 
 .headline {
-  margin: 0 0 var(--space-4);
+  margin: 0;
   font-size: var(--text-3xl);
   font-weight: var(--weight-bold);
   letter-spacing: -0.025em;
   line-height: 1.15;
 }
 
-.tagline {
+.features {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
   margin: 0;
-  font-size: var(--text-lg);
-  opacity: 0.9;
+  padding: 0;
+  list-style: none;
+}
+
+.feature {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-md);
+  opacity: 0.95;
+}
+
+.featureIcon,
+.mockAvatar {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--color-on-primary) 20%, transparent);
+}
+
+.mock {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5) var(--space-3) var(--space-3);
+  font-size: var(--text-sm);
+  background: color-mix(in srgb, var(--color-on-primary) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-on-primary) 28%, transparent);
+  border-radius: var(--radius-lg);
+  backdrop-filter: blur(12px);
+  box-shadow: var(--shadow-2);
+}
+
+.mockAvatar {
+  background: color-mix(in srgb, var(--color-on-primary) 28%, transparent);
 }
 
 .footnote {

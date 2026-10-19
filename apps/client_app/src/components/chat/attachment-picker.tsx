@@ -5,11 +5,19 @@ import {
   MESSAGE_MAX_ATTACHMENTS,
   type IUploadedAttachment,
 } from '@repo/contracts';
+import {
+  ChevronLeft,
+  ChevronRight,
+  FileText,
+  Paperclip,
+  X,
+} from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { ApiError } from '../../lib/api/client';
 import { uploadAttachment } from '../../lib/api/chats';
 import { getAccessToken } from '../../lib/auth/refresh';
+import { IconButton } from '../ui/button';
 
 import styles from './attachment-picker.module.css';
 import { formatFileSize } from './message-attachments';
@@ -164,30 +172,27 @@ export function useAttachmentUploads(chatId: string) {
   };
 }
 
-interface AttachmentPickerProps {
-  items: readonly AttachmentUpload[];
-  onAddFiles: (files: File[]) => void;
-  onRemove: (key: string) => void;
-  onMove: (key: string, offset: -1 | 1) => void;
-  disabled?: boolean;
+/** True when no more files fit into the message. */
+export function attachmentsFull(items: readonly AttachmentUpload[]): boolean {
+  return (
+    items.filter((item) => item.status !== 'error').length >=
+    MESSAGE_MAX_ATTACHMENTS
+  );
 }
 
-/** Attach button plus the chips of picked files (reorder, remove, progress, errors). */
-export function AttachmentPicker({
-  items,
-  onAddFiles,
-  onRemove,
-  onMove,
-  disabled,
-}: AttachmentPickerProps) {
+interface AttachButtonProps {
+  onAddFiles: (files: File[]) => void;
+  disabled?: boolean;
+  /** The message already holds the maximum number of files. */
+  full?: boolean;
+}
+
+/** Paperclip button that opens the file picker (multi-select). */
+export function AttachButton({ onAddFiles, disabled, full }: AttachButtonProps) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const [announce, setAnnounce] = useState('');
-  const full =
-    items.filter((item) => item.status !== 'error').length >=
-    MESSAGE_MAX_ATTACHMENTS;
 
   return (
-    <div className={styles.picker}>
+    <>
       <input
         ref={inputRef}
         type="file"
@@ -202,10 +207,8 @@ export function AttachmentPicker({
           }
         }}
       />
-      <button
-        type="button"
-        className={`button button--ghost ${styles.attach}`}
-        aria-label="Attach files"
+      <IconButton
+        label="Attach files"
         title={
           full
             ? `At most ${MESSAGE_MAX_ATTACHMENTS} files per message`
@@ -214,8 +217,28 @@ export function AttachmentPicker({
         disabled={disabled || full}
         onClick={() => inputRef.current?.click()}
       >
-        Attach
-      </button>
+        <Paperclip size={20} />
+      </IconButton>
+    </>
+  );
+}
+
+interface AttachmentChipsProps {
+  items: readonly AttachmentUpload[];
+  onRemove: (key: string) => void;
+  onMove: (key: string, offset: -1 | 1) => void;
+}
+
+/** Chips of the picked files (reorder, remove, progress, errors). */
+export function AttachmentChips({
+  items,
+  onRemove,
+  onMove,
+}: AttachmentChipsProps) {
+  const [announce, setAnnounce] = useState('');
+
+  return (
+    <>
       {items.length > 0 && (
         <ul className={styles.chips} aria-label="Attachments">
           {items.map((item, index) => (
@@ -227,6 +250,7 @@ export function AttachmentPicker({
                   : styles.chip
               }
             >
+              <FileText size={16} aria-hidden="true" className={styles.fileIcon} />
               <span className={styles.name} title={item.file.name}>
                 {item.file.name}
               </span>
@@ -256,7 +280,7 @@ export function AttachmentPicker({
                       setAnnounce(`${item.file.name} moved earlier`);
                     }}
                   >
-                    &#8249;
+                    <ChevronLeft size={14} aria-hidden="true" />
                   </button>
                   <button
                     type="button"
@@ -268,7 +292,7 @@ export function AttachmentPicker({
                       setAnnounce(`${item.file.name} moved later`);
                     }}
                   >
-                    &#8250;
+                    <ChevronRight size={14} aria-hidden="true" />
                   </button>
                 </>
               )}
@@ -278,15 +302,15 @@ export function AttachmentPicker({
                 aria-label={`Remove ${item.file.name}`}
                 onClick={() => onRemove(item.key)}
               >
-                &#215;
+                <X size={14} aria-hidden="true" />
               </button>
             </li>
           ))}
         </ul>
       )}
-      <span className={styles.srOnly} aria-live="polite">
+      <span className="visually-hidden" aria-live="polite">
         {announce}
       </span>
-    </div>
+    </>
   );
 }

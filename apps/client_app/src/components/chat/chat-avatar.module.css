@@ -1,0 +1,11 @@
+.group {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: var(--avatar-size);
+  height: var(--avatar-size);
+  color: var(--color-link);
+  background: var(--color-primary-soft);
+  border-radius: var(--radius-full);
+}

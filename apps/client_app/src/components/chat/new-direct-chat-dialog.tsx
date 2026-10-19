@@ -2,7 +2,7 @@
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import type { IChatUser } from '@repo/contracts';
 
@@ -11,7 +11,12 @@ import { listFollowers, listFollowing } from '../../lib/api/follows';
 import { getUsersByIds, searchProfiles } from '../../lib/api/profile';
 import { useAuth } from '../../lib/auth/auth-context';
 
+import { Dialog } from '../ui/dialog';
+import { Input } from '../ui/input';
+import { Spinner } from '../ui/spinner';
+
 import styles from './new-direct-chat-dialog.module.css';
+import { UserOption } from './user-option';
 
 export interface Suggestion {
   userId: string;
@@ -19,6 +24,7 @@ export interface Suggestion {
   /** Resolved display name; undefined while loading or for unknown users. */
   displayName?: string;
   username?: string;
+  avatarUrl?: string | null;
 }
 
 /**
@@ -64,6 +70,7 @@ export function useFollowSuggestions(enabled: boolean) {
     ...s,
     displayName: byId.get(s.userId)?.displayName,
     username: byId.get(s.userId)?.username,
+    avatarUrl: byId.get(s.userId)?.avatarUrl,
   }));
 
   return {
@@ -83,6 +90,7 @@ export function NewDirectChatDialog({ onClose }: NewDirectChatDialogProps) {
   const { accessToken, user } = useAuth();
   const router = useRouter();
   const queryClient = useQueryClient();
+  const searchRef = useRef<HTMLInputElement>(null);
   const [text, setText] = useState('');
   const [term, setTerm] = useState('');
   const [opening, setOpening] = useState(false);
@@ -93,15 +101,10 @@ export function NewDirectChatDialog({ onClose }: NewDirectChatDialogProps) {
     return () => clearTimeout(timer);
   }, [text]);
 
+  // The dialog is opened by an effect of its own, so focus the field after it.
   useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+    searchRef.current?.focus();
+  }, []);
 
   const me = user?.id;
   const searching = term.length > 0;
@@ -134,39 +137,15 @@ export function NewDirectChatDialog({ onClose }: NewDirectChatDialogProps) {
   );
 
   return (
-    <div
-      className={styles.backdrop}
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
-          onClose();
-        }
-      }}
-    >
-      <div
-        className={styles.dialog}
-        role="dialog"
-        aria-modal="true"
-        aria-label="New message"
-      >
-        <div className={styles.header}>
-          <h2 className={styles.heading}>New message</h2>
-          <button
-            type="button"
-            className="button button--ghost"
-            onClick={onClose}
-          >
-            Close
-          </button>
-        </div>
-
-        <input
-          className="input"
+    <Dialog open onClose={onClose} title="New message" size="sm">
+      <div className={styles.content}>
+        <Input
+          ref={searchRef}
           type="search"
           placeholder="Search by username"
           aria-label="Search users"
           value={text}
           onChange={(event) => setText(event.target.value)}
-          autoFocus
         />
 
         {error && (
@@ -177,68 +156,65 @@ export function NewDirectChatDialog({ onClose }: NewDirectChatDialogProps) {
 
         {searching ? (
           <>
-            {results.isPending && <span className="muted">Searching…</span>}
+            {results.isPending && (
+              <p className={styles.status} role="status">
+                <Spinner size={14} /> Searching…
+              </p>
+            )}
             {results.isError && (
               <p className={styles.error} role="alert">
                 Search failed. Please try again.
               </p>
             )}
             {results.isSuccess && users.length === 0 && (
-              <span className="muted">No users found.</span>
+              <p className={styles.status}>No users found.</p>
             )}
             <ul className={styles.list}>
               {users.map((u) => (
                 <li key={u.userId}>
-                  <button
-                    type="button"
-                    className={styles.option}
+                  <UserOption
+                    name={u.displayName}
+                    meta={`@${u.username}`}
+                    avatarUrl={u.avatarUrl}
                     disabled={opening}
                     onClick={() => void open(u.userId)}
-                  >
-                    <span className={styles.optionName}>{u.displayName}</span>
-                    <span className={styles.optionMeta}>@{u.username}</span>
-                  </button>
+                  />
                 </li>
               ))}
             </ul>
           </>
         ) : (
           <>
-            <span className={styles.subheading}>Suggestions</span>
+            <h3 className={styles.subheading}>Suggestions</h3>
             {suggestions.isPending && (
-              <span className="muted">Loading suggestions…</span>
+              <p className={styles.status} role="status">
+                <Spinner size={14} /> Loading suggestions…
+              </p>
             )}
             {suggestions.isError && (
-              <span className="muted">Could not load suggestions.</span>
+              <p className={styles.status}>Could not load suggestions.</p>
             )}
             {suggestions.isSuccess && (suggestions.data?.length ?? 0) === 0 && (
-              <span className="muted">
+              <p className={styles.status}>
                 Follow someone, or search above to find anyone.
-              </span>
+              </p>
             )}
             <ul className={styles.list}>
               {suggestions.data?.map((s) => (
                 <li key={s.userId}>
-                  <button
-                    type="button"
-                    className={styles.option}
+                  <UserOption
+                    name={s.displayName ?? `User ${s.userId.slice(0, 8)}`}
+                    meta={`${s.username ? `@${s.username} · ` : ''}${s.relation}`}
+                    avatarUrl={s.avatarUrl}
                     disabled={opening}
                     onClick={() => void open(s.userId)}
-                  >
-                    <span className={styles.optionName}>
-                      {s.displayName ?? `User ${s.userId.slice(0, 8)}`}
-                    </span>
-                    <span className={styles.optionMeta}>
-                      {s.username ? `@${s.username} · ` : ''}
-                      {s.relation}
-                    </span>
-                  </button>
+                  />
                 </li>
               ))}
             </ul>
           </>
         )}
       </div>
-    </div>
+    </Dialog>
   );
 }

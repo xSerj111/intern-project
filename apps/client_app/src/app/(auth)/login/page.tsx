@@ -1,12 +1,17 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
 
-import { Logo } from '../../../components/brand/logo';
+import { FormAlert } from '../../../components/auth/form-alert';
+import { GoogleAuthButton } from '../../../components/auth/google-auth-button';
+import { PasswordInput } from '../../../components/auth/password-input';
+import { Button } from '../../../components/ui/button';
+import { Input } from '../../../components/ui/input';
 import { useAuth } from '../../../lib/auth/auth-context';
 
-import styles from './login.module.css';
+import styles from '../../../components/auth/auth-form.module.css';
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -57,65 +62,56 @@ export default function LoginPage() {
   }
 
   return (
-    <div className={`container ${styles.page}`}>
-      <Logo />
-      <h1 className={styles.title}>Sign in</h1>
+    <div className={styles.page}>
+      <div className={styles.heading}>
+        <h1 className={styles.title}>Welcome back</h1>
+        <p className={styles.subtitle}>Sign in to see what you missed.</p>
+      </div>
 
       <form
-        className={`card ${styles.form}`}
+        className={styles.form}
         onSubmit={(event) => {
           void handleSubmit(event);
         }}
         noValidate
       >
-        {errors.form && (
-          <p className={styles.formError} role="alert">
-            {errors.form}
-          </p>
-        )}
+        {errors.form && <FormAlert message={errors.form} />}
 
-        <div className={styles.field}>
-          <label className={styles.label} htmlFor="email">
-            Email
-          </label>
-          <input
-            id="email"
-            className="input"
-            type="email"
-            autoComplete="email"
-            value={email}
-            onChange={(event) => setEmail(event.target.value)}
-            aria-invalid={Boolean(errors.email)}
-          />
-          {errors.email && <p className={styles.fieldError}>{errors.email}</p>}
-        </div>
+        <Input
+          label="Email"
+          type="email"
+          autoComplete="email"
+          inputMode="email"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+          error={errors.email}
+        />
 
-        <div className={styles.field}>
-          <label className={styles.label} htmlFor="password">
-            Password
-          </label>
-          <input
-            id="password"
-            className="input"
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-            aria-invalid={Boolean(errors.password)}
-          />
-          {errors.password && (
-            <p className={styles.fieldError}>{errors.password}</p>
-          )}
-        </div>
+        <PasswordInput
+          label="Password"
+          autoComplete="current-password"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
+          error={errors.password}
+        />
 
-        <button
-          type="submit"
-          className={`button ${styles.submit}`}
-          disabled={isSubmitting}
-        >
+        <Button type="submit" size="lg" fullWidth loading={isSubmitting}>
           {isSubmitting ? 'Signing in…' : 'Sign in'}
-        </button>
+        </Button>
       </form>
+
+      <div className={styles.divider} aria-hidden="true">
+        or
+      </div>
+
+      <GoogleAuthButton mode="signin" />
+
+      <p className={styles.switch}>
+        New to Innogram?{' '}
+        <Link href="/signup" className={styles.switchLink}>
+          Create an account
+        </Link>
+      </p>
     </div>
   );
 }

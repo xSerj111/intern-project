@@ -1,20 +1,20 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import Link from 'next/link';
 
 import type { INotificationPreferences } from '@repo/contracts';
 
-import {
-  ErrorState,
-  LoadingState,
-} from '../../../../components/common/async-state';
+import { LoadError } from '../../../../components/profile/load-error';
+import { Skeleton, SkeletonGroup } from '../../../../components/ui/skeleton';
+import { Switch } from '../../../../components/ui/switch';
 import {
   getPreferences,
   notificationKeys,
   updatePreferences,
 } from '../../../../lib/api/notifications';
 import { useAuth } from '../../../../lib/auth/auth-context';
+import { SettingsHeader } from '../_components/settings-header';
+import { SignInPrompt } from '../_components/sign-in-prompt';
 
 import styles from './page.module.css';
 
@@ -105,23 +105,23 @@ export default function NotificationSettingsPage() {
   }
 
   let content;
-  if (!isHydrated) {
-    content = <LoadingState label="Loading your session…" />;
-  } else if (!isSignedIn) {
+  if (!isSignedIn && isHydrated) {
+    content = <SignInPrompt what="manage your notification settings" />;
+  } else if (!isHydrated || query.isPending) {
     content = (
-      <div className={styles.prompt}>
-        <p className="muted">Sign in to manage your notification settings.</p>
-        <Link href="/login" className="button">
-          Sign in
-        </Link>
-      </div>
+      <SkeletonGroup
+        label="Loading your preferences"
+        className={styles.skeleton}
+      >
+        {OPTIONS.map(({ key }) => (
+          <Skeleton key={key} height={44} radius="md" />
+        ))}
+      </SkeletonGroup>
     );
-  } else if (query.isPending) {
-    content = <LoadingState label="Loading your preferences…" />;
   } else if (query.isError) {
     content = (
-      <ErrorState
-        message="We couldn't load your notification preferences. Retrying automatically…"
+      <LoadError
+        message="We couldn’t load your notification preferences."
         onRetry={() => {
           void query.refetch();
         }}
@@ -130,31 +130,23 @@ export default function NotificationSettingsPage() {
   } else {
     const prefs = query.data;
     content = (
-      <section className={`card ${styles.card}`} aria-label="Email preferences">
-        <p className="muted">
-          Choose which events send you an email. Changes apply to notifications
-          created after you save.
-        </p>
+      <section className={styles.card} aria-label="Email preferences">
         <ul className={styles.list}>
           {OPTIONS.map(({ key, label, description }) => (
             <li key={key} className={styles.item}>
-              <label className={styles.row}>
-                <span className={styles.text}>
-                  <span className={styles.label}>{label}</span>
-                  <span className="muted">{description}</span>
-                </span>
-                <input
-                  type="checkbox"
-                  className={styles.checkbox}
-                  checked={prefs[key]}
-                  onChange={(event) => toggle(key, event.target.checked)}
-                />
-              </label>
+              <Switch
+                label={label}
+                description={description}
+                checked={prefs[key]}
+                onChange={(value) => toggle(key, value)}
+              />
             </li>
           ))}
         </ul>
         <div className={styles.status} aria-live="polite">
-          {mutation.isPending && <span className="muted">Saving…</span>}
+          {mutation.isPending && (
+            <span className={styles.muted}>Saving…</span>
+          )}
           {mutation.isSuccess && !mutation.isPending && (
             <span className={styles.saved}>Saved</span>
           )}
@@ -169,8 +161,11 @@ export default function NotificationSettingsPage() {
   }
 
   return (
-    <div className={`container ${styles.page}`}>
-      <h1 className={styles.title}>Notification settings</h1>
+    <div className={styles.page}>
+      <SettingsHeader
+        title="Notifications"
+        description="Choose which events send you an email. Changes apply to notifications created after you save."
+      />
       {content}
     </div>
   );

@@ -1,46 +1,25 @@
 'use client';
 
-import { useState } from 'react';
+import { MessageCircle } from 'lucide-react';
 
-import { ConversationList } from '../../../components/chat/conversation-list';
-import { NewDirectChatDialog } from '../../../components/chat/new-direct-chat-dialog';
-import { NewGroupDialog } from '../../../components/chat/new-group-dialog';
+import { useMessagesDialogs } from '../../../components/chat/messages-dialogs';
+import { Button } from '../../../components/ui/button';
+import { EmptyState } from '../../../components/ui/empty-state';
 
 import styles from './page.module.css';
 
+/** Right pane when no conversation is open (hidden on phones, where the list shows). */
 export default function MessagesPage() {
-  const [dialog, setDialog] = useState<'direct' | 'group' | null>(null);
+  const { openDirect } = useMessagesDialogs();
 
   return (
-    <div className={`container ${styles.page}`}>
-      <div className={styles.header}>
-        <h1 className={styles.title}>Messages</h1>
-        <div className={styles.actions}>
-          <button
-            type="button"
-            className="button button--ghost"
-            onClick={() => setDialog('group')}
-          >
-            New group
-          </button>
-          <button
-            type="button"
-            className="button"
-            onClick={() => setDialog('direct')}
-          >
-            New message
-          </button>
-        </div>
-      </div>
-
-      <section aria-label="Conversations">
-        <ConversationList />
-      </section>
-
-      {dialog === 'direct' && (
-        <NewDirectChatDialog onClose={() => setDialog(null)} />
-      )}
-      {dialog === 'group' && <NewGroupDialog onClose={() => setDialog(null)} />}
+    <div className={styles.empty}>
+      <EmptyState
+        icon={MessageCircle}
+        title="Select a conversation"
+        description="Pick a chat from the list, or start a new one."
+        action={<Button onClick={openDirect}>New message</Button>}
+      />
     </div>
   );
 }

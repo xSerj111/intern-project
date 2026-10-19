@@ -1,14 +1,14 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
+import { FileX } from 'lucide-react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 
-import {
-  ErrorState,
-  LoadingState,
-} from '../../../../components/common/async-state';
-import { PostCard } from '../../../../components/feed/feed-list';
+import { PostDetail } from '../../../../components/posts/post-detail';
+import { buttonClassName, Button } from '../../../../components/ui/button';
+import { EmptyState } from '../../../../components/ui/empty-state';
+import { Skeleton, SkeletonGroup } from '../../../../components/ui/skeleton';
 import { ApiError } from '../../../../lib/api/client';
 import { getPost, postKeys } from '../../../../lib/api/posts';
 import { useAuth } from '../../../../lib/auth/auth-context';
@@ -25,11 +25,12 @@ function isUnavailable(error: unknown): boolean {
 /** Landing page for notification and email links (`/posts/{postId}`). */
 export default function PostPage() {
   const { postId } = useParams<{ postId: string }>();
-  const { accessToken, isHydrated } = useAuth();
+  const { getAccessToken, isHydrated, user } = useAuth();
 
   const query = useQuery({
-    queryKey: [...postKeys.detail(postId), accessToken],
-    queryFn: ({ signal }) => getPost(postId, { token: accessToken, signal }),
+    queryKey: [...postKeys.detail(postId), user?.id ?? null],
+    queryFn: ({ signal }) =>
+      getPost(postId, { token: getAccessToken(), signal }),
     enabled: isHydrated,
     // A missing post will not reappear on retry, so skip the default retry/poll.
     retry: (count, error) => !isUnavailable(error) && count < 2,
@@ -41,36 +42,50 @@ export default function PostPage() {
 
   let body;
   if (!isHydrated || query.isPending) {
-    body = <LoadingState label="Loading post…" />;
+    body = (
+      <SkeletonGroup label="Loading post…" className={styles.loading}>
+        <Skeleton height="auto" radius="md" className={styles.loadingMedia} />
+        <div className={styles.loadingLines}>
+          <Skeleton width="40%" height={14} />
+          <Skeleton width="85%" height={12} />
+          <Skeleton width="60%" height={12} />
+        </div>
+      </SkeletonGroup>
+    );
   } else if (query.isError && isUnavailable(query.error)) {
     body = (
-      <div className={styles.unavailable}>
-        <p>This content is no longer available</p>
-        <Link href="/" className="button">
-          Back to Home
-        </Link>
-      </div>
+      <EmptyState
+        icon={FileX}
+        title="This content is no longer available"
+        description="The post may have been deleted, or you may not have access to it."
+        action={
+          <Link href="/" className={buttonClassName()}>
+            Back to Home
+          </Link>
+        }
+      />
     );
   } else if (query.isError) {
     body = (
-      <ErrorState
-        message="We couldn't load this post."
-        onRetry={() => {
-          void query.refetch();
-        }}
-      />
+      <div className={styles.error} role="alert">
+        <p>We couldn&apos;t load this post.</p>
+        <Button
+          variant="secondary"
+          onClick={() => {
+            void query.refetch();
+          }}
+        >
+          Try again
+        </Button>
+      </div>
     );
   } else {
-    body = (
-      <ul className={styles.list}>
-        <PostCard post={query.data} commentsOpen />
-      </ul>
-    );
+    body = <PostDetail post={query.data} />;
   }
 
   return (
-    <div className={`container ${styles.page}`}>
-      <h1 className={styles.title}>Post</h1>
+    <div className={styles.page}>
+      <h1 className="visually-hidden">Post</h1>
       {body}
     </div>
   );

@@ -30,3 +30,14 @@ export function createComment(
     body,
   });
 }
+
+/** Delete one of the caller's own comments (`DELETE /comments/:id`, 204). */
+export function deleteComment(
+  commentId: string,
+  { token }: { token?: string | null } = {},
+): Promise<void> {
+  return coreApi<void>(`/comments/${commentId}`, {
+    method: 'DELETE',
+    token,
+  });
+}

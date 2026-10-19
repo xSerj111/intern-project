@@ -1,24 +1,6 @@
-.page {
+.empty {
   display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-  padding-top: 1.5rem;
-  padding-bottom: 2rem;
-}
-
-.header {
-  display: flex;
+  flex: 1;
   align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-.title {
-  font-size: 1.75rem;
-  letter-spacing: -0.02em;
-}
-
-.actions {
-  display: flex;
-  gap: 0.5rem;
+  justify-content: center;
 }

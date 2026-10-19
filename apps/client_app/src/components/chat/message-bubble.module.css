@@ -1,167 +1,197 @@
 .row {
   display: flex;
-  flex-direction: column;
-  max-width: 80%;
-  align-items: flex-start;
+  align-items: flex-end;
+  gap: var(--space-2);
+  margin-top: 2px;
 }
 
 .rowOwn {
-  align-self: flex-end;
+  justify-content: flex-end;
+}
+
+.groupStart {
+  margin-top: var(--space-3);
+}
+
+.avatarSlot {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+}
+
+.column {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  max-width: min(85%, 36rem);
+}
+
+.columnOwn {
   align-items: flex-end;
 }
 
-.bubble {
-  margin: 0;
-  padding: 0.5rem 0.8rem;
-  border-radius: 14px;
-  background: var(--innogram-bg);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.bubbleOwn {
-  background: var(--innogram-primary);
-  color: #fff;
-}
-
-.bubbleSending {
-  opacity: 0.6;
-}
-
-.bubbleFailed {
-  background: var(--innogram-danger-bg);
-  color: var(--innogram-danger);
-  border: 1px solid var(--innogram-danger);
-}
-
-.meta {
-  display: flex;
-  gap: 0.5rem;
-  align-items: center;
-  margin-top: 0.15rem;
-  font-size: 0.75rem;
-  color: var(--innogram-muted);
-}
-
-.failed {
-  color: var(--innogram-danger);
-}
-
-.linkButton {
-  background: none;
-  border: none;
-  padding: 0;
-  font: inherit;
-  color: var(--innogram-primary);
-  cursor: pointer;
-  text-decoration: underline;
-}
-
-.bubbleDeleted {
-  background: transparent;
-  color: var(--innogram-muted);
-  font-style: italic;
-  border: 1px dashed var(--innogram-border);
+.author {
+  margin: 0 var(--space-3) 2px;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text-muted);
 }
 
 .bubbleLine {
   display: flex;
-  align-items: flex-start;
-  gap: 0.25rem;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: 100%;
 }
 
-.rowOwn .bubbleLine {
+.bubbleLineOwn {
   flex-direction: row-reverse;
-}
-
-.actions {
-  position: relative;
-}
-
-.menuButton {
-  background: none;
-  border: none;
-  padding: 0.1rem 0.4rem;
-  font: inherit;
-  line-height: 1;
-  color: var(--innogram-muted);
-  cursor: pointer;
-  border-radius: 6px;
-}
-
-.menuButton:hover,
-.menuButton:focus-visible {
-  background: var(--innogram-border);
-  color: var(--innogram-text);
-}
-
-.menu {
-  position: absolute;
-  top: 100%;
-  right: 0;
-  z-index: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 7rem;
-  padding: 0.25rem;
-  background: var(--innogram-surface);
-  border: 1px solid var(--innogram-border);
-  border-radius: 8px;
-  box-shadow: var(--innogram-shadow);
-}
-
-.menuItem {
-  background: none;
-  border: none;
-  padding: 0.35rem 0.6rem;
-  font: inherit;
-  text-align: left;
-  color: var(--innogram-text);
-  cursor: pointer;
-  border-radius: 6px;
-}
-
-.menuItem:hover,
-.menuItem:focus-visible {
-  background: var(--innogram-bg);
-}
-
-.menuItemDanger {
-  color: var(--innogram-danger);
-}
-
-.editor {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  width: min(32rem, 70vw);
-}
-
-.editorTextarea {
-  resize: vertical;
-  min-height: 2.5rem;
-}
-
-.editorButtons {
-  display: flex;
-  gap: 0.5rem;
-  justify-content: flex-end;
-}
-
-.error {
-  color: var(--innogram-danger);
-  font-size: 0.75rem;
 }
 
 .content {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 0.3rem;
+  gap: var(--space-1);
   min-width: 0;
   max-width: 100%;
 }
 
-.rowOwn .content {
+.contentOwn {
   align-items: flex-end;
+}
+
+.bubble {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border-radius: var(--radius-lg);
+}
+
+.bubbleOther {
+  color: var(--color-text);
+  background: var(--color-surface-3);
+}
+
+.bubbleOwn {
+  color: var(--color-on-primary);
+  background: var(--color-primary);
+}
+
+/* Tight corners on the side facing the rest of the group. */
+.bubbleOther.joinPrev {
+  border-top-left-radius: var(--radius-xs);
+}
+
+.bubbleOther.joinNext {
+  border-bottom-left-radius: var(--radius-xs);
+}
+
+.bubbleOwn.joinPrev {
+  border-top-right-radius: var(--radius-xs);
+}
+
+.bubbleOwn.joinNext {
+  border-bottom-right-radius: var(--radius-xs);
+}
+
+.bubble.bubbleSending {
+  opacity: 0.6;
+}
+
+.bubble.bubbleFailed {
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+  box-shadow: inset 0 0 0 1px var(--color-danger);
+}
+
+.bubble.bubbleDeleted {
+  font-style: italic;
+  color: var(--color-text-muted);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--color-border-strong);
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 2px var(--space-3) 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.failed {
+  color: var(--color-danger);
+}
+
+.linkButton {
+  padding: 0;
+  font: inherit;
+  color: var(--color-link);
+  text-decoration: underline;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.error {
+  margin: 2px var(--space-3) 0;
+  font-size: var(--text-xs);
+  color: var(--color-danger);
+}
+
+/* Per-message actions: revealed on hover and focus, always shown on touch. */
+.actions {
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity var(--duration-fast) ease;
+}
+
+.bubbleLine:hover .actions,
+.actions:focus-within,
+.actions:has([aria-expanded='true']) {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .actions {
+    opacity: 0.7;
+  }
+}
+
+.menuTrigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+}
+
+.menuTrigger:hover,
+.menuTrigger[aria-expanded='true'] {
+  color: var(--color-text);
+  background: var(--color-surface-3);
+}
+
+.editor {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  width: min(28rem, 75vw);
+}
+
+.editorButtons {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
 }

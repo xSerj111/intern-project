@@ -1,0 +1,9 @@
+.page {
+  max-width: 560px;
+}
+
+.skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}

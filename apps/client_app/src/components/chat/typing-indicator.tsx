@@ -75,26 +75,35 @@ export function useTypingUsers(chatId: string): IChatUser[] {
   return users;
 }
 
-/** Human text for the typing users, or `null` when nobody is typing. */
+/** Human text for the typing users (no trailing dots), or `null` when nobody is typing. */
 export function formatTypingText(users: IChatUser[]): string | null {
   if (users.length === 0) {
     return null;
   }
   if (users.length === 1) {
-    return `${users[0].displayName} is typing…`;
+    return `${users[0].displayName} is typing`;
   }
   if (users.length === 2) {
-    return `${users[0].displayName} and ${users[1].displayName} are typing…`;
+    return `${users[0].displayName} and ${users[1].displayName} are typing`;
   }
   return 'several people are typing';
 }
 
-/** "Anna is typing…" line for a chat. Reserves its height so the layout doesn't jump. */
+/** "Anna is typing" line with animated dots. Reserves its height so the layout doesn't jump. */
 export function TypingIndicator({ chatId }: { chatId: string }) {
   const text = formatTypingText(useTypingUsers(chatId));
   return (
     <div className={styles.typing} role="status" aria-live="polite">
-      {text}
+      {text && (
+        <>
+          <span className={styles.dots} aria-hidden="true">
+            <span />
+            <span />
+            <span />
+          </span>
+          <span className={styles.text}>{text}</span>
+        </>
+      )}
     </div>
   );
 }
