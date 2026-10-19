@@ -13,7 +13,7 @@ import { Button } from '../ui/button';
 import { Menu, type MenuEntry } from '../ui/menu';
 import { Textarea } from '../ui/input';
 
-import { ConfirmDialog } from './confirm-dialog';
+import { ConfirmDialog } from '../ui/confirm-dialog';
 import { MessageAttachments } from './message-attachments';
 import styles from './message-bubble.module.css';
 import { MESSAGE_MAX_LENGTH } from './message-composer';

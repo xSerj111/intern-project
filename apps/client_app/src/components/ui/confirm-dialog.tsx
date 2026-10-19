@@ -2,8 +2,8 @@
 
 import type { ReactNode } from 'react';
 
-import { Button } from '../ui/button';
-import { Dialog } from '../ui/dialog';
+import { Button } from './button';
+import { Dialog } from './dialog';
 
 import styles from './confirm-dialog.module.css';
 
@@ -12,6 +12,7 @@ interface ConfirmDialogProps {
   title: string;
   description?: ReactNode;
   confirmLabel: string;
+  cancelLabel?: string;
   /** Red confirm button for destructive actions. */
   destructive?: boolean;
   busy?: boolean;
@@ -27,6 +28,7 @@ export function ConfirmDialog({
   title,
   description,
   confirmLabel,
+  cancelLabel = 'Cancel',
   destructive = false,
   busy = false,
   error,
@@ -46,7 +48,7 @@ export function ConfirmDialog({
       footer={
         <>
           <Button variant="secondary" disabled={busy} onClick={onCancel}>
-            Cancel
+            {cancelLabel}
           </Button>
           <Button
             variant={destructive ? 'danger' : 'primary'}

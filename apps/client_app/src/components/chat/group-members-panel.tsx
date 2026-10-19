@@ -21,7 +21,7 @@ import { Button, IconButton } from '../ui/button';
 import { Input } from '../ui/input';
 import { Spinner } from '../ui/spinner';
 
-import { ConfirmDialog } from './confirm-dialog';
+import { ConfirmDialog } from '../ui/confirm-dialog';
 import styles from './group-members-panel.module.css';
 
 const TITLE_MAX = 100;

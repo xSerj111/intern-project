@@ -15,11 +15,10 @@ import {
 import { profileKeys } from '../../lib/api/profile';
 import { useAuth } from '../../lib/auth/auth-context';
 import { Button } from '../ui/button';
+import { ConfirmDialog } from '../ui/confirm-dialog';
 import { Dialog } from '../ui/dialog';
 import { Menu, type MenuEntry } from '../ui/menu';
 import { Textarea } from '../ui/input';
-
-import styles from './post-menu.module.css';
 
 export const POST_MAX_LENGTH = 500;
 
@@ -147,59 +146,28 @@ export function PostMenu({ post, onDeleted }: PostMenuProps) {
         </form>
       </Dialog>
 
-      <Dialog
+      <ConfirmDialog
         open={panel === 'archive'}
-        onClose={() => !archive.isPending && setPanel(null)}
         title="Archive this post?"
-        flush={!archive.isError}
         description="It will no longer appear in feeds or on your profile. You can't undo this here."
-        size="sm"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setPanel(null)}>
-              Cancel
-            </Button>
-            <Button loading={archive.isPending} onClick={() => archive.mutate()}>
-              Archive
-            </Button>
-          </>
-        }
-      >
-        {archive.isError && (
-          <p className={styles.error} role="alert">
-            Couldn&apos;t archive the post. Try again.
-          </p>
-        )}
-      </Dialog>
+        confirmLabel="Archive"
+        busy={archive.isPending}
+        error={archive.isError ? "Couldn't archive the post. Try again." : null}
+        onConfirm={() => archive.mutate()}
+        onCancel={() => setPanel(null)}
+      />
 
-      <Dialog
+      <ConfirmDialog
         open={panel === 'delete'}
-        onClose={() => !remove.isPending && setPanel(null)}
         title="Delete this post?"
-        flush={!remove.isError}
         description="This permanently removes the post along with its comments and likes."
-        size="sm"
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setPanel(null)}>
-              Cancel
-            </Button>
-            <Button
-              variant="danger"
-              loading={remove.isPending}
-              onClick={() => remove.mutate()}
-            >
-              Delete
-            </Button>
-          </>
-        }
-      >
-        {remove.isError && (
-          <p className={styles.error} role="alert">
-            Couldn&apos;t delete the post. Try again.
-          </p>
-        )}
-      </Dialog>
+        confirmLabel="Delete"
+        destructive
+        busy={remove.isPending}
+        error={remove.isError ? "Couldn't delete the post. Try again." : null}
+        onConfirm={() => remove.mutate()}
+        onCancel={() => setPanel(null)}
+      />
     </>
   );
 }

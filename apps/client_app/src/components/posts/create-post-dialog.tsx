@@ -19,6 +19,7 @@ import { useAuth } from '../../lib/auth/auth-context';
 import { cx } from '../../lib/cx';
 import { Avatar } from '../ui/avatar';
 import { Button, IconButton } from '../ui/button';
+import { ConfirmDialog } from '../ui/confirm-dialog';
 import { Dialog } from '../ui/dialog';
 import { Textarea } from '../ui/input';
 import { Spinner } from '../ui/spinner';
@@ -339,26 +340,16 @@ function Composer({ onClose }: { onClose: () => void }) {
         </form>
       </Dialog>
 
-      <Dialog
+      <ConfirmDialog
         open={confirmDiscard}
-        onClose={() => setConfirmDiscard(false)}
         title="Discard this post?"
         description="Your text and photos won't be saved."
-        size="sm"
-        flush
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setConfirmDiscard(false)}>
-              Keep editing
-            </Button>
-            <Button variant="danger" onClick={onClose}>
-              Discard
-            </Button>
-          </>
-        }
-      >
-        {null}
-      </Dialog>
+        confirmLabel="Discard"
+        cancelLabel="Keep editing"
+        destructive
+        onConfirm={onClose}
+        onCancel={() => setConfirmDiscard(false)}
+      />
     </>
   );
 }

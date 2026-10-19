@@ -13,7 +13,7 @@ import { cx } from '../../lib/cx';
 import { LikeButton } from '../likes/like-button';
 import { Avatar } from '../ui/avatar';
 import { Button, IconButton } from '../ui/button';
-import { Dialog } from '../ui/dialog';
+import { ConfirmDialog } from '../ui/confirm-dialog';
 import { RelativeTime } from '../ui/relative-time';
 import { Skeleton, SkeletonGroup } from '../ui/skeleton';
 
@@ -234,34 +234,17 @@ export function PostComments({
         )}
       </div>
 
-      <Dialog
+      <ConfirmDialog
         open={pendingDelete !== null}
-        onClose={() => !remove.isPending && setPendingDelete(null)}
         title="Delete comment?"
         description="This can't be undone."
-        size="sm"
-        flush={!remove.isError}
-        footer={
-          <>
-            <Button variant="ghost" onClick={() => setPendingDelete(null)}>
-              Cancel
-            </Button>
-            <Button
-              variant="danger"
-              loading={remove.isPending}
-              onClick={() => pendingDelete && remove.mutate(pendingDelete.id)}
-            >
-              Delete
-            </Button>
-          </>
-        }
-      >
-        {remove.isError && (
-          <p className={styles.error} role="alert">
-            Couldn&apos;t delete the comment. Try again.
-          </p>
-        )}
-      </Dialog>
+        confirmLabel="Delete"
+        destructive
+        busy={remove.isPending}
+        error={remove.isError ? "Couldn't delete the comment. Try again." : null}
+        onConfirm={() => pendingDelete && remove.mutate(pendingDelete.id)}
+        onCancel={() => setPendingDelete(null)}
+      />
     </section>
   );
 }
