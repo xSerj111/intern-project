@@ -16,8 +16,11 @@ export interface IUpdateProfileRequest {
   displayName?: string;
   /** New bio, or `null` to clear it */
   bio?: string | null;
-  /** New avatar image URL, or `null` to clear it */
-  avatarUrl?: string | null;
+  /**
+   * Id of a public asset the requester uploaded via `POST /assets/upload`,
+   * or `null` to clear the avatar. The server resolves it to a URL.
+   */
+  avatarAssetId?: string | null;
 }
 
 /**

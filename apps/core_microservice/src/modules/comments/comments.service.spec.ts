@@ -3,6 +3,7 @@ import { EntityByIdNotFoundError, LoggerKey, RoutingKeys } from '@repo/shared';
 import { OUTBOX_PORT } from '../../common/messaging/outbox.port';
 import { USER_DIRECTORY_PORT } from '../profiles/domain/interfaces/user-directory.port';
 import { fakePost } from '../posts/__tests__/fakers';
+import { fakeComment } from './__tests__/fakers/comment.faker';
 import { Comment } from './domain/entities/comment.entity';
 import { CommentsService } from './comments.service';
 import { COMMENT_REPOSITORY } from './domain/interfaces/comment-repository.port';
@@ -143,6 +144,22 @@ describe('CommentsService', () => {
       ).rejects.toThrow(EntityByIdNotFoundError);
       expect(commentSave).not.toHaveBeenCalled();
       expect(outbox.add).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getAuthors', () => {
+    it('resolves each distinct author with one directory call', async () => {
+      const comments = [
+        fakeComment({ id: 'c-1', authorId: COMMENTER }),
+        fakeComment({ id: 'c-2', authorId: POST_AUTHOR }),
+        fakeComment({ id: 'c-3', authorId: COMMENTER }),
+      ];
+
+      const authors = await service.getAuthors(comments);
+
+      expect(directory.getUsers).toHaveBeenCalledTimes(1);
+      expect(directory.getUsers).toHaveBeenCalledWith([COMMENTER, POST_AUTHOR]);
+      expect([...authors.keys()]).toEqual([COMMENTER, POST_AUTHOR]);
     });
   });
 });

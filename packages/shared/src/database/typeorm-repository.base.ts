@@ -78,7 +78,8 @@ export abstract class TypeormRepositoryBase<
         if (index === segments.length - 1) {
           node[segment] = node[segment] ?? true;
         } else {
-          node[segment] = (node[segment] as Record<string, unknown>) ?? {};
+          // `a` listed before `a.b` leaves `true` behind: upgrade it to a node.
+          if (typeof node[segment] !== "object") node[segment] = {};
           node = node[segment] as Record<string, unknown>;
         }
       });

@@ -1,6 +1,15 @@
-import { EntityByIdNotFoundError, EXCERPT_MAX_LENGTH } from '@repo/shared';
+import {
+  AccessDeniedError,
+  EntityByIdNotFoundError,
+  EXCERPT_MAX_LENGTH,
+} from '@repo/shared';
 import { fakePost } from '../../__tests__/fakers/post.faker';
-import { InvalidPostStateError, Post, PostStatus } from './post.entity';
+import {
+  InvalidPostStateError,
+  Post,
+  PostStatus,
+  PostStatusNotVisibleError,
+} from './post.entity';
 
 describe('Post', () => {
   describe('create', () => {
@@ -97,6 +106,46 @@ describe('Post', () => {
       const post = fakePost({ content: `  ${'x'.repeat(500)}  ` });
 
       expect(post.excerpt()).toHaveLength(EXCERPT_MAX_LENGTH);
+    });
+  });
+
+  describe('assertStatusListableBy', () => {
+    const AUTHOR = 'author-1';
+
+    it('lets anyone, even anonymous, list published posts', () => {
+      expect(() =>
+        Post.assertStatusListableBy(AUTHOR, PostStatus.Published, undefined),
+      ).not.toThrow();
+      expect(() =>
+        Post.assertStatusListableBy(AUTHOR, PostStatus.Published, 'other'),
+      ).not.toThrow();
+    });
+
+    it.each([PostStatus.Draft, PostStatus.Archived])(
+      'lets the author list their %s posts',
+      (status) => {
+        expect(() =>
+          Post.assertStatusListableBy(AUTHOR, status, AUTHOR),
+        ).not.toThrow();
+      },
+    );
+
+    it.each([PostStatus.Draft, PostStatus.Archived])(
+      'forbids other users and anonymous callers from listing %s posts',
+      (status) => {
+        expect(() =>
+          Post.assertStatusListableBy(AUTHOR, status, 'other'),
+        ).toThrow(PostStatusNotVisibleError);
+        expect(() =>
+          Post.assertStatusListableBy(AUTHOR, status, undefined),
+        ).toThrow(PostStatusNotVisibleError);
+      },
+    );
+
+    it('is an AccessDeniedError so it maps to 403', () => {
+      expect(new PostStatusNotVisibleError(PostStatus.Draft)).toBeInstanceOf(
+        AccessDeniedError,
+      );
     });
   });
 });

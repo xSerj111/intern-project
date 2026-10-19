@@ -6,7 +6,6 @@ import {
   Param,
   ParseUUIDPipe,
   UseGuards,
-  ForbiddenException,
   Query,
 } from '@nestjs/common';
 import { ProfilesService } from './profiles.service';
@@ -115,15 +114,11 @@ export class ProfilesController {
     @Body() updateProfileDto: UpdateProfileDto,
     @CurrentUser('sub') authUserId: string,
   ): Promise<ProfileResponseDto> {
-    const profile = await this.profilesService.getProfile(id);
-
-    if (profile.authUserId !== authUserId) {
-      throw new ForbiddenException('You can only update your profile');
-    }
-
+    // Ownership (403) is enforced by the entity inside the service.
     const updatedProfile = await this.profilesService.updateProfile(
       id,
       updateProfileDto,
+      authUserId,
     );
     return new ProfileResponseDto(updatedProfile);
   }

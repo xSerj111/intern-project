@@ -1,4 +1,5 @@
 import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
+import type { IChatUser } from '@repo/contracts';
 import {
   type ActorSnapshot,
   CreateCommentDto,
@@ -121,6 +122,16 @@ export class CommentsService {
     viewerId?: string,
   ): Promise<Map<string, LikeStats>> {
     return this.commentRepository.getLikeStats(commentIds, viewerId);
+  }
+
+  /**
+   * Author identities for a set of comments (one `IN` query, de-duplicated);
+   * authors without a profile are absent from the map.
+   */
+  async getAuthors(comments: Comment[]): Promise<Map<string, IChatUser>> {
+    return this.userDirectory.getUsers([
+      ...new Set(comments.map((c) => c.authorId)),
+    ]);
   }
 
   async softDeleteComment(userId: string, id: string): Promise<void> {

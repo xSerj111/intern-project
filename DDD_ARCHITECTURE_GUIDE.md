@@ -451,7 +451,8 @@ Two older services still inject a concrete repository class: `ProfilesService` (
 
 | Module | Owns | Exposes to other modules |
 |---|---|---|
-| `profiles` | `UserProfile`, profile search, by-ids lookup, lazy profile creation | `ProfilesService`, `USER_DIRECTORY_PORT` |
+| `profiles` | `UserProfile`, profile search, by-ids lookup, lazy profile creation, avatar rules (`AVATAR_ASSET_PORT` over `AssetsService`) | `ProfilesService`, `USER_DIRECTORY_PORT` |
+| `profile-summary` | `GET /profiles/by-user/:userId` (profile + follower/following/published-post counts). Separate module because follows and posts already import profiles | — |
 | `posts` | `Post`, `PostLike` and `PostAsset` entities, feed, search | `POST_REPOSITORY` |
 | `comments` | `Comment`, `CommentLike` entities | `COMMENT_REPOSITORY` |
 | `likes` | like/unlike routes and the like repositories (entities belong to posts/comments) | — |
@@ -547,7 +548,8 @@ request['user'] = result.payload; // { sub, email, jti, sid?, exp }
 | likes | `Post.assertLikeableBy`, `Comment.assertLikeableBy` (an unpublished post is visible to its author only) | `EntityByIdNotFoundError` (404) |
 | follows | scoped by construction: the follower is always `user.sub` | — |
 | posts, comments | service compares `authorId !== userId` | Nest `ForbiddenException` (403) |
-| profiles | `ProfilesController.updateProfile` compares `profile.authUserId` with `sub` | Nest `ForbiddenException` (403) |
+| profiles | `UserProfile.assertOwnedBy` (called from `ProfilesService.updateProfile`), `UserProfile.changeAvatar` (asset must be the owner's, public, a non-SVG image) | `NotProfileOwnerError`, `AvatarAssetNotOwnedError` (`AccessDeniedError`, 403) |
+| posts (by author) | `Post.assertStatusListableBy`: non-published statuses are listed for the author only | `PostStatusNotVisibleError` (`AccessDeniedError`, 403) |
 
 New code follows the chats pattern: an entity method such as `assertOwnedBy(userId)` throwing an `AccessDeniedError` subclass, called from the service (§8 steps 3, 4 and 8).
 

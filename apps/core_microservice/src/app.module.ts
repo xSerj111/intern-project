@@ -7,6 +7,7 @@ import { RedisModule } from './common/redis/redis.module';
 import { CommonAuthModule } from './common/auth/common-auth.module';
 import { MessagingModule } from './common/messaging/messaging.module';
 import { ProfilesModule } from './modules/profiles/profiles.module';
+import { ProfileSummaryModule } from './modules/profile-summary/profile-summary.module';
 import { PostsModule } from './modules/posts/posts.module';
 import { CommentsModule } from './modules/comments/comments.module';
 import { ChatsModule } from './modules/chats/chats.module';
@@ -34,6 +35,7 @@ import { NotificationsRelayModule } from './modules/notifications-relay/notifica
     MessagingModule,
 
     ProfilesModule,
+    ProfileSummaryModule,
     PostsModule,
     CommentsModule,
     ChatsModule,

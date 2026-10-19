@@ -2,7 +2,7 @@ import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import { type Logger, LoggerKey } from '@repo/shared';
 import { CreatePostDto } from './dto/create-post.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
-import { Post } from './domain/entities/post.entity';
+import { Post, PostStatus } from './domain/entities/post.entity';
 import {
   POST_REPOSITORY,
   type IPostRepository,
@@ -44,6 +44,35 @@ export class PostsService {
 
     return { items, total };
   }
+
+  /**
+   * One author's posts in `status`, newest first. Published posts are public;
+   * any other status is only listed for the author themself.
+   * @throws PostStatusNotVisibleError (403) when `viewerId` is not the author
+   */
+  async getPostsByAuthor(
+    authorId: string,
+    status: PostStatus,
+    page: number,
+    limit: number,
+    viewerId?: string,
+  ): Promise<{ items: Post[]; total: number }> {
+    Post.assertStatusListableBy(authorId, status, viewerId);
+
+    const [items, total] = await this.postRepository.findByAuthor(
+      authorId,
+      status,
+      page,
+      limit,
+    );
+
+    this.logger.debug('Posts by author retrieved', {
+      props: { authorId, status, count: items.length, total },
+    });
+
+    return { items, total };
+  }
+
   async createPost(
     userId: string,
     createPostDto: CreatePostDto,
@@ -65,7 +94,8 @@ export class PostsService {
     const savedPost = await this.postRepository.save(post);
     this.logger.debug('Post created', { props: { postId: savedPost.id } });
 
-    return savedPost;
+    // Reload so the response carries the joined author and the assets' files.
+    return this.postRepository.findOneByIdOrThrow(savedPost.id);
   }
 
   async getPost(id: string): Promise<Post> {
@@ -161,5 +191,10 @@ export class PostsService {
     viewerId?: string,
   ): Promise<Map<string, LikeStats>> {
     return this.postRepository.getLikeStats(postIds, viewerId);
+  }
+
+  /** Active comment count per post (one grouped query). */
+  async getCommentCounts(postIds: string[]): Promise<Map<string, number>> {
+    return this.postRepository.getCommentCounts(postIds);
   }
 }

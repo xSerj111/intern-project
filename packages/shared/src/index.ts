@@ -2,6 +2,7 @@
 export * from "./dtos/auth/create-user.dto";
 export * from "./dtos/auth/login.dto";
 export * from "./dtos/core/update-profile.dto";
+export * from "./dtos/core/posts-by-author-query.dto";
 export * from "./dtos/core/create-comment.dto";
 export * from "./dtos/core/update-comment.dto";
 export * from "./dtos/auth/google-login.dto";

@@ -23,20 +23,24 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator';
 export class CommentsController {
   constructor(private readonly commentsService: CommentsService) {}
 
-  /** Wraps comments with like counts and the viewer's own like (one query). */
+  /** Wraps comments with like counts, the viewer's own like and authors (one query each). */
   private async toResponses(
     comments: Comment[],
     viewerId?: string,
   ): Promise<CommentResponseDto[]> {
-    const stats = await this.commentsService.getLikeStats(
-      comments.map((comment) => comment.id),
-      viewerId,
-    );
+    const [stats, authors] = await Promise.all([
+      this.commentsService.getLikeStats(
+        comments.map((comment) => comment.id),
+        viewerId,
+      ),
+      this.commentsService.getAuthors(comments),
+    ]);
     return comments.map(
       (comment) =>
         new CommentResponseDto(
           comment,
           stats.get(comment.id) ?? { likeCount: 0, likedByMe: false },
+          authors.get(comment.authorId),
         ),
     );
   }

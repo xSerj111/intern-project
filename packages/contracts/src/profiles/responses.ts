@@ -12,3 +12,15 @@ export interface IProfileResponse {
   createdAt: string;
   updatedAt: string;
 }
+
+/**
+ * Profile with social stats, as returned by `GET /profiles/by-user/:userId`.
+ */
+export interface IProfileSummaryResponse extends IProfileResponse {
+  followerCount: number;
+  followingCount: number;
+  /** Published posts only. */
+  postCount: number;
+  /** `false` for the requester's own profile. */
+  isFollowedByMe: boolean;
+}

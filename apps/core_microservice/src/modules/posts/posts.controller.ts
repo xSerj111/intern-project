@@ -21,27 +21,29 @@ import { FeedQueryDto } from './dto/feed-query.dto';
 import { SearchQueryDto } from './dto/search-query.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../../common/auth/optional-jwt-auth.guard';
-import { Post } from './domain/entities/post.entity';
+import { Post, PostStatus } from './domain/entities/post.entity';
+import { PostsByAuthorQueryDto } from '@repo/shared';
 
 @Controller('posts')
 export class PostsController {
   constructor(private readonly postsService: PostsService) {}
 
-  /** Wraps posts with like counts and the viewer's own like (one query). */
+  /** Wraps posts with like/comment counts and the viewer's own like (one query each). */
   private async toResponses(
     posts: Post[],
     viewerId?: string,
   ): Promise<PostResponseDto[]> {
-    const stats = await this.postsService.getLikeStats(
-      posts.map((post) => post.id),
-      viewerId,
-    );
+    const ids = posts.map((post) => post.id);
+    const [likes, commentCounts] = await Promise.all([
+      this.postsService.getLikeStats(ids, viewerId),
+      this.postsService.getCommentCounts(ids),
+    ]);
     return posts.map(
       (post) =>
-        new PostResponseDto(
-          post,
-          stats.get(post.id) ?? { likeCount: 0, likedByMe: false },
-        ),
+        new PostResponseDto(post, {
+          ...(likes.get(post.id) ?? { likeCount: 0, likedByMe: false }),
+          commentCount: commentCounts.get(post.id) ?? 0,
+        }),
     );
   }
 
@@ -58,8 +60,6 @@ export class PostsController {
     @CurrentUser('sub') userId: string,
     @Body() createPostDto: CreatePostDto,
   ): Promise<PostResponseDto> {
-    console.log('User Id from token:', userId);
-
     return this.toResponse(
       await this.postsService.createPost(userId, createPostDto),
       userId,
@@ -99,6 +99,33 @@ export class PostsController {
 
     return {
       items: await this.toResponses(items, userId),
+      total,
+      page: query.page,
+      limit: query.limit,
+    };
+  }
+
+  /**
+   * `userId` is the author's auth user id. Published posts are public (the
+   * viewer's `likedByMe` is filled when a valid token is sent); draft/archived
+   * are only returned to the author, everyone else gets 403.
+   */
+  @Get('author/:userId')
+  @UseGuards(OptionalJwtAuthGuard)
+  async getPostsByAuthor(
+    @CurrentUser('sub') viewerId: string | undefined,
+    @Param('userId', ParseUUIDPipe) authorId: string,
+    @Query() query: PostsByAuthorQueryDto,
+  ) {
+    const { items, total } = await this.postsService.getPostsByAuthor(
+      authorId,
+      query.status as PostStatus,
+      query.page,
+      query.limit,
+      viewerId,
+    );
+    return {
+      items: await this.toResponses(items, viewerId),
       total,
       page: query.page,
       limit: query.limit,

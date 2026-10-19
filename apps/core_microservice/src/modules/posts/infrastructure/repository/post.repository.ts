@@ -18,7 +18,7 @@ export class PostRepository
 {
   public static readonly entity = Post;
   // Joined by default so reads include the post's author profile.
-  protected relations: string[] = ['author', 'assets'];
+  protected relations: string[] = ['author', 'assets', 'assets.asset'];
 
   constructor(
     @InjectRepository(Post)
@@ -43,13 +43,56 @@ export class PostRepository
         authorId: In(authorIds),
         status: PostStatus.Published,
       },
-      relations: { author: true, assets: true },
+      relations: { author: true, assets: { asset: true } },
       order: {
         createdAt: 'DESC',
       },
       skip,
       take: limit,
     });
+  }
+
+  async findByAuthor(
+    authorId: string,
+    status: PostStatus,
+    page: number,
+    limit: number,
+  ): Promise<[Post[], number]> {
+    return this.repository.findAndCount({
+      where: { authorId, status },
+      relations: { author: true, assets: { asset: true } },
+      order: { createdAt: 'DESC', id: 'DESC' },
+      skip: (page - 1) * limit,
+      take: limit,
+    });
+  }
+
+  async countPublishedByAuthor(authorId: string): Promise<number> {
+    return this.repository.count({
+      where: { authorId, status: PostStatus.Published },
+    });
+  }
+
+  /**
+   * Active comment count per post in one grouped query. Every requested id
+   * gets an entry; the join condition skips soft-deleted comments.
+   */
+  async getCommentCounts(postIds: string[]): Promise<Map<string, number>> {
+    const counts = new Map<string, number>(postIds.map((id) => [id, 0]));
+    if (postIds.length === 0) return counts;
+
+    const rows = await this.repository
+      .createQueryBuilder('p')
+      .select('p.id', 'postId')
+      .addSelect('COUNT(c.id)::int', 'commentCount')
+      .leftJoin('p.comments', 'c', 'c."deletedAt" IS NULL')
+      .where('p.id IN (:...postIds)', { postIds })
+      .groupBy('p.id')
+      .getRawMany<{ postId: string; commentCount: number }>();
+    for (const row of rows) {
+      counts.set(row.postId, Number(row.commentCount));
+    }
+    return counts;
   }
 
   async searchPublishedPosts(
@@ -64,7 +107,7 @@ export class PostRepository
         content: ILike(`%${keyword}%`),
         status: PostStatus.Published,
       },
-      relations: { author: true, assets: true },
+      relations: { author: true, assets: { asset: true } },
       order: {
         createdAt: 'DESC',
       },

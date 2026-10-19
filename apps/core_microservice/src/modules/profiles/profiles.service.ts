@@ -10,6 +10,11 @@ import {
 import type { IChatUser } from '@repo/contracts';
 import { UserProfile } from './domain/entities/user-profile.entity';
 import { UserProfileRepository } from './infrastructure/repository/user-profile.repository';
+import {
+  AVATAR_ASSET_PORT,
+  type IAvatarAssetPort,
+} from './domain/interfaces/avatar-asset.port';
+import { AvatarAssetNotFoundError } from './domain/errors/user-profile.errors';
 
 /** Max attempts to allocate a non-colliding username before giving up. */
 const MAX_USERNAME_ATTEMPTS = 3;
@@ -26,6 +31,8 @@ export class ProfilesService {
   constructor(
     @Inject(LoggerKey) private readonly logger: Logger,
     private readonly userProfileRepository: UserProfileRepository,
+    @Inject(AVATAR_ASSET_PORT)
+    private readonly avatarAssets: IAvatarAssetPort,
   ) {}
 
   // Temporary: Used for testing until Event-Driven architecture is wired up
@@ -137,15 +144,38 @@ export class ProfilesService {
     return this.createProfile(authUserId, this.deriveHandle(email));
   }
 
+  /**
+   * Partial update of the caller's own profile. `avatarAssetId` is resolved
+   * through the assets port (`null` clears the avatar); all rules live on the
+   * entity, and nothing is persisted unless every field is valid.
+   * @throws NotProfileOwnerError (403) when `callerAuthUserId` is not the owner
+   * @throws AvatarAssetNotFoundError / InvalidAvatarAssetError (400),
+   *         AvatarAssetNotOwnedError (403) for a bad avatar asset
+   */
   async updateProfile(
     id: string,
     updateDto: UpdateProfileDto,
+    callerAuthUserId: string,
   ): Promise<UserProfile> {
     const profile = await this.getProfile(id);
-    // Mutations go through entity methods so the domain rules (length, etc.) hold.
-    if (updateDto.bio !== undefined) {
-      profile.editBio(updateDto.bio ?? null);
+    profile.assertOwnedBy(callerAuthUserId);
+
+    if (updateDto.displayName != null) {
+      profile.rename(updateDto.displayName);
     }
+    if (updateDto.bio !== undefined) {
+      profile.editBio(updateDto.bio);
+    }
+    if (updateDto.avatarAssetId === null) {
+      profile.setAvatar(null);
+    } else if (updateDto.avatarAssetId !== undefined) {
+      const asset = await this.avatarAssets.findAvatarSource(
+        updateDto.avatarAssetId,
+      );
+      if (!asset) throw new AvatarAssetNotFoundError(updateDto.avatarAssetId);
+      profile.changeAvatar(asset);
+    }
+
     const updatedProfile = await this.userProfileRepository.save(profile);
     this.logger.debug('Profile updated', {
       props: { profileId: updatedProfile.id },

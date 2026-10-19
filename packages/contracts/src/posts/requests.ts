@@ -1,0 +1,25 @@
+import type { PostStatus } from './responses';
+
+/** Body of `POST /posts`. New posts start as drafts. */
+export interface ICreatePostRequest {
+  /** Up to 500 characters. */
+  content: string;
+  /** Up to 10 uploaded asset ids, in display order. */
+  assetIds?: string[];
+}
+
+/** Body of `PATCH /posts/:id`. */
+export interface IUpdatePostRequest {
+  content: string;
+}
+
+/** Query of `GET /posts/author/:userId`. */
+export interface IPostsByAuthorQuery {
+  page?: number;
+  limit?: number;
+  /**
+   * Defaults to `published`. Other statuses are only returned when the
+   * requester is the author.
+   */
+  status?: PostStatus;
+}
