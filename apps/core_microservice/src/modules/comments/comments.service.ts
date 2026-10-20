@@ -1,4 +1,5 @@
 import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
+import type { IChatUser } from '@repo/contracts';
 import {
   type ActorSnapshot,
   CreateCommentDto,
@@ -123,6 +124,16 @@ export class CommentsService {
     return this.commentRepository.getLikeStats(commentIds, viewerId);
   }
 
+  /**
+   * Author identities for a set of comments (one `IN` query, de-duplicated);
+   * authors without a profile are absent from the map.
+   */
+  async getAuthors(comments: Comment[]): Promise<Map<string, IChatUser>> {
+    return this.userDirectory.getUsers([
+      ...new Set(comments.map((c) => c.authorId)),
+    ]);
+  }
+
   async softDeleteComment(userId: string, id: string): Promise<void> {
     const comment = await this.commentRepository.findOneByIdOrThrow(id);
 
@@ -132,8 +143,8 @@ export class CommentsService {
       );
     }
 
-    await this.commentRepository.softDelete(comment);
-    this.logger.debug('Comment soft-deleted', {
+    await this.commentRepository.softDeleteWithReplies(comment);
+    this.logger.debug('Comment and its replies soft-deleted', {
       props: { commentId: comment.id },
     });
   }

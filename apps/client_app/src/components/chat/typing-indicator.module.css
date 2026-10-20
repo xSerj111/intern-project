@@ -1,7 +1,60 @@
 .typing {
-  min-height: 1.25rem;
-  padding: 0 0.25rem;
-  font-size: 0.8rem;
-  font-style: italic;
-  color: var(--innogram-muted);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 24px;
+  padding: 0 var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: var(--space-1) var(--space-2);
+  background: var(--color-surface-3);
+  border-radius: var(--radius-full);
+}
+
+.dots span {
+  width: 5px;
+  height: 5px;
+  background: var(--color-text-muted);
+  border-radius: var(--radius-full);
+  animation: typing-bounce 1.2s ease-in-out infinite;
+}
+
+.dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes typing-bounce {
+  0%,
+  60%,
+  100% {
+    opacity: 0.45;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-3px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dots span {
+    animation: none;
+    opacity: 0.8;
+  }
 }

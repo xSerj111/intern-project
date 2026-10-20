@@ -1,17 +1,7 @@
-.picker {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.attach {
-  align-self: flex-start;
-}
-
 .chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.35rem;
+  gap: var(--space-2);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -20,70 +10,70 @@
 .chip {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: var(--space-2);
   max-width: 100%;
-  padding: 0.2rem 0.4rem 0.2rem 0.6rem;
-  border: 1px solid var(--innogram-border);
-  border-radius: 999px;
-  background: var(--innogram-surface);
-  font-size: 0.8rem;
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
 }
 
 .chipError {
-  border-color: var(--innogram-danger);
-  background: var(--innogram-danger-bg);
-  color: var(--innogram-danger);
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+  border-color: var(--color-danger);
+}
+
+.fileIcon {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
 }
 
 .name {
   max-width: 10rem;
   overflow: hidden;
+  font-weight: var(--weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .status {
-  font-size: 0.75rem;
-  color: var(--innogram-muted);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
 }
 
 .chipError .status {
-  color: var(--innogram-danger);
+  color: var(--color-danger);
 }
 
 .progress {
   width: 4rem;
   height: 0.4rem;
   vertical-align: middle;
+  accent-color: var(--color-primary);
 }
 
 .iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: var(--color-text-muted);
   background: none;
   border: none;
-  padding: 0 0.25rem;
-  font: inherit;
-  line-height: 1.2;
-  color: var(--innogram-muted);
+  border-radius: var(--radius-full);
   cursor: pointer;
-  border-radius: 6px;
 }
 
-.iconButton:hover:not(:disabled),
-.iconButton:focus-visible {
-  background: var(--innogram-border);
-  color: var(--innogram-text);
+.iconButton:hover:not(:disabled) {
+  color: var(--color-text);
+  background: var(--color-surface-3);
 }
 
 .iconButton:disabled {
   opacity: 0.35;
   cursor: default;
-}
-
-.srOnly {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
 }

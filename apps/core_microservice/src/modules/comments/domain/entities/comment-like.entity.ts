@@ -28,9 +28,9 @@ export class CommentLike {
   @Column({ type: 'uuid' })
   userId!: string;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt!: Date;
 
-  @DeleteDateColumn()
+  @DeleteDateColumn({ type: 'timestamptz' })
   deletedAt!: Date;
 }

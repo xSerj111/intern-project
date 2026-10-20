@@ -7,6 +7,6 @@ export interface UserProfileProps {
   authUserId: string;
   username: string;
   displayName: string;
-  bio?: string;
-  avatarUrl?: string;
+  bio?: string | null;
+  avatarUrl?: string | null;
 }

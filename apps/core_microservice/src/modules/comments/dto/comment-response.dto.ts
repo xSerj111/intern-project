@@ -1,5 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
-import type { ICommentResponse } from '@repo/contracts';
+import type { ICommentResponse, IUserSummary } from '@repo/contracts';
+import { UserSummaryDto } from '../../../common/dto/user-summary.dto';
 import { Comment } from '../domain/entities/comment.entity';
 
 /** Response DTO for a comment, built from the entity in its constructor. */
@@ -15,6 +16,13 @@ export class CommentResponseDto {
 
   @ApiProperty()
   authorId: string;
+
+  @ApiProperty({
+    type: UserSummaryDto,
+    nullable: true,
+    description: 'Author identity; null if the profile no longer exists',
+  })
+  author: UserSummaryDto | null;
 
   @ApiProperty()
   content: string;
@@ -34,11 +42,13 @@ export class CommentResponseDto {
   constructor(
     comment: Comment,
     likes: Pick<ICommentResponse, 'likeCount' | 'likedByMe'>,
+    author: IUserSummary | null | undefined,
   ) {
     this.id = comment.id;
     this.postId = comment.postId;
     this.parentId = comment.parentId ?? null;
     this.authorId = comment.authorId;
+    this.author = UserSummaryDto.from(author);
     this.content = comment.content;
     this.likeCount = likes.likeCount;
     this.likedByMe = likes.likedByMe;

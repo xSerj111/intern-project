@@ -2,9 +2,13 @@ import { Column, Entity, Index } from 'typeorm';
 import { TypeormEntityBase } from '@repo/shared';
 import type { UserProfileProps } from '../../domain/interfaces/user-profile.props';
 import {
+  AvatarAssetNotOwnedError,
+  InvalidAvatarAssetError,
   InvalidDisplayNameError,
   InvalidProfileBioError,
+  NotProfileOwnerError,
 } from '../../domain/errors/user-profile.errors';
+import type { AvatarSource } from '../../domain/interfaces/avatar-asset.port';
 
 export const DISPLAY_NAME_MAX_LENGTH = 100;
 export const PROFILE_BIO_MAX_LENGTH = 160;
@@ -27,11 +31,12 @@ export class UserProfile extends TypeormEntityBase implements UserProfileProps {
   @Column({ type: 'varchar', length: DISPLAY_NAME_MAX_LENGTH })
   displayName!: string;
 
+  // `null` (not `undefined`) clears a value: TypeORM skips undefined on save.
   @Column({ type: 'text', nullable: true })
-  bio?: string;
+  bio?: string | null;
 
   @Column({ type: 'varchar', nullable: true })
-  avatarUrl?: string;
+  avatarUrl?: string | null;
 
   /**
    * Factory for creating a profile. Centralizes the construction rules
@@ -60,12 +65,42 @@ export class UserProfile extends TypeormEntityBase implements UserProfileProps {
     if (bio !== null && bio.length > PROFILE_BIO_MAX_LENGTH) {
       throw new InvalidProfileBioError(bio.length);
     }
-    this.bio = bio ?? undefined;
+    this.bio = bio;
   }
 
   /** Set or clear (with `null`) the avatar image URL. */
   setAvatar(avatarUrl: string | null): void {
-    this.avatarUrl = avatarUrl ?? undefined;
+    this.avatarUrl = avatarUrl;
+  }
+
+  /**
+   * Use an uploaded asset as the avatar. It must be public, an image and
+   * uploaded by this profile's owner.
+   * @throws InvalidAvatarAssetError (400) when private or not an image
+   * @throws AvatarAssetNotOwnedError (403) when someone else uploaded it
+   */
+  changeAvatar(asset: AvatarSource): void {
+    if (asset.uploaderId !== this.authUserId) {
+      throw new AvatarAssetNotOwnedError();
+    }
+    if (!asset.url) {
+      throw new InvalidAvatarAssetError('it is not publicly accessible');
+    }
+    const mime = asset.mimeType.toLowerCase();
+    // SVG is excluded: it can carry scripts if ever opened outside an <img>.
+    if (!mime.startsWith('image/') || mime.startsWith('image/svg')) {
+      throw new InvalidAvatarAssetError(
+        `"${asset.mimeType}" is not an image type`,
+      );
+    }
+    this.avatarUrl = asset.url;
+  }
+
+  /** @throws NotProfileOwnerError (403) unless `authUserId` owns this profile */
+  assertOwnedBy(authUserId: string): void {
+    if (this.authUserId !== authUserId) {
+      throw new NotProfileOwnerError();
+    }
   }
 
   get hasAvatar(): boolean {

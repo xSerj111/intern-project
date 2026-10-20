@@ -36,7 +36,7 @@ export class NotificationPreferences implements EmailPreferenceSwitches {
   @Column({ type: 'boolean', default: true })
   emailFollows!: boolean;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt!: Date;
 
   static defaults(userId: string): NotificationPreferences {

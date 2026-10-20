@@ -68,7 +68,7 @@ export class ChatParticipant {
   @Column({ type: 'bigint', default: 0, transformer: bigintNumberTransformer })
   lastReadSeq!: number;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt!: Date;
 
   isActive(): boolean {

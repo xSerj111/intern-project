@@ -1,16 +1,22 @@
 'use client';
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { Check, X } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 
 import { chatKeys, createGroupChat } from '../../lib/api/chats';
 import { searchProfiles } from '../../lib/api/profile';
 import { useAuth } from '../../lib/auth/auth-context';
+import { Avatar } from '../ui/avatar';
+import { Button } from '../ui/button';
+import { Dialog } from '../ui/dialog';
+import { Input } from '../ui/input';
+import { Spinner } from '../ui/spinner';
 
 import { useFollowSuggestions } from './new-direct-chat-dialog';
-
 import styles from './new-group-dialog.module.css';
+import { UserOption } from './user-option';
 
 const TITLE_MAX = 100;
 const MEMBERS_MIN = 2;
@@ -24,6 +30,7 @@ interface Candidate {
   userId: string;
   name: string;
   meta: string;
+  avatarUrl?: string | null;
 }
 
 /** Name the group, pick 2-99 other people (search or suggestions) and create it. */
@@ -42,16 +49,6 @@ export function NewGroupDialog({ onClose }: NewGroupDialogProps) {
     const timer = setTimeout(() => setTerm(text.trim()), 250);
     return () => clearTimeout(timer);
   }, [text]);
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        onClose();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
 
   const me = user?.id;
   const searching = term.length > 0;
@@ -110,70 +107,67 @@ export function NewGroupDialog({ onClose }: NewGroupDialogProps) {
           userId: u.userId,
           name: u.displayName,
           meta: `@${u.username}`,
+          avatarUrl: u.avatarUrl,
         }))
     : (suggestions.data ?? []).map((s) => ({
         userId: s.userId,
         name: s.displayName ?? `User ${s.userId.slice(0, 8)}`,
         meta: `${s.username ? `@${s.username} · ` : ''}${s.relation}`,
+        avatarUrl: s.avatarUrl,
       }));
 
   return (
-    <div
-      className={styles.backdrop}
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) {
-          onClose();
-        }
-      }}
-    >
-      <div
-        className={styles.dialog}
-        role="dialog"
-        aria-modal="true"
-        aria-label="New group"
-      >
-        <div className={styles.header}>
-          <h2 className={styles.heading}>New group</h2>
-          <button
-            type="button"
-            className="button button--ghost"
-            onClick={onClose}
+    <Dialog
+      open
+      onClose={onClose}
+      title="New group"
+      size="sm"
+      footer={
+        <>
+          <span className={styles.count}>
+            {selected.size} selected
+            {selected.size < MEMBERS_MIN && ` (pick at least ${MEMBERS_MIN})`}
+          </span>
+          <Button
+            disabled={!valid}
+            loading={creating}
+            onClick={() => void create()}
           >
-            Close
-          </button>
-        </div>
-
-        <input
-          className="input"
+            Create group
+          </Button>
+        </>
+      }
+    >
+      <div className={styles.content}>
+        <Input
+          label="Group name"
           type="text"
-          placeholder="Group name"
-          aria-label="Group name"
+          placeholder="Weekend plans"
           maxLength={TITLE_MAX}
           value={title}
           onChange={(event) => setTitle(event.target.value)}
-          autoFocus
         />
 
         {selected.size > 0 && (
           <ul className={styles.chips} aria-label="Selected members">
             {[...selected.values()].map((p) => (
               <li key={p.userId} className={styles.chip}>
-                {p.name}
+                <Avatar src={p.avatarUrl} name={p.name} size="xs" decorative />
+                <span className={styles.chipName}>{p.name}</span>
                 <button
                   type="button"
                   className={styles.chipRemove}
                   aria-label={`Remove ${p.name}`}
                   onClick={() => toggle(p)}
                 >
-                  ×
+                  <X size={14} aria-hidden="true" />
                 </button>
               </li>
             ))}
           </ul>
         )}
 
-        <input
-          className="input"
+        <Input
           type="search"
           placeholder="Search by username"
           aria-label="Search users"
@@ -181,9 +175,11 @@ export function NewGroupDialog({ onClose }: NewGroupDialogProps) {
           onChange={(event) => setText(event.target.value)}
         />
 
-        {!searching && <span className={styles.subheading}>Suggestions</span>}
+        {!searching && <h3 className={styles.subheading}>Suggestions</h3>}
         {searching && results.isPending && (
-          <span className="muted">Searching…</span>
+          <p className={styles.status} role="status">
+            <Spinner size={14} /> Searching…
+          </p>
         )}
         {searching && results.isError && (
           <p className={styles.error} role="alert">
@@ -191,39 +187,44 @@ export function NewGroupDialog({ onClose }: NewGroupDialogProps) {
           </p>
         )}
         {searching && results.isSuccess && options.length === 0 && (
-          <span className="muted">No users found.</span>
+          <p className={styles.status}>No users found.</p>
         )}
         {!searching && suggestions.isPending && (
-          <span className="muted">Loading suggestions…</span>
+          <p className={styles.status} role="status">
+            <Spinner size={14} /> Loading suggestions…
+          </p>
         )}
         {!searching && suggestions.isError && (
-          <span className="muted">Could not load suggestions.</span>
+          <p className={styles.status}>Could not load suggestions.</p>
         )}
         {!searching && suggestions.isSuccess && options.length === 0 && (
-          <span className="muted">
+          <p className={styles.status}>
             Follow someone, or search above to find anyone.
-          </span>
+          </p>
         )}
         <ul className={styles.list}>
           {options.map((o) => {
             const checked = selected.has(o.userId);
             return (
               <li key={o.userId}>
-                <button
-                  type="button"
-                  className={styles.option}
-                  aria-pressed={checked}
+                <UserOption
+                  name={o.name}
+                  meta={o.meta}
+                  avatarUrl={o.avatarUrl}
+                  pressed={checked}
                   disabled={
                     creating || (!checked && selected.size >= MEMBERS_MAX)
                   }
                   onClick={() => toggle(o)}
-                >
-                  <span className={styles.optionText}>
-                    <span className={styles.optionName}>{o.name}</span>
-                    <span className={styles.optionMeta}>{o.meta}</span>
-                  </span>
-                  {checked && <span className={styles.check}>✓</span>}
-                </button>
+                  trailing={
+                    <span
+                      className={checked ? styles.checkOn : styles.checkOff}
+                      aria-hidden="true"
+                    >
+                      {checked && <Check size={14} strokeWidth={3} />}
+                    </span>
+                  }
+                />
               </li>
             );
           })}
@@ -234,21 +235,7 @@ export function NewGroupDialog({ onClose }: NewGroupDialogProps) {
             {error}
           </p>
         )}
-
-        <div className={styles.footer}>
-          <span className="muted">
-            {selected.size} selected (pick at least {MEMBERS_MIN})
-          </span>
-          <button
-            type="button"
-            className="button"
-            disabled={!valid || creating}
-            onClick={() => void create()}
-          >
-            {creating ? 'Creating…' : 'Create group'}
-          </button>
-        </div>
       </div>
-    </div>
+    </Dialog>
   );
 }

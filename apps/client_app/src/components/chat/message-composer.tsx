@@ -2,7 +2,8 @@
 
 import type { IAttachment, IUploadedAttachment } from '@repo/contracts';
 import { useQueryClient } from '@tanstack/react-query';
-import { useCallback, useState } from 'react';
+import { SendHorizontal } from 'lucide-react';
+import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 
 import { deleteMessage, editMessage, sendMessage } from '../../lib/api/chats';
 import { getAccessToken } from '../../lib/auth/refresh';
@@ -15,11 +16,22 @@ import {
   type ChatMessage,
 } from '../../lib/realtime/chat-cache';
 
-import { AttachmentPicker, useAttachmentUploads } from './attachment-picker';
+import { IconButton } from '../ui/button';
+
+import {
+  AttachButton,
+  AttachmentChips,
+  attachmentsFull,
+  useAttachmentUploads,
+} from './attachment-picker';
 import styles from './message-composer.module.css';
 import { useTypingSignal } from './use-typing-signal';
 
 export const MESSAGE_MAX_LENGTH = 2000;
+/** The character counter appears once this few characters remain. */
+const COUNTER_THRESHOLD = 200;
+/** Tallest the auto-growing textarea gets before it scrolls (px). */
+const TEXTAREA_MAX_HEIGHT = 144;
 
 /**
  * Local stand-in for an uploaded file on an optimistic message. It has no
@@ -174,11 +186,13 @@ export function MessageComposer({
   disabled,
 }: MessageComposerProps) {
   const [text, setText] = useState('');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Clearing the text on send also emits `typing:stop`.
   const { stop } = useTypingSignal(chatId, text);
   const attachments = useAttachmentUploads(chatId);
   const trimmed = text.trim();
   const tooLong = text.length > MESSAGE_MAX_LENGTH;
+  const nearLimit = text.length > MESSAGE_MAX_LENGTH - COUNTER_THRESHOLD;
   const hasContent = trimmed.length > 0 || attachments.uploaded.length > 0;
   // Failed files must be removed first so nothing is dropped silently.
   const canSend =
@@ -187,6 +201,16 @@ export function MessageComposer({
     !tooLong &&
     !attachments.uploading &&
     !attachments.hasErrors;
+
+  // Grow with the content up to a cap, then scroll.
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el) {
+      return;
+    }
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, TEXTAREA_MAX_HEIGHT)}px`;
+  }, [text]);
 
   const submit = () => {
     if (!canSend) {
@@ -205,16 +229,20 @@ export function MessageComposer({
         submit();
       }}
     >
-      <AttachmentPicker
+      <AttachmentChips
         items={attachments.items}
-        disabled={disabled}
-        onAddFiles={attachments.addFiles}
         onRemove={attachments.remove}
         onMove={attachments.move}
       />
-      <div className={styles.row}>
+      <div className={styles.bar}>
+        <AttachButton
+          disabled={disabled}
+          full={attachmentsFull(attachments.items)}
+          onAddFiles={attachments.addFiles}
+        />
         <textarea
-          className={`input ${styles.textarea}`}
+          ref={textareaRef}
+          className={styles.textarea}
           aria-label="Message"
           placeholder="Write a message…"
           rows={1}
@@ -222,23 +250,35 @@ export function MessageComposer({
           onChange={(event) => setText(event.target.value)}
           onBlur={stop}
           onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey) {
+            if (
+              event.key === 'Enter' &&
+              !event.shiftKey &&
+              !event.nativeEvent.isComposing
+            ) {
               event.preventDefault();
               submit();
             }
           }}
         />
-        <button type="submit" className="button" disabled={!canSend}>
-          Send
-        </button>
+        <IconButton
+          type="submit"
+          variant="primary"
+          label="Send message"
+          disabled={!canSend}
+        >
+          <SendHorizontal size={20} />
+        </IconButton>
       </div>
-      <span
-        className={
-          tooLong ? `${styles.counter} ${styles.counterOver}` : styles.counter
-        }
-      >
-        {text.length}/{MESSAGE_MAX_LENGTH}
-      </span>
+      {nearLimit && (
+        <span
+          className={
+            tooLong ? `${styles.counter} ${styles.counterOver}` : styles.counter
+          }
+          role={tooLong ? 'alert' : undefined}
+        >
+          {text.length}/{MESSAGE_MAX_LENGTH}
+        </span>
+      )}
     </form>
   );
 }

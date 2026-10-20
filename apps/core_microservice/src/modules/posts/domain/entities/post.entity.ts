@@ -7,6 +7,7 @@ import {
   OneToMany,
 } from 'typeorm';
 import {
+  AccessDeniedError,
   DomainError,
   EntityByIdNotFoundError,
   EXCERPT_MAX_LENGTH,
@@ -32,6 +33,13 @@ export class InvalidPostStateError extends DomainError {
 export class PostArchiveError extends DomainError {
   constructor(from: PostStatus) {
     super(`Cannot archive a post in state "${from}".`);
+  }
+}
+
+/** Someone other than the author asked for drafts or archived posts. */
+export class PostStatusNotVisibleError extends AccessDeniedError {
+  constructor(status: PostStatus) {
+    super(`Only the author can list their ${status} posts.`);
   }
 }
 
@@ -98,6 +106,21 @@ export class Post extends TypeormEntityBase {
       throw new PostArchiveError(this.status);
     }
     this.status = PostStatus.Archived;
+  }
+
+  /**
+   * Whether `viewerId` may list `authorId`'s posts in `status`: published posts
+   * are public, every other status is visible to the author only.
+   * @throws PostStatusNotVisibleError (403) otherwise
+   */
+  static assertStatusListableBy(
+    authorId: string,
+    status: PostStatus,
+    viewerId: string | undefined,
+  ): void {
+    if (status !== PostStatus.Published && authorId !== viewerId) {
+      throw new PostStatusNotVisibleError(status);
+    }
   }
 
   /**

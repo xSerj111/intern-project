@@ -1,0 +1,75 @@
+/*
+ * The shell pads <main> for its own bars, so this area is pinned between them
+ * instead of flowing: below the mobile top bar, above the bottom tab bar, and
+ * beside the sidebar from tablet width up.
+ */
+.root {
+  position: fixed;
+  z-index: var(--z-sticky);
+  top: var(--topbar-height);
+  right: 0;
+  bottom: calc(var(--bottombar-height) + var(--safe-bottom));
+  left: 0;
+  display: flex;
+  background: var(--color-surface);
+}
+
+.frame {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+}
+
+.thread {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Phones: one pane at a time. */
+.frame[data-view='list'] .thread,
+.frame[data-view='thread'] > section {
+  display: none;
+}
+
+@media (min-width: 768px) {
+  .root {
+    top: 0;
+    bottom: 0;
+    left: var(--sidebar-rail-width);
+    padding: var(--space-4) var(--space-6);
+    background: var(--color-bg);
+  }
+
+  .frame {
+    max-width: 1200px;
+    margin: 0 auto;
+    grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+    overflow: hidden;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-1);
+  }
+
+  .frame > section {
+    border-right: 1px solid var(--color-border);
+  }
+
+  .frame[data-view='list'] .thread {
+    display: flex;
+  }
+
+  .frame[data-view='thread'] > section {
+    display: flex;
+  }
+}
+
+@media (min-width: 1264px) {
+  .root {
+    left: var(--sidebar-width);
+  }
+}

@@ -31,3 +31,14 @@ export interface IPaginationMeta {
   limit: number;
   totalPages: number;
 }
+
+/**
+ * Minimal public identity of a user, embedded in posts, comments and chats.
+ * `userId` is the auth user id (JWT `sub`).
+ */
+export interface IUserSummary {
+  userId: string;
+  username: string;
+  displayName: string;
+  avatarUrl: string | null;
+}

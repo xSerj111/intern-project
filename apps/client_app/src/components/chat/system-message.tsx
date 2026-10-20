@@ -1,5 +1,7 @@
 import type { IMessage } from '@repo/contracts';
 
+import { formatClock } from '../../lib/format/time';
+
 import styles from './system-message.module.css';
 
 /** Resolves an auth user id to a display name; `undefined` when unknown (e.g. left the group). */
@@ -67,10 +69,7 @@ export function SystemMessage({
     <p className={styles.system}>
       <span>{text}</span>
       <time className={styles.time} dateTime={message.createdAt}>
-        {new Date(message.createdAt).toLocaleTimeString(undefined, {
-          hour: '2-digit',
-          minute: '2-digit',
-        })}
+        {formatClock(message.createdAt)}
       </time>
     </p>
   );

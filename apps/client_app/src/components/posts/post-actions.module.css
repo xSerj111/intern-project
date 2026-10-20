@@ -1,0 +1,43 @@
+.row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  /* Align the first icon's glyph with the content above it. */
+  margin-left: calc(-1 * var(--space-3));
+}
+
+.comment {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0 var(--space-3);
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+  border-radius: var(--radius-full);
+  transition: background-color var(--duration-fast) ease;
+}
+
+a.comment:hover {
+  background: var(--color-surface-2);
+}
+
+.count {
+  font-variant-numeric: tabular-nums;
+}
+
+.share {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+  margin-right: calc(-1 * var(--space-2));
+}
+
+.feedback {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  color: var(--color-text-muted);
+}

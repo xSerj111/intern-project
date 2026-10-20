@@ -1,15 +1,14 @@
 .system {
   align-self: center;
   max-width: 90%;
-  margin: 0.25rem 0;
-  font-size: 0.8rem;
+  margin: var(--space-3) 0;
+  font-size: var(--text-xs);
   text-align: center;
-  color: var(--innogram-muted);
+  color: var(--color-text-muted);
   overflow-wrap: anywhere;
 }
 
 .time {
-  margin-left: 0.5rem;
-  font-size: 0.7rem;
-  opacity: 0.8;
+  margin-left: var(--space-2);
+  color: var(--color-text-subtle);
 }

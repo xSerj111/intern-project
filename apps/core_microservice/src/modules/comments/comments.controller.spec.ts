@@ -10,6 +10,7 @@ describe('CommentsController', () => {
   const commentsService = {
     getCommentsByPost: jest.fn(),
     getLikeStats: jest.fn(),
+    getAuthors: jest.fn(),
   };
   const comment = fakeComment();
 
@@ -18,6 +19,20 @@ describe('CommentsController', () => {
     commentsService.getCommentsByPost.mockResolvedValue([comment]);
     commentsService.getLikeStats.mockResolvedValue(
       new Map([[comment.id, { likeCount: 2, likedByMe: true }]]),
+    );
+
+    commentsService.getAuthors.mockResolvedValue(
+      new Map([
+        [
+          comment.authorId,
+          {
+            userId: comment.authorId,
+            username: 'john_doe',
+            displayName: 'John Doe',
+            avatarUrl: 'https://cdn/a.png',
+          },
+        ],
+      ]),
     );
 
     const module: TestingModule = await Test.createTestingModule({
@@ -38,6 +53,36 @@ describe('CommentsController', () => {
   });
 
   describe('getCommentsByPost', () => {
+    it('embeds the author, loading every author in one batch', async () => {
+      const other = fakeComment({ id: 'c-2' });
+      commentsService.getCommentsByPost.mockResolvedValue([comment, other]);
+
+      const response = await controller.getCommentsByPost(
+        'viewer-1',
+        comment.postId,
+      );
+
+      expect(commentsService.getAuthors).toHaveBeenCalledTimes(1);
+      expect(commentsService.getAuthors).toHaveBeenCalledWith([comment, other]);
+      expect(response[0].author).toEqual({
+        userId: comment.authorId,
+        username: 'john_doe',
+        displayName: 'John Doe',
+        avatarUrl: 'https://cdn/a.png',
+      });
+    });
+
+    it('sets author to null when the profile no longer exists', async () => {
+      commentsService.getAuthors.mockResolvedValue(new Map());
+
+      const response = await controller.getCommentsByPost(
+        undefined,
+        comment.postId,
+      );
+
+      expect(response[0].author).toBeNull();
+    });
+
     it('adds likeCount and likedByMe for the signed-in viewer', async () => {
       const response = await controller.getCommentsByPost(
         'viewer-1',

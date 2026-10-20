@@ -1,5 +1,5 @@
 import type { RepositoryPort } from '@repo/shared';
-import type { Post } from '../entities/post.entity';
+import type { Post, PostStatus } from '../entities/post.entity';
 import type { PostProps } from './post.props';
 
 /** Like count and whether the viewer has an active like on the item. */
@@ -11,7 +11,7 @@ export interface LikeStats {
 export interface IPostRepository extends RepositoryPort<Post, PostProps> {
   /** The post by id without relations; null when missing or soft-deleted. */
   findById(id: string): Promise<Post | null>;
-  /** Published posts of the given authors, newest first, with author and assets. */
+  /** Published posts of the given authors, newest first, with author and assets (and each asset's file). */
   getFeedForAuthors(
     authorIds: string[],
     page: number,
@@ -23,6 +23,20 @@ export interface IPostRepository extends RepositoryPort<Post, PostProps> {
     page: number,
     limit: number,
   ): Promise<[Post[], number]>;
+  /** One author's posts in the given status, newest first, with author and assets. */
+  findByAuthor(
+    authorId: string,
+    status: PostStatus,
+    page: number,
+    limit: number,
+  ): Promise<[Post[], number]>;
+  /** Number of the author's published posts. */
+  countPublishedByAuthor(authorId: string): Promise<number>;
+  /**
+   * Active comments (`deletedAt IS NULL`, replies included) per post, in one
+   * grouped query. Every requested id gets an entry (0 when none).
+   */
+  getCommentCounts(postIds: string[]): Promise<Map<string, number>>;
   /**
    * Like stats for each requested post (every id gets an entry); `viewerId`
    * is undefined for anonymous requests (`likedByMe: false`).

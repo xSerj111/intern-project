@@ -171,6 +171,97 @@ export function coreApi<T>(
   return apiRequest<T>(config.coreServiceUrl, path, options);
 }
 
+export interface UploadOptions {
+  token?: string | null;
+  signal?: AbortSignal;
+  /** Upload progress as a 0..1 fraction. Switches the request to XMLHttpRequest. */
+  onProgress?: (fraction: number) => void;
+}
+
+function xhrUpload<T>(
+  url: string,
+  form: FormData,
+  token: string | null | undefined,
+  { signal, onProgress }: UploadOptions,
+): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', url);
+    xhr.setRequestHeader('Accept', 'application/json');
+    if (token) {
+      xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+    }
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) {
+        onProgress?.(event.loaded / event.total);
+      }
+    };
+    xhr.onerror = () =>
+      reject(new ApiError('Unable to reach the service', 0, null));
+    xhr.onabort = () =>
+      reject(new DOMException('The upload was aborted', 'AbortError'));
+    xhr.onload = () => {
+      let payload: unknown = null;
+      try {
+        payload = xhr.responseText ? JSON.parse(xhr.responseText) : null;
+      } catch {
+        payload = xhr.responseText;
+      }
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve(payload as T);
+        return;
+      }
+      reject(
+        new ApiError(
+          errorMessage(payload) ?? `Request failed with status ${xhr.status}`,
+          xhr.status,
+          payload,
+        ),
+      );
+    };
+    if (signal) {
+      if (signal.aborted) {
+        xhr.abort();
+        return;
+      }
+      signal.addEventListener('abort', () => xhr.abort(), { once: true });
+    }
+    xhr.send(form);
+  });
+}
+
+/**
+ * Upload one file to the core service as multipart field `file`. With
+ * `onProgress` the upload runs over XMLHttpRequest (reporting a 0..1 fraction)
+ * and keeps the single 401 refresh-and-retry; without it, plain `coreApi`.
+ */
+export async function uploadCoreFile<T>(
+  path: string,
+  file: File,
+  { token, signal, onProgress }: UploadOptions = {},
+): Promise<T> {
+  const form = new FormData();
+  form.append('file', file);
+
+  if (!onProgress) {
+    return coreApi<T>(path, { method: 'POST', token, signal, body: form });
+  }
+
+  const url = buildUrl(config.coreServiceUrl, path);
+  try {
+    return await xhrUpload<T>(url, form, token, { signal, onProgress });
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 401 || !token) {
+      throw error;
+    }
+    const next = await retryToken(token);
+    if (!next) {
+      throw error;
+    }
+    return xhrUpload<T>(url, form, next, { signal, onProgress });
+  }
+}
+
 /**
  * Request against the auth service (`AUTH_SERVICE_URL`). Sends cookies so the
  * httpOnly `refresh_token` cookie reaches `/auth/refresh` and `/auth/logout`.

@@ -42,10 +42,10 @@ export class EmailDelivery {
   @Column({ type: 'timestamptz', nullable: true })
   sentAt!: Date | null;
 
-  @CreateDateColumn()
+  @CreateDateColumn({ type: 'timestamptz' })
   createdAt!: Date;
 
-  @UpdateDateColumn()
+  @UpdateDateColumn({ type: 'timestamptz' })
   updatedAt!: Date;
 
   static pending(

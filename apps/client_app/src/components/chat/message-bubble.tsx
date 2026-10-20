@@ -1,29 +1,41 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import type { IChatUser } from '@repo/contracts';
+import { MoreHorizontal, Pencil, Trash2 } from 'lucide-react';
+import { useState, type MouseEvent, type FocusEvent } from 'react';
 
+import { cx } from '../../lib/cx';
+import { formatClock, formatFullDate } from '../../lib/format/time';
 import type { ChatMessage } from '../../lib/realtime/chat-cache';
 import { isPendingMessage } from '../../lib/realtime/chat-cache';
+import { Avatar } from '../ui/avatar';
+import { Button } from '../ui/button';
+import { Menu, type MenuEntry } from '../ui/menu';
+import { Textarea } from '../ui/input';
 
-import styles from './message-bubble.module.css';
+import { ConfirmDialog } from '../ui/confirm-dialog';
 import { MessageAttachments } from './message-attachments';
+import styles from './message-bubble.module.css';
 import { MESSAGE_MAX_LENGTH } from './message-composer';
 
-function formatTime(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) {
-    return '';
-  }
-  return date.toLocaleTimeString(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
+/** The message list marks its scroller with this attribute so popups can pick the side with room. */
+const CHAT_SCROLLER_SELECTOR = '[data-chat-scroller]';
+
+/** Menu height (two items plus padding) a popup needs above or below. */
+const MENU_ROOM_PX = 120;
+
+type Author = Pick<IChatUser, 'displayName' | 'avatarUrl'>;
 
 interface MessageBubbleProps {
   /** A `USER` message (system rows are rendered by `SystemMessage`). */
   message: ChatMessage;
   own: boolean;
+  /** Sender of someone else's message in a group chat (shows avatar and name). */
+  author?: Author;
+  /** The previous row is another bubble from the same sender. */
+  joinPrev?: boolean;
+  /** The next row is another bubble from the same sender. */
+  joinNext?: boolean;
   onRetry: (message: ChatMessage) => void;
   onDiscard: (message: ChatMessage) => void;
   /** Save an edit; rejects on failure. */
@@ -36,17 +48,19 @@ interface MessageBubbleProps {
 export function MessageBubble({
   message,
   own,
+  author,
+  joinPrev = false,
+  joinNext = false,
   onRetry,
   onDiscard,
   onEdit,
   onDelete,
 }: MessageBubbleProps) {
-  const [menuOpen, setMenuOpen] = useState(false);
   const [mode, setMode] = useState<'view' | 'edit' | 'confirmDelete'>('view');
   const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const actionsRef = useRef<HTMLDivElement>(null);
+  const [menuPlacement, setMenuPlacement] = useState<'top' | 'bottom'>('top');
 
   const pending = isPendingMessage(message);
   const failed = message.delivery === 'failed';
@@ -55,29 +69,14 @@ export function MessageBubble({
   const editing = canAct && mode === 'edit';
   const confirming = canAct && mode === 'confirmDelete';
 
-  useEffect(() => {
-    if (!menuOpen) {
-      return;
-    }
-    const onPointerDown = (event: PointerEvent) => {
-      if (!actionsRef.current?.contains(event.target as Node)) {
-        setMenuOpen(false);
-      }
-    };
-    document.addEventListener('pointerdown', onPointerDown);
-    return () => document.removeEventListener('pointerdown', onPointerDown);
-  }, [menuOpen]);
-
   const startEdit = () => {
     setDraft(message.content ?? '');
     setError(null);
-    setMenuOpen(false);
     setMode('edit');
   };
 
   const startDelete = () => {
     setError(null);
-    setMenuOpen(false);
     setMode('confirmDelete');
   };
 
@@ -124,6 +123,25 @@ export function MessageBubble({
     }
   };
 
+  // Open the popup toward the side of the scroller that has room for it.
+  const choosePlacement = (
+    event: MouseEvent<HTMLElement> | FocusEvent<HTMLElement>,
+  ) => {
+    const scroller = event.currentTarget.closest(CHAT_SCROLLER_SELECTOR);
+    if (!scroller) {
+      return;
+    }
+    const above =
+      event.currentTarget.getBoundingClientRect().top -
+      scroller.getBoundingClientRect().top;
+    setMenuPlacement(above > MENU_ROOM_PX ? 'top' : 'bottom');
+  };
+
+  const menuEntries: MenuEntry[] = [
+    { label: 'Edit', icon: Pencil, onSelect: startEdit },
+    { label: 'Delete', icon: Trash2, danger: true, onSelect: startDelete },
+  ];
+
   const attachments = !deleted && hasAttachments && (
     <MessageAttachments
       chatId={message.chatId}
@@ -133,171 +151,175 @@ export function MessageBubble({
     />
   );
   const text = deleted ? 'Message deleted' : message.content;
-
-  const bubbleClass = [
-    styles.bubble,
-    own ? styles.bubbleOwn : '',
-    deleted ? styles.bubbleDeleted : '',
-    pending && !failed ? styles.bubbleSending : '',
-    failed ? styles.bubbleFailed : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
+  const showMeta = !joinNext || pending || failed || Boolean(message.editedAt);
 
   return (
-    <div className={own ? `${styles.row} ${styles.rowOwn}` : styles.row}>
-      {editing ? (
-        <div className={styles.editor}>
-          <textarea
-            className={`input ${styles.editorTextarea}`}
-            aria-label="Edit message"
-            rows={2}
-            autoFocus
-            value={draft}
-            disabled={busy}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                void save();
-              } else if (event.key === 'Escape') {
-                cancel();
-              }
-            }}
-          />
-          <div className={styles.editorButtons}>
-            <button
-              type="button"
-              className="button button--ghost"
-              disabled={busy}
-              onClick={cancel}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="button"
-              disabled={!canSave}
-              onClick={() => void save()}
-            >
-              Save
-            </button>
-          </div>
-          {attachments}
-        </div>
-      ) : (
-        <div className={styles.bubbleLine}>
-          <div className={styles.content}>
-            {(text || !attachments) && <p className={bubbleClass}>{text}</p>}
-            {attachments}
-          </div>
-          {canAct && !confirming && (
-            <div className={styles.actions} ref={actionsRef}>
-              <button
-                type="button"
-                className={styles.menuButton}
-                aria-label="Message actions"
-                aria-haspopup="menu"
-                aria-expanded={menuOpen}
-                onClick={() => setMenuOpen((open) => !open)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Escape') {
-                    setMenuOpen(false);
-                  }
-                }}
-              >
-                &#8943;
-              </button>
-              {menuOpen && (
-                <div className={styles.menu} role="menu">
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className={styles.menuItem}
-                    onClick={startEdit}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    role="menuitem"
-                    className={`${styles.menuItem} ${styles.menuItemDanger}`}
-                    onClick={startDelete}
-                  >
-                    Delete
-                  </button>
-                </div>
-              )}
-            </div>
+    <div
+      className={cx(
+        styles.row,
+        own && styles.rowOwn,
+        !joinPrev && styles.groupStart,
+      )}
+    >
+      {author && (
+        <div className={styles.avatarSlot}>
+          {!joinNext && (
+            <Avatar
+              src={author.avatarUrl}
+              name={author.displayName}
+              size="sm"
+              decorative
+            />
           )}
         </div>
       )}
 
-      {confirming && (
-        <div
-          className={styles.meta}
-          role="alertdialog"
-          aria-label="Delete message"
-        >
-          <span>Delete this message?</span>
-          <button
-            type="button"
-            className={`${styles.linkButton} ${styles.failed}`}
-            disabled={busy}
-            onClick={() => void confirmDelete()}
-          >
-            Delete
-          </button>
-          <button
-            type="button"
-            className={styles.linkButton}
-            disabled={busy}
-            onClick={cancel}
-          >
-            Cancel
-          </button>
-        </div>
-      )}
+      <div className={cx(styles.column, own && styles.columnOwn)}>
+        {author && !joinPrev && (
+          <span className={styles.author}>{author.displayName}</span>
+        )}
 
-      {error && (
-        <span className={styles.error} role="alert">
-          {error}
-        </span>
-      )}
-
-      <div className={styles.meta}>
-        {failed ? (
-          <>
-            <span className={styles.failed}>Failed to send</span>
-            <button
-              type="button"
-              className={styles.linkButton}
-              onClick={() => onRetry(message)}
-            >
-              Retry
-            </button>
-            <button
-              type="button"
-              className={styles.linkButton}
-              onClick={() => onDiscard(message)}
-            >
-              Discard
-            </button>
-          </>
-        ) : pending ? (
-          <span>Sending…</span>
+        {editing ? (
+          <div className={styles.editor}>
+            <Textarea
+              aria-label="Edit message"
+              rows={2}
+              autoFocus
+              value={draft}
+              disabled={busy}
+              error={
+                draft.length > MESSAGE_MAX_LENGTH
+                  ? `At most ${MESSAGE_MAX_LENGTH} characters`
+                  : undefined
+              }
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (
+                  event.key === 'Enter' &&
+                  !event.shiftKey &&
+                  !event.nativeEvent.isComposing
+                ) {
+                  event.preventDefault();
+                  void save();
+                } else if (event.key === 'Escape') {
+                  cancel();
+                }
+              }}
+            />
+            <div className={styles.editorButtons}>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={busy}
+                onClick={cancel}
+              >
+                Cancel
+              </Button>
+              <Button
+                size="sm"
+                disabled={!canSave}
+                loading={busy}
+                onClick={() => void save()}
+              >
+                Save
+              </Button>
+            </div>
+            {attachments}
+          </div>
         ) : (
-          <>
-            <time dateTime={message.createdAt}>
-              {formatTime(message.createdAt)}
-            </time>
-            {message.editedAt && !deleted && (
-              <span>edited · {formatTime(message.editedAt)}</span>
+          <div className={cx(styles.bubbleLine, own && styles.bubbleLineOwn)}>
+            <div className={cx(styles.content, own && styles.contentOwn)}>
+              {(text || !attachments) && (
+                <p
+                  className={cx(
+                    styles.bubble,
+                    own ? styles.bubbleOwn : styles.bubbleOther,
+                    joinPrev && styles.joinPrev,
+                    joinNext && styles.joinNext,
+                    deleted && styles.bubbleDeleted,
+                    pending && !failed && styles.bubbleSending,
+                    failed && styles.bubbleFailed,
+                  )}
+                  title={formatFullDate(message.createdAt)}
+                >
+                  {text}
+                </p>
+              )}
+              {attachments}
+            </div>
+            {canAct && (
+              <div
+                className={styles.actions}
+                onPointerDownCapture={choosePlacement}
+                onFocusCapture={choosePlacement}
+              >
+                <Menu
+                  label="Message actions"
+                  triggerClassName={styles.menuTrigger}
+                  trigger={<MoreHorizontal size={18} aria-hidden="true" />}
+                  entries={menuEntries}
+                  align={own ? 'end' : 'start'}
+                  placement={menuPlacement}
+                />
+              </div>
             )}
-            {own && !deleted && <span>Sent</span>}
-          </>
+          </div>
+        )}
+
+        {error && !confirming && (
+          <span className={styles.error} role="alert">
+            {error}
+          </span>
+        )}
+
+        {showMeta && (
+          <div className={styles.meta}>
+            {failed ? (
+              <>
+                <span className={styles.failed}>Failed to send</span>
+                <button
+                  type="button"
+                  className={styles.linkButton}
+                  onClick={() => onRetry(message)}
+                >
+                  Retry
+                </button>
+                <button
+                  type="button"
+                  className={styles.linkButton}
+                  onClick={() => onDiscard(message)}
+                >
+                  Discard
+                </button>
+              </>
+            ) : pending ? (
+              <span>Sending…</span>
+            ) : (
+              <>
+                <time dateTime={message.createdAt}>
+                  {formatClock(message.createdAt)}
+                </time>
+                {message.editedAt && !deleted && (
+                  <span title={formatFullDate(message.editedAt)}>edited</span>
+                )}
+                {own && !deleted && !joinNext && <span>Sent</span>}
+              </>
+            )}
+          </div>
         )}
       </div>
+
+      <ConfirmDialog
+        open={confirming}
+        title="Delete this message?"
+        description="It will be removed for everyone in this conversation."
+        confirmLabel="Delete"
+        destructive
+        busy={busy}
+        error={error}
+        onConfirm={() => void confirmDelete()}
+        onCancel={cancel}
+      />
     </div>
   );
 }

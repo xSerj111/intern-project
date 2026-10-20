@@ -1,0 +1,60 @@
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+}
+
+.avatarRow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-5);
+}
+
+.avatarWrap {
+  position: relative;
+  display: inline-flex;
+  flex-shrink: 0;
+}
+
+.uploading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-on-primary);
+  background: var(--color-overlay);
+  border-radius: var(--radius-full);
+}
+
+.avatarActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.counter {
+  display: block;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.error {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--color-danger);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}
+
+.saved {
+  margin-right: auto;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--color-success);
+}

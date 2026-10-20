@@ -1,0 +1,149 @@
+.section {
+  margin-top: var(--space-4);
+}
+
+.panel {
+  padding-top: var(--space-1);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.item {
+  min-width: 0;
+}
+
+.tile {
+  position: relative;
+  display: block;
+  aspect-ratio: 1;
+  overflow: hidden;
+  color: var(--color-text);
+  background: var(--color-surface-2);
+  border-radius: var(--radius-xs);
+}
+
+.image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform var(--duration-slow) var(--ease-out);
+}
+
+.text {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: var(--space-3);
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--brand-violet) 16%, var(--color-surface)),
+      color-mix(in srgb, var(--brand-pink) 14%, var(--color-surface))
+    );
+  border: 1px solid var(--color-border);
+  border-radius: inherit;
+}
+
+.textBody {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-normal);
+  text-align: center;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  line-clamp: 5;
+}
+
+.draftBadge {
+  position: absolute;
+  top: var(--space-2);
+  left: var(--space-2);
+  padding: 2px var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--color-text);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-1);
+}
+
+.multi {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  color: var(--color-on-primary);
+  filter: drop-shadow(0 1px 2px var(--color-overlay));
+}
+
+.text ~ .multi {
+  color: var(--color-text);
+  filter: none;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-5);
+  color: var(--color-on-primary);
+  background: var(--color-overlay);
+  opacity: 0;
+  transition: opacity var(--duration-fast) ease;
+}
+
+.overlayStat {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  font-weight: var(--weight-bold);
+}
+
+.tile:focus-visible {
+  outline-offset: -2px;
+}
+
+@media (hover: hover) {
+  .tile:hover .overlay,
+  .tile:focus-visible .overlay {
+    opacity: 1;
+  }
+
+  .tile:hover .image {
+    transform: scale(1.04);
+  }
+}
+
+.skeletonTile {
+  aspect-ratio: 1;
+}
+
+.more {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-6) 0;
+}
+
+@media (min-width: 640px) {
+  .grid {
+    gap: var(--space-2);
+  }
+
+  .tile {
+    border-radius: var(--radius-sm);
+  }
+}

@@ -1,0 +1,81 @@
+.card {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+}
+
+.media {
+  order: 1;
+}
+
+.side {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.header {
+  padding: var(--space-3) var(--space-2) var(--space-3) var(--space-4);
+}
+
+/* Stacked layout: header above the photos, everything else below. */
+.card:not(.textOnly) .header {
+  order: -1;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.caption {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.actions {
+  margin-bottom: calc(-1 * var(--space-2));
+}
+
+.comments {
+  flex: 1;
+}
+
+@media (max-width: 899px) {
+  /*
+   * Flatten .side so the header can sit above the photos with display:contents
+   * and the comments flow below them.
+   */
+  .card:not(.textOnly) .side {
+    display: contents;
+  }
+
+  .card:not(.textOnly) .comments {
+    order: 2;
+  }
+}
+
+@media (min-width: 900px) {
+  .card:not(.textOnly) {
+    display: grid;
+    grid-template-columns: minmax(0, 1.5fr) minmax(320px, 1fr);
+    height: min(calc(100dvh - var(--space-16)), 720px);
+    min-height: 480px;
+  }
+
+  .media {
+    order: 0;
+    min-height: 0;
+    border-right: 1px solid var(--color-border);
+  }
+
+  .card:not(.textOnly) .header {
+    order: 0;
+  }
+}
+
+.textOnly {
+  max-width: var(--content-width);
+  margin: 0 auto;
+}
