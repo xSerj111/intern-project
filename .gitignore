@@ -121,3 +121,13 @@ packages/shared/generated
 packages/shared/src/prisma/generated/
 
 /prisma/libs/prisma/prisma
+
+# Client e2e (Playwright) artifacts
+apps/client_app/e2e/.artifacts/
+apps/client_app/playwright-report/
+apps/client_app/test-results/
+
+# Load test reports: ignore generated runs, keep the committed baseline and final reports
+apps/core_microservice/test/load/reports/*.json
+!apps/core_microservice/test/load/reports/baseline.json
+!apps/core_microservice/test/load/reports/final.json

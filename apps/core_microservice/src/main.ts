@@ -32,6 +32,7 @@ async function bootstrap() {
   });
 
   const appConfig = app.get(AppConfigService);
+  appConfig.assertSafeForEnvironment();
 
   // Validate & sanitize all incoming DTOs (strips unknown props, coerces types).
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));

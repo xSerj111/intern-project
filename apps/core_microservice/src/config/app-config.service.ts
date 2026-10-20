@@ -86,4 +86,62 @@ export class AppConfigService {
         this.config.get<string>('S3_USE_SSL', 'false').toLowerCase() === 'true',
     };
   }
+
+  /** Enables per-request SQL counting (`X-Db-Query-Count`); never allowed in production. */
+  get perfInstrumentation(): boolean {
+    return this.config.get<string>('PERF_INSTRUMENTATION') === 'true';
+  }
+
+  /** Queries slower than this many milliseconds are logged as slow. */
+  get slowQueryMs(): number {
+    return this.positiveInt('SLOW_QUERY_MS', 200);
+  }
+
+  /** Connection settings for the separate cache Redis instance. */
+  get cacheRedis() {
+    return {
+      host: this.config.get<string>('CACHE_REDIS_HOST') || 'localhost',
+      port: this.positiveInt('CACHE_REDIS_PORT', 6380),
+    };
+  }
+
+  /** Upload-link lifetime and orphan-sweep timings, in seconds. */
+  get uploads() {
+    return {
+      linkTtlSec: this.positiveInt('UPLOAD_LINK_TTL_SEC', 300),
+      sweepGraceSec: this.positiveInt('UPLOAD_SWEEP_GRACE_SEC', 3600),
+      sweepIntervalSec: this.positiveInt('UPLOAD_SWEEP_INTERVAL_SEC', 900),
+    };
+  }
+
+  /** Raw shared token for internal endpoints; length validation is added separately. */
+  get internalApiToken(): string | undefined {
+    return this.config.get<string>('INTERNAL_API_TOKEN') || undefined;
+  }
+
+  /**
+   * Fails fast on unsafe configuration; called during bootstrap.
+   * Query-count instrumentation must never run in production.
+   */
+  assertSafeForEnvironment(): void {
+    if (
+      this.perfInstrumentation &&
+      this.config.get<string>('NODE_ENV') === 'production'
+    ) {
+      throw new Error(
+        'PERF_INSTRUMENTATION=true is not allowed when NODE_ENV=production',
+      );
+    }
+  }
+
+  private positiveInt(key: string, fallback: number): number {
+    const raw = this.config.get<string>(key);
+    if (raw === undefined || raw === '') return fallback;
+
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < 1) {
+      throw new Error(`${key} must be a positive integer`);
+    }
+    return value;
+  }
 }

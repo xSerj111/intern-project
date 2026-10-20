@@ -17,7 +17,9 @@
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
     "db:migrate": "turbo run db:migrate",
-    "db:seed": "turbo run db:seed"
+    "db:seed": "turbo run db:seed",
+    "perf:baseline": "MODE=measure bash apps/core_microservice/test/load/run-k6.sh",
+    "perf:compare": "ts-node apps/core_microservice/test/load/compare-reports.ts"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",
