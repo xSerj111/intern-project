@@ -19,9 +19,9 @@ export function getPostComments(
   });
 }
 
-/** Create a top-level comment (`POST /comments`). */
+/** Create a comment, or a reply when `parentId` is set (`POST /comments`). */
 export function createComment(
-  body: { postId: string; content: string },
+  body: { postId: string; content: string; parentId?: string },
   { token }: { token?: string | null } = {},
 ): Promise<ICommentResponse> {
   return coreApi<ICommentResponse>('/comments', {
@@ -39,5 +39,18 @@ export function deleteComment(
   return coreApi<void>(`/comments/${commentId}`, {
     method: 'DELETE',
     token,
+  });
+}
+
+/** Edit the text of one of the caller's own comments (`PATCH /comments/:id`). */
+export function updateComment(
+  commentId: string,
+  body: { content: string },
+  { token }: { token?: string | null } = {},
+): Promise<ICommentResponse> {
+  return coreApi<ICommentResponse>(`/comments/${commentId}`, {
+    method: 'PATCH',
+    token,
+    body,
   });
 }

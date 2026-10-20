@@ -1,22 +1,20 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Trash2 } from 'lucide-react';
 import Link from 'next/link';
-import { useState, type FormEvent, type ReactNode } from 'react';
+import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
 
 import type { ICommentResponse } from '@repo/contracts';
 
 import { postKeys } from '../../lib/api/posts';
 import { useAuth } from '../../lib/auth/auth-context';
 import { cx } from '../../lib/cx';
-import { LikeButton } from '../likes/like-button';
-import { Avatar } from '../ui/avatar';
-import { Button, IconButton } from '../ui/button';
+import { Button } from '../ui/button';
 import { ConfirmDialog } from '../ui/confirm-dialog';
-import { RelativeTime } from '../ui/relative-time';
 import { Skeleton, SkeletonGroup } from '../ui/skeleton';
 
+import { CommentItem, COMMENT_MAX_LENGTH } from './comment-item';
+import { buildCommentTree } from './comment-tree';
 import {
   commentKeys,
   createComment,
@@ -25,8 +23,6 @@ import {
 } from './comments-api';
 import styles from './post-comments.module.css';
 
-const MAX_LENGTH = 300;
-const DELETED_AUTHOR = 'Deleted user';
 
 interface PostCommentsProps {
   postId: string;
@@ -37,58 +33,7 @@ interface PostCommentsProps {
   className?: string;
 }
 
-function CommentRow({
-  comment,
-  isOwn,
-  onDelete,
-}: {
-  comment: ICommentResponse;
-  isOwn: boolean;
-  onDelete: (comment: ICommentResponse) => void;
-}) {
-  const { author } = comment;
-  const name = author?.displayName || author?.username || DELETED_AUTHOR;
-
-  return (
-    <li className={styles.comment}>
-      <Avatar src={author?.avatarUrl} name={name} size="sm" decorative />
-      <div className={styles.body}>
-        <p className={styles.text}>
-          {author ? (
-            <Link href={`/profile/${author.userId}`} className={styles.name}>
-              {name}
-            </Link>
-          ) : (
-            <span className={styles.name}>{name}</span>
-          )}{' '}
-          {comment.content}
-        </p>
-        <div className={styles.meta}>
-          <RelativeTime value={comment.createdAt} />
-          {isOwn && (
-            <IconButton
-              label="Delete comment"
-              size="sm"
-              className={styles.delete}
-              onClick={() => onDelete(comment)}
-            >
-              <Trash2 size={16} />
-            </IconButton>
-          )}
-        </div>
-      </div>
-      <LikeButton
-        target="comment"
-        targetId={comment.id}
-        initialLiked={comment.likedByMe}
-        initialCount={comment.likeCount}
-        variant="compact"
-      />
-    </li>
-  );
-}
-
-/** A post's comments with author avatars, own-comment deletion and a composer. */
+/** A post's comment threads with replies, own-comment edit/delete and a composer. */
 export function PostComments({
   postId,
   intro,
@@ -144,6 +89,7 @@ export function PostComments({
   }
 
   const comments = query.data ?? [];
+  const tree = useMemo(() => buildCommentTree(comments), [comments]);
 
   return (
     <section
@@ -181,13 +127,13 @@ export function PostComments({
             No comments yet. Start the conversation.
           </p>
         )}
-        {comments.length > 0 && (
+        {tree.length > 0 && (
           <ul className={styles.list}>
-            {comments.map((comment) => (
-              <CommentRow
-                key={comment.id}
-                comment={comment}
-                isOwn={Boolean(user) && comment.authorId === user?.id}
+            {tree.map((node) => (
+              <CommentItem
+                key={node.comment.id}
+                node={node}
+                onChanged={refresh}
                 onDelete={(target) => {
                   remove.reset();
                   setPendingDelete(target);
@@ -205,7 +151,7 @@ export function PostComments({
               className={styles.input}
               value={content}
               onChange={(event) => setContent(event.target.value)}
-              maxLength={MAX_LENGTH}
+              maxLength={COMMENT_MAX_LENGTH}
               placeholder="Add a comment…"
               aria-label="Add a comment"
               autoComplete="off"
