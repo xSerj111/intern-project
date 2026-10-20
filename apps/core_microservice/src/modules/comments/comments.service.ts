@@ -143,8 +143,8 @@ export class CommentsService {
       );
     }
 
-    await this.commentRepository.softDelete(comment);
-    this.logger.debug('Comment soft-deleted', {
+    await this.commentRepository.softDeleteWithReplies(comment);
+    this.logger.debug('Comment and its replies soft-deleted', {
       props: { commentId: comment.id },
     });
   }

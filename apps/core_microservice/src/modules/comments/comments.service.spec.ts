@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { ForbiddenException } from '@nestjs/common';
 import { EntityByIdNotFoundError, LoggerKey, RoutingKeys } from '@repo/shared';
 import { OUTBOX_PORT } from '../../common/messaging/outbox.port';
 import { USER_DIRECTORY_PORT } from '../profiles/domain/interfaces/user-directory.port';
@@ -17,6 +18,8 @@ describe('CommentsService', () => {
   let service: CommentsService;
   const tx = { tx: true };
   let commentSave: jest.Mock;
+  let commentFindOneByIdOrThrow: jest.Mock;
+  let softDeleteWithReplies: jest.Mock;
   let postFindById: jest.Mock;
   let outbox: { add: jest.Mock };
   let directory: { getUsers: jest.Mock };
@@ -25,8 +28,14 @@ describe('CommentsService', () => {
     commentSave = jest.fn((c: Comment) =>
       Promise.resolve(Object.assign(c, { id: 'c-1' })),
     );
+    commentFindOneByIdOrThrow = jest.fn(() =>
+      Promise.resolve(fakeComment({ id: 'c-1', authorId: COMMENTER })),
+    );
+    softDeleteWithReplies = jest.fn(() => Promise.resolve());
     const commentRepository = {
       save: commentSave,
+      findOneByIdOrThrow: commentFindOneByIdOrThrow,
+      softDeleteWithReplies,
       runInTransaction: jest.fn((work: (m: typeof tx) => Promise<unknown>) =>
         work(tx),
       ),
@@ -144,6 +153,24 @@ describe('CommentsService', () => {
       ).rejects.toThrow(EntityByIdNotFoundError);
       expect(commentSave).not.toHaveBeenCalled();
       expect(outbox.add).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('softDeleteComment', () => {
+    it('deletes the comment together with its replies for the author', async () => {
+      await service.softDeleteComment(COMMENTER, 'c-1');
+
+      expect(softDeleteWithReplies).toHaveBeenCalledTimes(1);
+      expect(softDeleteWithReplies).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'c-1' }),
+      );
+    });
+
+    it('rejects anyone but the author and deletes nothing', async () => {
+      await expect(
+        service.softDeleteComment(POST_AUTHOR, 'c-1'),
+      ).rejects.toThrow(ForbiddenException);
+      expect(softDeleteWithReplies).not.toHaveBeenCalled();
     });
   });
 

@@ -21,6 +21,11 @@ export interface ICommentRepository extends RepositoryPort<
     commentIds: string[],
     viewerId?: string,
   ): Promise<Map<string, LikeStats>>;
+  /**
+   * Soft-deletes the comment and every reply under it, at any depth, in one
+   * statement (replies stay in the table, so a plain soft delete would orphan them).
+   */
+  softDeleteWithReplies(comment: Comment): Promise<void>;
   /** Persists through `tx` when given (raw errors), else the base `save`. */
   save(comment: Comment, tx?: CommentTransaction): Promise<Comment>;
   runInTransaction<T>(work: (tx: CommentTransaction) => Promise<T>): Promise<T>;

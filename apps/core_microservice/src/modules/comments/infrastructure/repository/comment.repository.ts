@@ -39,6 +39,20 @@ export class CommentRepository
     return this.repository.manager.transaction(work);
   }
 
+  async softDeleteWithReplies(comment: Comment): Promise<void> {
+    await this.repository.query(
+      `WITH RECURSIVE thread AS (
+         SELECT id FROM comments WHERE id = $1
+         UNION
+         SELECT c.id FROM comments c JOIN thread t ON c."parentId" = t.id
+       )
+       UPDATE comments SET "deletedAt" = now()
+       WHERE id IN (SELECT id FROM thread) AND "deletedAt" IS NULL`,
+      [comment.id],
+    );
+    this.logger.debug(`[Comment] soft deleted ${comment.id} and its replies`);
+  }
+
   /** Comments for a post, newest first, with the author profile joined. */
   async findByPost(postId: string): Promise<Comment[]> {
     return this.repository.find({
