@@ -113,6 +113,7 @@ export function CommentItem({ node, onChanged, onDelete }: CommentItemProps) {
                 value={draft}
                 maxLength={COMMENT_MAX_LENGTH}
                 onValueChange={setDraft}
+                onEscape={() => setMode('view')}
                 autoFocus
               />
               <EditorActions
@@ -180,6 +181,7 @@ export function CommentItem({ node, onChanged, onDelete }: CommentItemProps) {
             inputClassName={styles.input}
             value={draft}
             onValueChange={setDraft}
+            onEscape={() => setMode('view')}
             maxLength={COMMENT_MAX_LENGTH}
             placeholder={`Reply to ${name}…`}
             aria-label={`Reply to ${name}`}

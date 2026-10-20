@@ -37,13 +37,16 @@ interface MentionInputProps {
   'aria-label': string;
   autoFocus?: boolean;
   rows?: number;
+  /** Called on Esc while the suggestion list is closed (e.g. cancel an inline form). */
+  onEscape?: () => void;
 }
 
 type Field = HTMLInputElement | HTMLTextAreaElement;
 
 /**
  * Text field that suggests users while typing `@name` and inserts `@username`.
- * Up/Down move, Enter or Tab pick, Esc closes. Falls back to a plain field
+ * Up/Down move, Enter or Tab pick, Esc closes the list (or calls `onEscape`
+ * when it is already closed). Falls back to a plain field
  * while signed out or when the search fails.
  */
 export function MentionInput({
@@ -56,6 +59,7 @@ export function MentionInput({
   'aria-label': ariaLabel,
   autoFocus,
   rows,
+  onEscape,
 }: MentionInputProps) {
   const { accessToken } = useAuth();
   const listId = useId();
@@ -100,6 +104,8 @@ export function MentionInput({
     const next = findMentionAtCaret(field.value, field.selectionStart ?? 0);
     setTrigger(next);
     setActive(0);
+    // Esc only dismisses the mention it was pressed on.
+    if (next?.start !== dismissedAt) setDismissedAt(null);
   }
 
   function pick(username: string) {
@@ -121,7 +127,14 @@ export function MentionInput({
   }
 
   function onKeyDown(event: KeyboardEvent<Field>) {
-    if (!open) return;
+    if (!open) {
+      if (event.key === 'Escape' && onEscape) {
+        // preventDefault keeps the post view's own Esc handler from closing it.
+        event.preventDefault();
+        onEscape();
+      }
+      return;
+    }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault();
       const step = event.key === 'ArrowDown' ? 1 : -1;
