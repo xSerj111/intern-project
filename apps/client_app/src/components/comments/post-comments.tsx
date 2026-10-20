@@ -183,7 +183,7 @@ export function PostComments({
       <ConfirmDialog
         open={pendingDelete !== null}
         title="Delete comment?"
-        description="This can't be undone."
+        description="This also deletes all replies to it. This can't be undone."
         confirmLabel="Delete"
         destructive
         busy={remove.isPending}
