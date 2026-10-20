@@ -37,14 +37,10 @@ export interface IPostResponse {
 }
 
 /**
- * Paginated feed envelope returned by `GET /posts/feed`.
- *
- * Note: the feed uses `items`, not the `data` field of the generic
- * `IPaginatedResponse<T>`.
+ * Cursor-paginated feed page returned by `GET /posts/feed`.
  */
-export interface IFeedResponse {
+export interface IFeedPage {
   items: IPostResponse[];
-  total: number;
-  page: number;
-  limit: number;
+  /** `null` when there are no more items. */
+  nextCursor: string | null;
 }

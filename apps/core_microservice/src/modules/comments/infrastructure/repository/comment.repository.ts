@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import type { EntityManager, Repository } from 'typeorm';
+import { In, IsNull, type EntityManager, type Repository } from 'typeorm';
 
 import { TypeormRepositoryBase } from '@repo/shared';
 import { Comment } from '../../domain/entities/comment.entity';
@@ -53,12 +53,46 @@ export class CommentRepository
     this.logger.debug(`[Comment] soft deleted ${comment.id} and its replies`);
   }
 
-  /** Comments for a post, newest first, with the author profile joined. */
-  async findByPost(postId: string): Promise<Comment[]> {
+  /**
+   * Root comments of a post, newest first; fetches `limit + 1` so the caller
+   * can tell whether another page exists. Soft-deleted rows are excluded by
+   * the entity's `deletedAt` column.
+   */
+  async findRootPage(
+    postId: string,
+    { offset, limit }: { offset: number; limit: number },
+  ): Promise<Comment[]> {
     return this.repository.find({
-      where: { postId },
+      where: { postId, parentId: IsNull() },
       relations: { author: true },
-      order: { createdAt: 'DESC' },
+      order: { createdAt: 'DESC', id: 'DESC' },
+      skip: offset,
+      take: limit + 1,
+    });
+  }
+
+  /**
+   * All live descendants of the given roots, at any depth (replies to replies
+   * are allowed by `Comment.create`). The recursive walk stops at a
+   * soft-deleted comment, and the final load excludes soft-deleted rows.
+   */
+  async findRepliesOf(rootIds: string[]): Promise<Comment[]> {
+    if (rootIds.length === 0) return [];
+    const rows = await this.repository.query<{ id: string }[]>(
+      `WITH RECURSIVE thread AS (
+         SELECT id FROM comments WHERE "parentId" = ANY($1::uuid[]) AND "deletedAt" IS NULL
+         UNION
+         SELECT c.id FROM comments c JOIN thread t ON c."parentId" = t.id
+         WHERE c."deletedAt" IS NULL
+       )
+       SELECT id FROM thread`,
+      [rootIds],
+    );
+    if (rows.length === 0) return [];
+    return this.repository.find({
+      where: { id: In(rows.map((row) => row.id)) },
+      relations: { author: true },
+      order: { createdAt: 'ASC', id: 'ASC' },
     });
   }
 

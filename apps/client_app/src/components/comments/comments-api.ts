@@ -1,4 +1,4 @@
-import type { ICommentResponse } from '@repo/contracts';
+import type { ICommentResponse, IOffsetPage } from '@repo/contracts';
 
 import { coreApi } from '../../lib/api/client';
 
@@ -8,15 +8,45 @@ export const commentKeys = {
   post: (postId: string) => [...commentKeys.all, 'post', postId] as const,
 };
 
-/** List a post's comments (`GET /comments/post/:postId`, optional auth for `likedByMe`). */
+/** Root comments per page (the server counts roots; replies ride along). */
+export const COMMENTS_PAGE_SIZE = 20;
+
+/**
+ * One page of a post's comments (`GET /comments/post/:postId`, optional auth for
+ * `likedByMe`): the page's roots newest-first, then all their replies.
+ */
 export function getPostComments(
   postId: string,
-  { token, signal }: { token?: string | null; signal?: AbortSignal } = {},
-): Promise<ICommentResponse[]> {
-  return coreApi<ICommentResponse[]>(`/comments/post/${postId}`, {
+  {
     token,
     signal,
+    page,
+    limit = COMMENTS_PAGE_SIZE,
+  }: {
+    token?: string | null;
+    signal?: AbortSignal;
+    page?: number;
+    limit?: number;
+  } = {},
+): Promise<IOffsetPage<ICommentResponse>> {
+  return coreApi<IOffsetPage<ICommentResponse>>(`/comments/post/${postId}`, {
+    token,
+    signal,
+    query: { page, limit },
   });
+}
+
+/** Concatenate fetched pages, dropping repeats (offset paging can overlap after inserts). */
+export function mergeCommentPages(
+  pages: IOffsetPage<ICommentResponse>[],
+): ICommentResponse[] {
+  const byId = new Map<string, ICommentResponse>();
+  for (const page of pages) {
+    for (const comment of page.items) {
+      if (!byId.has(comment.id)) byId.set(comment.id, comment);
+    }
+  }
+  return [...byId.values()];
 }
 
 /** Create a comment, or a reply when `parentId` is set (`POST /comments`). */

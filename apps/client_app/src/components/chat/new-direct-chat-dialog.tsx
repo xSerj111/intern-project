@@ -7,7 +7,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { IChatUser } from '@repo/contracts';
 
 import { chatKeys, createDirectChat } from '../../lib/api/chats';
-import { listFollowers, listFollowing } from '../../lib/api/follows';
+import { getFollowers, getFollowing } from '../../lib/api/follows';
 import { getUsersByIds, searchProfiles } from '../../lib/api/profile';
 import { useAuth } from '../../lib/auth/auth-context';
 
@@ -39,8 +39,8 @@ export function useFollowSuggestions(enabled: boolean) {
     queryKey: ['chats', 'suggestions', me],
     queryFn: async ({ signal }): Promise<Suggestion[]> => {
       const [following, followers] = await Promise.all([
-        listFollowing(me!, { token: accessToken, signal }),
-        listFollowers(me!, { token: accessToken, signal }),
+        getFollowing(me!, { token: accessToken, signal }),
+        getFollowers(me!, { token: accessToken, signal }),
       ]);
       const seen = new Set<string>();
       const out: Suggestion[] = [];
@@ -50,8 +50,8 @@ export function useFollowSuggestions(enabled: boolean) {
           out.push({ userId, relation });
         }
       };
-      following.forEach((f) => add(f.followingId, 'Following'));
-      followers.forEach((f) => add(f.followerId, 'Follower'));
+      following.items.forEach((f) => add(f.followingId, 'Following'));
+      followers.items.forEach((f) => add(f.followerId, 'Follower'));
       return out;
     },
     enabled: enabled && Boolean(accessToken) && Boolean(me),

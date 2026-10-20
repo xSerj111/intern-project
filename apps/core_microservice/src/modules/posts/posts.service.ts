@@ -9,8 +9,7 @@ import {
   type LikeStats,
 } from './domain/interfaces/post-repository.port';
 import { PostAsset } from './domain/entities/post-asset.entity';
-import { FollowRepositoryKey } from '../follows/domain/interfaces/follow-repository.port';
-import type { IFollowRepository } from '../follows/domain/interfaces/follow-repository.port';
+import { FeedCursor } from './domain/feed-cursor';
 
 @Injectable()
 export class PostsService {
@@ -18,31 +17,28 @@ export class PostsService {
     @Inject(LoggerKey) private readonly logger: Logger,
     @Inject(POST_REPOSITORY)
     private readonly postRepository: IPostRepository,
-    @Inject(FollowRepositoryKey)
-    private readonly followRepository: IFollowRepository,
   ) {}
 
+  /**
+   * One keyset page of the viewer's feed (own posts and followed authors).
+   * `cursor` was already validated by the DTO; omit it for the first page.
+   */
   async getFeed(
     userId: string,
-    page: number,
+    cursor: string | undefined,
     limit: number,
-  ): Promise<{ items: Post[]; total: number }> {
-    const follows = await this.followRepository.findFollowing(userId);
-    const followingIds = follows.map((f) => f.followingId);
-
-    const targetAuthorIds = [...followingIds, userId];
-
-    const [items, total] = await this.postRepository.getFeedForAuthors(
-      targetAuthorIds,
-      page,
+  ): Promise<{ items: Post[]; nextCursor: string | null }> {
+    const { posts, nextCursor } = await this.postRepository.findFeedPage(
+      userId,
+      cursor === undefined ? null : FeedCursor.decode(cursor),
       limit,
     );
 
     this.logger.debug('Feed retrieved', {
-      props: { userId, count: items.length, total },
+      props: { userId, count: posts.length, hasMore: nextCursor !== null },
     });
 
-    return { items, total };
+    return { items: posts, nextCursor };
   }
 
   /**

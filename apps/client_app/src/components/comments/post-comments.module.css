@@ -227,3 +227,9 @@ a.name:hover {
   justify-content: flex-end;
   gap: var(--space-2);
 }
+
+.more {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-3) 0;
+}

@@ -3,6 +3,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { And, In, LessThan, MoreThan } from 'typeorm';
 import type { EntityManager, FindOptionsWhere, Repository } from 'typeorm';
 
+import { CHANGES_PAGE_SIZE_MAX, PAGE_SIZE_MAX } from '@repo/contracts';
 import { TypeormRepositoryBase } from '@repo/shared';
 import { Message } from '../../domain/entities/message.entity';
 import { MessageAttachment } from '../../domain/entities/message-attachment.entity';
@@ -22,9 +23,9 @@ import {
 } from './chat.repository';
 
 export const HISTORY_DEFAULT_LIMIT = 50;
-export const HISTORY_MAX_LIMIT = 100;
+export const HISTORY_MAX_LIMIT = PAGE_SIZE_MAX;
 export const CHANGES_DEFAULT_LIMIT = 200;
-export const CHANGES_MAX_LIMIT = 500;
+export const CHANGES_MAX_LIMIT = CHANGES_PAGE_SIZE_MAX;
 
 /** TypeORM adapter for the message repository port. */
 @Injectable()

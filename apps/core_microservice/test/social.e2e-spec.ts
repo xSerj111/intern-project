@@ -385,9 +385,10 @@ describe('Social: likes, events, outbox (e2e)', () => {
 
     it('GET /comments/post/:postId', async () => {
       const find = (res: request.Response) =>
-        res.body.find((c: any) => c.id === commentId);
+        res.body.items.find((c: any) => c.id === commentId);
 
       const anon = await http.get(`/comments/post/${post.id}`).expect(200);
+      expect(anon.body).toMatchObject({ page: 1, limit: 20, hasMore: false });
       expect(find(anon)).toMatchObject({ likeCount: 1, likedByMe: false });
 
       const asB = await http
@@ -494,6 +495,47 @@ describe('Social: likes, events, outbox (e2e)', () => {
           [b.userId, a.userId],
         ),
       ).toHaveLength(1);
+    });
+  });
+
+  describe('paged follow lists', () => {
+    it('lists B as a follower of A and A as followed by B, with isFollowedByMe', async () => {
+      await http
+        .post('/follows')
+        .set(authed(b))
+        .send({ followingId: a.userId })
+        .expect(201);
+
+      const followers = await http
+        .get(`/follows/${a.userId}/followers`)
+        .set(authed(b))
+        .expect(200);
+      expect(followers.body).toMatchObject({
+        page: 1,
+        limit: 50,
+        hasMore: false,
+      });
+      const ofB = followers.body.items.find(
+        (f: any) => f.followerId === b.userId,
+      );
+      expect(ofB).toMatchObject({
+        followingId: a.userId,
+        isFollowedByMe: false,
+      });
+
+      const following = await http
+        .get(`/follows/${b.userId}/following`)
+        .set(authed(b))
+        .expect(200);
+      const toA = following.body.items.find(
+        (f: any) => f.followingId === a.userId,
+      );
+      expect(toA).toMatchObject({ followerId: b.userId, isFollowedByMe: true });
+
+      const anon = await http.get(`/follows/${b.userId}/following`).expect(200);
+      expect(
+        anon.body.items.find((f: any) => f.followingId === a.userId),
+      ).toMatchObject({ isFollowedByMe: false });
     });
   });
 

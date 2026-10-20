@@ -1,6 +1,10 @@
 'use client';
 
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  useInfiniteQuery,
+  useMutation,
+  useQueryClient,
+} from '@tanstack/react-query';
 import Link from 'next/link';
 import { useMemo, useState, type FormEvent, type ReactNode } from 'react';
 
@@ -21,9 +25,9 @@ import {
   createComment,
   deleteComment,
   getPostComments,
+  mergeCommentPages,
 } from './comments-api';
 import styles from './post-comments.module.css';
-
 
 interface PostCommentsProps {
   postId: string;
@@ -49,10 +53,16 @@ export function PostComments({
     null,
   );
 
-  const query = useQuery({
+  const query = useInfiniteQuery({
     queryKey: [...commentKeys.post(postId), user?.id ?? null],
-    queryFn: ({ signal }) =>
-      getPostComments(postId, { token: getAccessToken(), signal }),
+    initialPageParam: 1,
+    queryFn: ({ pageParam, signal }) =>
+      getPostComments(postId, {
+        token: getAccessToken(),
+        signal,
+        page: pageParam,
+      }),
+    getNextPageParam: (last) => (last.hasMore ? last.page + 1 : undefined),
     enabled: isHydrated,
   });
 
@@ -89,12 +99,19 @@ export function PostComments({
     }
   }
 
-  const comments = query.data ?? [];
+  const comments = useMemo(
+    () => (query.data ? mergeCommentPages(query.data.pages) : []),
+    [query.data],
+  );
   const tree = useMemo(() => buildCommentTree(comments), [comments]);
 
   return (
     <section
-      className={cx(styles.comments, scrollable && styles.scrollable, className)}
+      className={cx(
+        styles.comments,
+        scrollable && styles.scrollable,
+        className,
+      )}
       aria-label="Comments"
     >
       <div className={styles.scroll}>
@@ -143,6 +160,20 @@ export function PostComments({
             ))}
           </ul>
         )}
+        {query.hasNextPage && (
+          <div className={styles.more}>
+            <Button
+              size="sm"
+              variant="secondary"
+              loading={query.isFetchingNextPage}
+              onClick={() => {
+                void query.fetchNextPage();
+              }}
+            >
+              Load more comments
+            </Button>
+          </div>
+        )}
       </div>
 
       <div className={styles.footer}>
@@ -187,7 +218,9 @@ export function PostComments({
         confirmLabel="Delete"
         destructive
         busy={remove.isPending}
-        error={remove.isError ? "Couldn't delete the comment. Try again." : null}
+        error={
+          remove.isError ? "Couldn't delete the comment. Try again." : null
+        }
         onConfirm={() => pendingDelete && remove.mutate(pendingDelete.id)}
         onCancel={() => setPendingDelete(null)}
       />

@@ -1,8 +1,9 @@
 import { Type } from 'class-transformer';
 import { IsISO8601, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { PAGE_SIZE_MAX } from '@repo/contracts';
 
 export const NOTIFICATIONS_DEFAULT_LIMIT = 20;
-export const NOTIFICATIONS_MAX_LIMIT = 50;
+export const NOTIFICATIONS_MAX_LIMIT = PAGE_SIZE_MAX;
 
 /** `GET /notifications` query (mirrors `IListNotificationsQuery`). */
 export class ListNotificationsQueryDto {

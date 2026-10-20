@@ -6,6 +6,7 @@ import { TypeormRepositoryBase } from '@repo/shared';
 import { Post, PostStatus } from '../../domain/entities/post.entity';
 import { PostLike } from '../../domain/entities/post-like.entity';
 import type { PostProps } from '../../domain/interfaces/post.props';
+import { FeedCursor } from '../../domain/feed-cursor';
 import type {
   IPostRepository,
   LikeStats,
@@ -31,25 +32,57 @@ export class PostRepository
     return this.repository.findOne({ where: { id } });
   }
 
-  async getFeedForAuthors(
-    authorIds: string[],
-    page: number,
+  /**
+   * Ids first (index-only on the partial feed index, follows as a sub-select,
+   * no COUNT), then one hydration query by id. `t` is the raw Postgres
+   * timestamp text with microseconds, so the cursor never loses precision.
+   */
+  async findFeedPage(
+    viewerId: string,
+    cursor: FeedCursor | null,
     limit: number,
-  ): Promise<[Post[], number]> {
-    const skip = (page - 1) * limit;
+  ): Promise<{ posts: Post[]; nextCursor: string | null }> {
+    const params: unknown[] = [viewerId, limit + 1];
+    let keyset = '';
+    if (cursor) {
+      params.push(cursor.t, cursor.id);
+      keyset = 'AND (p."createdAt", p.id) < ($3::timestamptz, $4::uuid)';
+    }
+    // The status literal stays inline so the planner can match the partial index.
+    const rows = await this.repository.query<{ id: string; t: string }[]>(
+      `SELECT p.id,
+              to_char(p."createdAt" AT TIME ZONE 'UTC',
+                      'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS t
+         FROM posts p
+        WHERE p.status = '${PostStatus.Published}'
+          AND p."deletedAt" IS NULL
+          AND (p."authorId" = $1
+               OR p."authorId" IN (SELECT f."followingId" FROM follows f
+                                    WHERE f."followerId" = $1
+                                      AND f."deletedAt" IS NULL))
+          ${keyset}
+        ORDER BY p."createdAt" DESC, p.id DESC
+        LIMIT $2`,
+      params,
+    );
 
-    return this.repository.findAndCount({
-      where: {
-        authorId: In(authorIds),
-        status: PostStatus.Published,
-      },
+    const page = rows.slice(0, limit);
+    const last = page[page.length - 1];
+    const nextCursor =
+      rows.length > limit && last ? FeedCursor.fromRow(last).encode() : null;
+    if (page.length === 0) return { posts: [], nextCursor };
+
+    const ids = page.map((row) => row.id);
+    const found = await this.repository.find({
+      where: { id: In(ids) },
       relations: { author: true, assets: { asset: true } },
-      order: {
-        createdAt: 'DESC',
-      },
-      skip,
-      take: limit,
     });
+    const byId = new Map(found.map((post) => [post.id, post]));
+    // A post deleted between the two queries simply drops out of the page.
+    const posts = ids
+      .map((id) => byId.get(id))
+      .filter((post): post is Post => post !== undefined);
+    return { posts, nextCursor };
   }
 
   async findByAuthor(

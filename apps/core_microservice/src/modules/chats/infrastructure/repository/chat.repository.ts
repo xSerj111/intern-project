@@ -3,6 +3,7 @@ import { InjectDataSource, InjectRepository } from '@nestjs/typeorm';
 import { DataSource, In, IsNull } from 'typeorm';
 import type { EntityManager, Repository } from 'typeorm';
 
+import { PAGE_SIZE_MAX } from '@repo/contracts';
 import {
   DatabaseQueryError,
   type Logger,
@@ -27,7 +28,7 @@ import type {
 } from '../../domain/interfaces/chat-repository.port';
 
 export const LIST_CHATS_DEFAULT_LIMIT = 20;
-export const LIST_CHATS_MAX_LIMIT = 50;
+export const LIST_CHATS_MAX_LIMIT = PAGE_SIZE_MAX;
 
 /**
  * Clamps a page size to 1..max. One extra row above `max` is allowed so callers

@@ -23,3 +23,11 @@ export interface IPostsByAuthorQuery {
    */
   status?: PostStatus;
 }
+
+/** Query of `GET /posts/feed`. Cursor-based; `page` is not accepted. */
+export interface IFeedQuery {
+  /** Opaque value from a previous `nextCursor`. Omit for the first page. */
+  cursor?: string;
+  /** `1..50`, default 20. */
+  limit?: number;
+}

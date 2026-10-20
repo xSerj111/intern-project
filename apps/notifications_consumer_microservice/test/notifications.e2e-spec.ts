@@ -942,6 +942,15 @@ describe('Notifications service (e2e)', () => {
         .expect(400);
     });
 
+    it('GET /notifications accepts the maximum page size limit=50', async () => {
+      const res = await http
+        .get('/notifications?limit=50')
+        .set(authed(a))
+        .expect(200);
+      expect(res.body.items).toHaveLength(3);
+      expect(res.body.hasMore).toBe(false);
+    });
+
     it('GET /notifications/unseen-count is scoped to the caller', async () => {
       const resA = await http
         .get('/notifications/unseen-count')

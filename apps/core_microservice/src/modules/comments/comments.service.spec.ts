@@ -20,6 +20,8 @@ describe('CommentsService', () => {
   let commentSave: jest.Mock;
   let commentFindOneByIdOrThrow: jest.Mock;
   let softDeleteWithReplies: jest.Mock;
+  let findRootPage: jest.Mock;
+  let findRepliesOf: jest.Mock;
   let postFindById: jest.Mock;
   let outbox: { add: jest.Mock };
   let directory: { getUsers: jest.Mock };
@@ -32,7 +34,11 @@ describe('CommentsService', () => {
       Promise.resolve(fakeComment({ id: 'c-1', authorId: COMMENTER })),
     );
     softDeleteWithReplies = jest.fn(() => Promise.resolve());
+    findRootPage = jest.fn(() => Promise.resolve([]));
+    findRepliesOf = jest.fn(() => Promise.resolve([]));
     const commentRepository = {
+      findRootPage,
+      findRepliesOf,
       save: commentSave,
       findOneByIdOrThrow: commentFindOneByIdOrThrow,
       softDeleteWithReplies,
@@ -171,6 +177,56 @@ describe('CommentsService', () => {
         service.softDeleteComment(POST_AUTHOR, 'c-1'),
       ).rejects.toThrow(ForbiddenException);
       expect(softDeleteWithReplies).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getCommentsByPost', () => {
+    const roots = (n: number) =>
+      Array.from({ length: n }, (_, i) => fakeComment({ id: `root-${i}` }));
+
+    it('returns roots first, then their replies, and passes the offset', async () => {
+      const reply = fakeComment({ id: 'reply-1', parentId: 'root-0' });
+      findRootPage.mockResolvedValue(roots(2));
+      findRepliesOf.mockResolvedValue([reply]);
+
+      const page = await service.getCommentsByPost(POST_ID, {
+        page: 3,
+        limit: 5,
+      });
+
+      expect(findRootPage).toHaveBeenCalledWith(POST_ID, {
+        offset: 10,
+        limit: 5,
+      });
+      expect(findRepliesOf).toHaveBeenCalledWith(['root-0', 'root-1']);
+      expect(page.items.map((c) => c.id)).toEqual([
+        'root-0',
+        'root-1',
+        'reply-1',
+      ]);
+      expect(page).toMatchObject({ page: 3, limit: 5, hasMore: false });
+    });
+
+    it('sets hasMore from the extra root and drops it from the page', async () => {
+      findRootPage.mockResolvedValue(roots(3));
+
+      const page = await service.getCommentsByPost(POST_ID, {
+        page: 1,
+        limit: 2,
+      });
+
+      expect(page.hasMore).toBe(true);
+      expect(page.items).toHaveLength(2);
+      expect(findRepliesOf).toHaveBeenCalledWith(['root-0', 'root-1']);
+    });
+
+    it('returns an empty page for a post without comments', async () => {
+      const page = await service.getCommentsByPost(POST_ID, {
+        page: 1,
+        limit: 20,
+      });
+
+      expect(page).toEqual({ items: [], page: 1, limit: 20, hasMore: false });
     });
   });
 

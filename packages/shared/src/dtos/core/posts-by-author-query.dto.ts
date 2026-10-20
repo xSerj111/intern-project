@@ -1,13 +1,14 @@
 import { ApiPropertyOptional } from "@nestjs/swagger";
 import { Type } from "class-transformer";
 import { IsIn, IsInt, IsOptional, Max, Min } from "class-validator";
+import { PAGE_SIZE_MAX } from "@repo/contracts";
 
 /** Mirrors the contracts `PostStatus` values (shared cannot import contracts). */
 export const POST_LIST_STATUSES = ["draft", "published", "archived"] as const;
 export type PostListStatus = (typeof POST_LIST_STATUSES)[number];
 
 /** Highest page size accepted by `GET /posts/author/:userId`. */
-export const POSTS_BY_AUTHOR_MAX_LIMIT = 50;
+export const POSTS_BY_AUTHOR_MAX_LIMIT = PAGE_SIZE_MAX;
 
 /** Query of `GET /posts/author/:userId` (matches `IPostsByAuthorQuery`). */
 export class PostsByAuthorQueryDto {

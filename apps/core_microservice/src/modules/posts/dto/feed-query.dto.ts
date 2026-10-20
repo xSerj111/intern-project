@@ -1,27 +1,35 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
+import { PAGE_SIZE_MAX, type IFeedQuery } from '@repo/contracts';
 import { Type } from 'class-transformer';
-import { IsInt, IsOptional, Min } from 'class-validator';
+import { Equals, IsInt, IsOptional, Max, Min } from 'class-validator';
+import { IsFeedCursor } from './is-feed-cursor.validator';
 
-export class FeedQueryDto {
+export class FeedQueryDto implements IFeedQuery {
   @ApiPropertyOptional({
-    description: 'Page number for pagination',
-    default: 1,
-    minimum: 1,
+    description:
+      'Opaque cursor from a previous `nextCursor`. Omit for the first page.',
   })
   @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  page: number = 1;
+  @IsFeedCursor()
+  cursor?: string;
 
   @ApiPropertyOptional({
     description: 'Number of posts per page',
     default: 20,
     minimum: 1,
+    maximum: PAGE_SIZE_MAX,
   })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  @Max(PAGE_SIZE_MAX)
   limit: number = 20;
+
+  /**
+   * Declared only so `whitelist` keeps it and validation can reject it.
+   * Any supplied value (including an empty one) is a 400.
+   */
+  @Equals(undefined, { message: 'page is not supported; use cursor' })
+  page?: unknown;
 }

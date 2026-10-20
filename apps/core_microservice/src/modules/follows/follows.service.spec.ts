@@ -13,6 +13,9 @@ describe('FollowsService', () => {
   let service: FollowsService;
   let repo: {
     findByFollowerAndFollowing: jest.Mock;
+    findFollowers: jest.Mock;
+    findFollowing: jest.Mock;
+    findFollowedAmong: jest.Mock;
     save: jest.Mock;
     runInTransaction: jest.Mock;
   };
@@ -27,6 +30,9 @@ describe('FollowsService', () => {
     );
     repo = {
       findByFollowerAndFollowing: jest.fn(() => Promise.resolve(null)),
+      findFollowers: jest.fn(() => Promise.resolve([])),
+      findFollowing: jest.fn(() => Promise.resolve([])),
+      findFollowedAmong: jest.fn(() => Promise.resolve(new Set<string>())),
       save: txSave,
       runInTransaction: jest.fn((work: (m: typeof tx) => Promise<unknown>) =>
         work(tx),
@@ -110,5 +116,84 @@ describe('FollowsService', () => {
 
     expect(txSave).toHaveBeenCalledTimes(1);
     expect(outbox.add).not.toHaveBeenCalled();
+  });
+
+  describe('list pages', () => {
+    const edge = (n: number, followerId: string, followingId: string) =>
+      Object.assign(Follow.create({ followerId, followingId }), {
+        id: `f-${n}`,
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+      });
+
+    it('asks for offset (page-1)*limit and drops the extra row into hasMore', async () => {
+      repo.findFollowers.mockResolvedValueOnce([
+        edge(1, 'a', FOLLOWED),
+        edge(2, 'b', FOLLOWED),
+        edge(3, 'c', FOLLOWED),
+      ]);
+
+      const page = await service.getFollowers(
+        FOLLOWED,
+        { page: 3, limit: 2 },
+        FOLLOWER,
+      );
+
+      expect(repo.findFollowers).toHaveBeenCalledWith(FOLLOWED, {
+        offset: 4,
+        limit: 2,
+      });
+      expect(page).toMatchObject({ page: 3, limit: 2, hasMore: true });
+      expect(page.items.map((i) => i.id)).toEqual(['f-1', 'f-2']);
+    });
+
+    it('reports hasMore false on a short page', async () => {
+      repo.findFollowing.mockResolvedValueOnce([edge(1, FOLLOWED, 'x')]);
+
+      const page = await service.getFollowing(FOLLOWED, {}, FOLLOWER);
+
+      expect(repo.findFollowing).toHaveBeenCalledWith(FOLLOWED, {
+        offset: 0,
+        limit: 50,
+      });
+      expect(page.hasMore).toBe(false);
+    });
+
+    it('marks followers the viewer follows, with one batched lookup', async () => {
+      repo.findFollowers.mockResolvedValueOnce([
+        edge(1, 'a', FOLLOWED),
+        edge(2, 'b', FOLLOWED),
+      ]);
+      repo.findFollowedAmong.mockResolvedValueOnce(new Set(['b']));
+
+      const page = await service.getFollowers(FOLLOWED, {}, FOLLOWER);
+
+      expect(repo.findFollowedAmong).toHaveBeenCalledTimes(1);
+      expect(repo.findFollowedAmong).toHaveBeenCalledWith(FOLLOWER, ['a', 'b']);
+      expect(page.items.map((i) => i.isFollowedByMe)).toEqual([false, true]);
+    });
+
+    it('checks the followed side for the following list', async () => {
+      repo.findFollowing.mockResolvedValueOnce([edge(1, FOLLOWED, 'x')]);
+      repo.findFollowedAmong.mockResolvedValueOnce(new Set(['x']));
+
+      const page = await service.getFollowing(FOLLOWED, {}, FOLLOWER);
+
+      expect(repo.findFollowedAmong).toHaveBeenCalledWith(FOLLOWER, ['x']);
+      expect(page.items[0].isFollowedByMe).toBe(true);
+    });
+
+    it('skips the lookup and returns false for anonymous viewers', async () => {
+      repo.findFollowers.mockResolvedValueOnce([edge(1, 'a', FOLLOWED)]);
+
+      const page = await service.getFollowers(FOLLOWED, {});
+
+      expect(repo.findFollowedAmong).not.toHaveBeenCalled();
+      expect(page.items[0]).toMatchObject({
+        followerId: 'a',
+        followingId: FOLLOWED,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        isFollowedByMe: false,
+      });
+    });
   });
 });

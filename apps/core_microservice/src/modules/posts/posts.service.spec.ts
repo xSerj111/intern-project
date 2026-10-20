@@ -2,10 +2,10 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { LoggerKey } from '@repo/shared';
 import { PostsService } from './posts.service';
 import { POST_REPOSITORY } from './domain/interfaces/post-repository.port';
-import { FollowRepositoryKey } from '../follows/domain/interfaces/follow-repository.port';
 import { PostStatus } from './domain/entities/post.entity';
 import { PostStatusNotVisibleError } from './domain/entities/post.entity';
 import { fakePost } from './__tests__/fakers/post.faker';
+import { FeedCursor } from './domain/feed-cursor';
 
 describe('PostsService', () => {
   let service: PostsService;
@@ -15,6 +15,7 @@ describe('PostsService', () => {
     findByAuthor: jest.fn(),
     save: jest.fn(),
     findOneByIdOrThrow: jest.fn(),
+    findFeedPage: jest.fn(),
   };
   const AUTHOR = '11111111-1111-1111-1111-111111111111';
 
@@ -25,7 +26,6 @@ describe('PostsService', () => {
         PostsService,
         { provide: LoggerKey, useValue: { debug: jest.fn() } },
         { provide: POST_REPOSITORY, useValue: postRepository },
-        { provide: FollowRepositoryKey, useValue: {} },
       ],
     }).compile();
 
@@ -34,6 +34,46 @@ describe('PostsService', () => {
 
   it('should be defined', () => {
     expect(service).toBeDefined();
+  });
+
+  describe('getFeed', () => {
+    const cursor = FeedCursor.fromRow({
+      t: '2026-01-02T03:04:05.123456Z',
+      id: '22222222-2222-2222-2222-222222222222',
+    });
+
+    it('asks for the first page with a null cursor and passes nextCursor through', async () => {
+      const post = fakePost();
+      postRepository.findFeedPage.mockResolvedValue({
+        posts: [post],
+        nextCursor: 'next-1',
+      });
+
+      const result = await service.getFeed(AUTHOR, undefined, 20);
+
+      expect(postRepository.findFeedPage).toHaveBeenCalledWith(
+        AUTHOR,
+        null,
+        20,
+      );
+      expect(result).toEqual({ items: [post], nextCursor: 'next-1' });
+    });
+
+    it('decodes the cursor before querying', async () => {
+      postRepository.findFeedPage.mockResolvedValue({
+        posts: [],
+        nextCursor: null,
+      });
+
+      const result = await service.getFeed(AUTHOR, cursor.encode(), 5);
+
+      expect(postRepository.findFeedPage).toHaveBeenCalledWith(
+        AUTHOR,
+        expect.objectContaining({ t: cursor.t, id: cursor.id }),
+        5,
+      );
+      expect(result).toEqual({ items: [], nextCursor: null });
+    });
   });
 
   describe('getLikeStats', () => {

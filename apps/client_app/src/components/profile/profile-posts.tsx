@@ -123,12 +123,8 @@ function PostsGrid({
         { token: accessToken, signal },
       ),
     initialPageParam: 1,
-    getNextPageParam: (lastPage, allPages) => {
-      const loaded = allPages.reduce((sum, page) => sum + page.items.length, 0);
-      return lastPage.items.length > 0 && loaded < lastPage.total
-        ? lastPage.page + 1
-        : undefined;
-    },
+    getNextPageParam: (lastPage) =>
+      lastPage.hasMore ? lastPage.page + 1 : undefined,
     enabled: isHydrated,
   });
 

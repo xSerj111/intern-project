@@ -9,11 +9,14 @@ import {
   Delete,
   HttpStatus,
   HttpCode,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { CommentsService } from './comments.service';
 import { CreateCommentDto, UpdateCommentDto } from '@repo/shared';
+import type { IOffsetPage } from '@repo/contracts';
 import { CommentResponseDto } from './dto/comment-response.dto';
+import { ListCommentsQueryDto } from './dto/list-comments-query.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../../common/auth/optional-jwt-auth.guard';
 import { Comment } from './domain/entities/comment.entity';
@@ -64,15 +67,22 @@ export class CommentsController {
     );
   }
 
-  // Example route: GET /comments/post/1234sd-123d-213132.....
+  // GET /comments/post/:postId?page=1&limit=20 (paged by root comments)
   @Get('post/:postId')
   @UseGuards(OptionalJwtAuthGuard)
   async getCommentsByPost(
     @CurrentUser('sub') userId: string | undefined,
     @Param('postId', ParseUUIDPipe) postId: string,
-  ): Promise<CommentResponseDto[]> {
-    const comments = await this.commentsService.getCommentsByPost(postId);
-    return this.toResponses(comments, userId);
+    @Query() query: ListCommentsQueryDto,
+  ): Promise<IOffsetPage<CommentResponseDto>> {
+    const { items, page, limit, hasMore } =
+      await this.commentsService.getCommentsByPost(postId, query);
+    return {
+      items: await this.toResponses(items, userId),
+      page,
+      limit,
+      hasMore,
+    };
   }
 
   @Patch(':id')

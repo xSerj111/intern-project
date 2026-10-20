@@ -733,14 +733,21 @@ describe('Realtime chat, US1 (e2e)', () => {
     const membersOf = async (s: Session) =>
       (await http.get(`/chats/${gid}`).set(authed(s)).expect(200)).body;
     const systemCount = async (s: Session) => {
-      const res = await http
-        .get(`/chats/${gid}/messages`)
-        .query({ limit: 100 })
-        .set(authed(s))
-        .expect(200);
-      return (res.body.items as Array<{ kind: string }>).filter(
-        (m) => m.kind === 'SYSTEM',
-      ).length;
+      let count = 0;
+      let beforeSeq: number | undefined;
+      for (;;) {
+        const res = await http
+          .get(`/chats/${gid}/messages`)
+          .query(
+            beforeSeq === undefined ? { limit: 50 } : { limit: 50, beforeSeq },
+          )
+          .set(authed(s))
+          .expect(200);
+        const items = res.body.items as Array<{ kind: string; seq: number }>;
+        count += items.filter((m) => m.kind === 'SYSTEM').length;
+        if (!res.body.hasMore || items.length === 0) return count;
+        beforeSeq = items[items.length - 1].seq; // page is newest first
+      }
     };
 
     beforeAll(async () => {

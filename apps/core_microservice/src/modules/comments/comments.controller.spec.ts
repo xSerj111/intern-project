@@ -3,6 +3,7 @@ import { CommentsController } from './comments.controller';
 import { CommentsService } from './comments.service';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../../common/auth/optional-jwt-auth.guard';
+import { Comment } from './domain/entities/comment.entity';
 import { fakeComment } from './__tests__/fakers/comment.faker';
 
 describe('CommentsController', () => {
@@ -13,10 +14,17 @@ describe('CommentsController', () => {
     getAuthors: jest.fn(),
   };
   const comment = fakeComment();
+  const query = { page: 1, limit: 20 };
+  const page = (items: Comment[], hasMore = false) => ({
+    items,
+    page: 1,
+    limit: 20,
+    hasMore,
+  });
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    commentsService.getCommentsByPost.mockResolvedValue([comment]);
+    commentsService.getCommentsByPost.mockResolvedValue(page([comment]));
     commentsService.getLikeStats.mockResolvedValue(
       new Map([[comment.id, { likeCount: 2, likedByMe: true }]]),
     );
@@ -53,18 +61,40 @@ describe('CommentsController', () => {
   });
 
   describe('getCommentsByPost', () => {
+    it('passes the query to the service and returns the page envelope', async () => {
+      commentsService.getCommentsByPost.mockResolvedValue(
+        page([comment], true),
+      );
+
+      const response = await controller.getCommentsByPost(
+        undefined,
+        comment.postId,
+        { page: 2, limit: 5 },
+      );
+
+      expect(commentsService.getCommentsByPost).toHaveBeenCalledWith(
+        comment.postId,
+        { page: 2, limit: 5 },
+      );
+      expect(response).toMatchObject({ page: 1, limit: 20, hasMore: true });
+      expect(response.items).toHaveLength(1);
+    });
+
     it('embeds the author, loading every author in one batch', async () => {
       const other = fakeComment({ id: 'c-2' });
-      commentsService.getCommentsByPost.mockResolvedValue([comment, other]);
+      commentsService.getCommentsByPost.mockResolvedValue(
+        page([comment, other]),
+      );
 
       const response = await controller.getCommentsByPost(
         'viewer-1',
         comment.postId,
+        query,
       );
 
       expect(commentsService.getAuthors).toHaveBeenCalledTimes(1);
       expect(commentsService.getAuthors).toHaveBeenCalledWith([comment, other]);
-      expect(response[0].author).toEqual({
+      expect(response.items[0].author).toEqual({
         userId: comment.authorId,
         username: 'john_doe',
         displayName: 'John Doe',
@@ -78,22 +108,27 @@ describe('CommentsController', () => {
       const response = await controller.getCommentsByPost(
         undefined,
         comment.postId,
+        query,
       );
 
-      expect(response[0].author).toBeNull();
+      expect(response.items[0].author).toBeNull();
     });
 
     it('adds likeCount and likedByMe for the signed-in viewer', async () => {
       const response = await controller.getCommentsByPost(
         'viewer-1',
         comment.postId,
+        query,
       );
 
       expect(commentsService.getLikeStats).toHaveBeenCalledWith(
         [comment.id],
         'viewer-1',
       );
-      expect(response[0]).toMatchObject({ likeCount: 2, likedByMe: true });
+      expect(response.items[0]).toMatchObject({
+        likeCount: 2,
+        likedByMe: true,
+      });
     });
 
     it('works for an anonymous viewer (no user id)', async () => {
@@ -104,13 +139,17 @@ describe('CommentsController', () => {
       const response = await controller.getCommentsByPost(
         undefined,
         comment.postId,
+        query,
       );
 
       expect(commentsService.getLikeStats).toHaveBeenCalledWith(
         [comment.id],
         undefined,
       );
-      expect(response[0]).toMatchObject({ likeCount: 2, likedByMe: false });
+      expect(response.items[0]).toMatchObject({
+        likeCount: 2,
+        likedByMe: false,
+      });
     });
   });
 });

@@ -41,14 +41,13 @@ export function FeedList() {
     queryKey: [...postKeys.feed(), user?.id ?? null],
     queryFn: ({ pageParam, signal }) =>
       getFeed({
-        page: pageParam,
+        cursor: pageParam,
         limit: PAGE_SIZE,
         token: getAccessToken(),
         signal,
       }),
-    initialPageParam: 1,
-    getNextPageParam: (last) =>
-      last.page * last.limit < last.total ? last.page + 1 : undefined,
+    initialPageParam: undefined as string | undefined,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
     enabled: isHydrated && isSignedIn,
   });
 

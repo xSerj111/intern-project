@@ -253,6 +253,11 @@ describe('Profile page: author posts, summary, avatar (e2e)', () => {
         .expect(200);
       expect(res.body.total).toBe(3);
       expect(res.body.items.map((p: any) => p.content)).toEqual(['pub 0']);
+      expect(res.body).toMatchObject({ page: 2, limit: 2, hasMore: false });
+      const first = await http
+        .get(`/posts/author/${author}?page=1&limit=2`)
+        .expect(200);
+      expect(first.body).toMatchObject({ page: 1, limit: 2, hasMore: true });
     });
 
     it('rejects an oversized limit and bad ids', async () => {
@@ -297,13 +302,15 @@ describe('Profile page: author posts, summary, avatar (e2e)', () => {
       const comments = await http
         .get(`/comments/post/${publishedIds[0]}`)
         .expect(200);
-      expect(comments.body).toHaveLength(2);
-      for (const c of comments.body) {
+      expect(comments.body.items).toHaveLength(2);
+      expect(comments.body.hasMore).toBe(false);
+      for (const c of comments.body.items) {
         expect(c.author.userId).toBe(c.authorId);
       }
       const feed = await http.get('/posts/feed').set(as(author)).expect(200);
       expect(feed.body.items[0].author.userId).toBe(author);
       expect(typeof feed.body.items[0].commentCount).toBe('number');
+      expect(feed.body).toHaveProperty('nextCursor');
     });
   });
 
@@ -332,6 +339,30 @@ describe('Profile page: author posts, summary, avatar (e2e)', () => {
         .set(as(author))
         .expect(200);
       expect(own.body.isFollowedByMe).toBe(false);
+
+      const followers = await http
+        .get(`/follows/${author}/followers`)
+        .set(as(viewer))
+        .expect(200);
+      expect(followers.body).toMatchObject({
+        page: 1,
+        limit: 50,
+        hasMore: false,
+      });
+      expect(followers.body.items).toHaveLength(1);
+      expect(followers.body.items[0]).toMatchObject({
+        followerId: viewer,
+        followingId: author,
+        isFollowedByMe: false,
+      });
+      const following = await http
+        .get(`/follows/${viewer}/following`)
+        .set(as(viewer))
+        .expect(200);
+      expect(following.body.items[0]).toMatchObject({
+        followingId: author,
+        isFollowedByMe: true,
+      });
 
       const anon = await http.get(`/profiles/by-user/${viewer}`).expect(200);
       expect(anon.body).toMatchObject({

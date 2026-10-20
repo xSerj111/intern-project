@@ -23,6 +23,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../../common/auth/optional-jwt-auth.guard';
 import { Post, PostStatus } from './domain/entities/post.entity';
 import { PostsByAuthorQueryDto } from '@repo/shared';
+import type { IFeedPage } from '@repo/contracts';
 
 @Controller('posts')
 export class PostsController {
@@ -71,18 +72,13 @@ export class PostsController {
   async getFeed(
     @CurrentUser('sub') userId: string,
     @Query() query: FeedQueryDto,
-  ) {
-    const { items, total } = await this.postsService.getFeed(
+  ): Promise<IFeedPage> {
+    const { items, nextCursor } = await this.postsService.getFeed(
       userId,
-      query.page,
+      query.cursor,
       query.limit,
     );
-    return {
-      items: await this.toResponses(items, userId),
-      total,
-      page: query.page,
-      limit: query.limit,
-    };
+    return { items: await this.toResponses(items, userId), nextCursor };
   }
 
   @Get('search')
@@ -129,6 +125,7 @@ export class PostsController {
       total,
       page: query.page,
       limit: query.limit,
+      hasMore: query.page * query.limit < total,
     };
   }
 

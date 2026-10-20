@@ -1,7 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsInt, IsOptional, Max, Min } from 'class-validator';
-import type { IMessageChangesQuery } from '@repo/contracts';
+import {
+  CHANGES_PAGE_SIZE_MAX,
+  type IMessageChangesQuery,
+} from '@repo/contracts';
 
 export class MessageChangesQueryDto implements IMessageChangesQuery {
   @ApiProperty({
@@ -13,11 +16,15 @@ export class MessageChangesQueryDto implements IMessageChangesQuery {
   @Min(0)
   afterChangeSeq!: number;
 
-  @ApiPropertyOptional({ default: 200, minimum: 1, maximum: 500 })
+  @ApiPropertyOptional({
+    default: 200,
+    minimum: 1,
+    maximum: CHANGES_PAGE_SIZE_MAX,
+  })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(500)
+  @Max(CHANGES_PAGE_SIZE_MAX)
   limit: number = 200;
 }
