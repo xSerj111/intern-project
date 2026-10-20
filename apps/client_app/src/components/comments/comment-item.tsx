@@ -10,9 +10,10 @@ import type { ICommentResponse } from '@repo/contracts';
 import { useAuth } from '../../lib/auth/auth-context';
 import { cx } from '../../lib/cx';
 import { LikeButton } from '../likes/like-button';
+import { MentionInput } from '../mentions/mention-input';
+import { MentionText } from '../mentions/mention-text';
 import { Avatar } from '../ui/avatar';
 import { Button, IconButton } from '../ui/button';
-import { Textarea } from '../ui/input';
 import { RelativeTime } from '../ui/relative-time';
 
 import { createComment, updateComment } from './comments-api';
@@ -100,17 +101,18 @@ export function CommentItem({ node, onChanged, onDelete }: CommentItemProps) {
               ) : (
                 <span className={styles.name}>{name}</span>
               )}{' '}
-              {comment.content}
+              <MentionText text={comment.content} />
             </p>
           )}
           {mode === 'edit' ? (
             <form className={styles.editor} onSubmit={submit}>
-              <Textarea
+              <MentionInput
+                multiline
                 aria-label="Edit comment"
                 rows={2}
                 value={draft}
                 maxLength={COMMENT_MAX_LENGTH}
-                onChange={(event) => setDraft(event.target.value)}
+                onValueChange={setDraft}
                 autoFocus
               />
               <EditorActions
@@ -174,14 +176,13 @@ export function CommentItem({ node, onChanged, onDelete }: CommentItemProps) {
 
       {mode === 'reply' && (
         <form className={cx(styles.replyForm)} onSubmit={submit}>
-          <input
-            className={styles.input}
+          <MentionInput
+            inputClassName={styles.input}
             value={draft}
-            onChange={(event) => setDraft(event.target.value)}
+            onValueChange={setDraft}
             maxLength={COMMENT_MAX_LENGTH}
             placeholder={`Reply to ${name}…`}
             aria-label={`Reply to ${name}`}
-            autoComplete="off"
             autoFocus
           />
           <EditorActions

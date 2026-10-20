@@ -7,6 +7,7 @@ import { useEffect, useRef } from 'react';
 import type { IPostResponse } from '@repo/contracts';
 
 import { PostComments } from '../comments/post-comments';
+import { MentionText } from '../mentions/mention-text';
 import { IconButton } from '../ui/button';
 
 import { ImageCarousel, visibleAssets } from './image-carousel';
@@ -72,7 +73,9 @@ export function PostDetail({ post }: { post: IPostResponse }) {
   );
 
   const caption = post.content ? (
-    <p className={styles.caption}>{post.content}</p>
+    <p className={styles.caption}>
+      <MentionText text={post.content} />
+    </p>
   ) : null;
 
   return (

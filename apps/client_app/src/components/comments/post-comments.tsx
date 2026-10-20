@@ -9,6 +9,7 @@ import type { ICommentResponse } from '@repo/contracts';
 import { postKeys } from '../../lib/api/posts';
 import { useAuth } from '../../lib/auth/auth-context';
 import { cx } from '../../lib/cx';
+import { MentionInput } from '../mentions/mention-input';
 import { Button } from '../ui/button';
 import { ConfirmDialog } from '../ui/confirm-dialog';
 import { Skeleton, SkeletonGroup } from '../ui/skeleton';
@@ -147,14 +148,13 @@ export function PostComments({
       <div className={styles.footer}>
         {isSignedIn ? (
           <form className={styles.form} onSubmit={submit}>
-            <input
-              className={styles.input}
+            <MentionInput
+              inputClassName={styles.input}
               value={content}
-              onChange={(event) => setContent(event.target.value)}
+              onValueChange={setContent}
               maxLength={COMMENT_MAX_LENGTH}
               placeholder="Add a comment…"
               aria-label="Add a comment"
-              autoComplete="off"
             />
             <Button
               type="submit"

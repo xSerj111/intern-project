@@ -5,6 +5,8 @@ import { useRouter } from 'next/navigation';
 
 import type { IPostResponse } from '@repo/contracts';
 
+import { MentionText } from '../mentions/mention-text';
+
 import { ImageCarousel, visibleAssets } from './image-carousel';
 import { PostActions } from './post-actions';
 import { PostHeader } from './post-header';
@@ -34,7 +36,11 @@ export function PostCard({ post }: { post: IPostResponse }) {
       <div className={styles.header}>
         <PostHeader post={post} actions={<PostMenu post={post} />} />
       </div>
-      {post.content && <p className={styles.content}>{post.content}</p>}
+      {post.content && (
+        <p className={styles.content}>
+          <MentionText text={post.content} />
+        </p>
+      )}
       {hasMedia && <ImageCarousel assets={post.assets ?? []} />}
       <div className={styles.footer}>
         <PostActions post={post} />
