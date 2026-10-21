@@ -11,3 +11,9 @@ export class EmailDeliveryFinalizedError extends DomainError {
     super(`Email delivery "${jobId}" is already ${status} and cannot change.`);
   }
 }
+
+export class InvalidNotificationCursorError extends DomainError {
+  constructor() {
+    super('The notifications cursor is malformed.');
+  }
+}

@@ -21,7 +21,7 @@ interface Auth {
   signal?: AbortSignal;
 }
 
-/** Newest-first page of the caller's notifications (`GET /notifications`), cursor = `before`. */
+/** Newest-first page of the caller's notifications (`GET /notifications`), `before` is the previous page's opaque `nextCursor`. */
 export function listNotifications(
   query: IListNotificationsQuery = {},
   { token, signal }: Auth = {},

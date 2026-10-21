@@ -21,8 +21,10 @@ import {
   eventsNamed,
   logout,
   registerAndLogin,
+  retryTransient,
   sleep,
   waitFor,
+  warmUpDb,
 } from './helpers/realtime.helpers';
 import { cleanupE2eData } from './helpers/cleanup.helpers';
 
@@ -57,7 +59,9 @@ describe('Notifications relay and chat alerts, US6 (e2e)', () => {
     const s = await registerAndLogin(label);
     sessions.push(s);
     // Profiles are created lazily on first use.
-    await http.get('/profiles/me').set(authed(s)).expect(200);
+    await retryTransient(() =>
+      http.get('/profiles/me').set(authed(s)).expect(200),
+    );
     return s;
   };
   const track = async (token: string): Promise<ConnectResult> => {
@@ -150,6 +154,7 @@ describe('Notifications relay and chat alerts, US6 (e2e)', () => {
     baseUrl = (await app.getUrl()).replace('[::1]', 'localhost');
     http = request(app.getHttpServer());
     db = app.get(DataSource);
+    await warmUpDb(db);
 
     // Publish through the app's own broker connection (no extra dependency).
     publishChannel = app
@@ -192,7 +197,11 @@ describe('Notifications relay and chat alerts, US6 (e2e)', () => {
       console.warn('relay e2e cleanup failed', err);
     }
     await Promise.all(sessions.map((s) => logout(s).catch(() => 0)));
-    if (db) await cleanupE2eData(db);
+    try {
+      if (db) await cleanupE2eData(db);
+    } catch (err) {
+      console.warn('relay e2e user cleanup failed', err);
+    }
     await publishChannel?.close().catch(() => undefined);
     await app?.close();
     if (previousRelayQueue === undefined) {

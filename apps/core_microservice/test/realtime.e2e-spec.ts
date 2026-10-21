@@ -20,7 +20,9 @@ import {
   logout,
   registerAndLogin,
   registerMany,
+  retryTransient,
   sleep,
+  warmUpDb,
   waitFor,
 } from './helpers/realtime.helpers';
 
@@ -68,6 +70,7 @@ describe('Realtime chat, US1 (e2e)', () => {
     baseUrl = baseUrl.replace('[::1]', 'localhost');
     http = request(app.getHttpServer());
     db = app.get(DataSource);
+    await warmUpDb(db);
 
     [a, b, c] = await Promise.all([
       registerAndLogin('a'),
@@ -77,15 +80,20 @@ describe('Realtime chat, US1 (e2e)', () => {
     // Profiles are created lazily on first use (auth's event targets a core
     // instance that is not running here).
     for (const s of [a, b, c]) {
-      await http.get('/profiles/me').set(authed(s)).expect(200);
+      await retryTransient(() =>
+        http.get('/profiles/me').set(authed(s)).expect(200),
+      );
     }
   });
 
   afterAll(async () => {
     sockets.forEach((s) => s.socket.close());
-    // Removes the users, profiles and chats this file created.
-    if (db) await cleanupE2eData(db);
-    await app?.close();
+    try {
+      // Removes the users, profiles and chats this file created.
+      if (db) await cleanupE2eData(db);
+    } finally {
+      await app?.close();
+    }
   });
 
   it('refuses a handshake without a token or with a garbage token', async () => {

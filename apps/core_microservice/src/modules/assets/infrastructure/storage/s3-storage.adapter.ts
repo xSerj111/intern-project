@@ -17,8 +17,10 @@ import {
   IFileStoragePort,
   PresignPostInput,
   PresignedPostResult,
+  StorageCopyOptions,
   StorageObjectHead,
 } from '../../domain/interfaces/file-storage.port';
+import { UploadObjectChangedError } from '../../domain/errors/asset.errors';
 import { AppConfigService } from '../../../../config/app-config.service';
 
 /**
@@ -166,7 +168,11 @@ export class S3StorageAdapter implements IFileStoragePort {
       const out = await this.s3Client.send(
         new HeadObjectCommand({ Bucket: bucket, Key: key }),
       );
-      return { size: out.ContentLength ?? 0, contentType: out.ContentType };
+      return {
+        size: out.ContentLength ?? 0,
+        contentType: out.ContentType,
+        etag: out.ETag,
+      };
     } catch (error) {
       if (isNotFound(error)) return null;
       this.logError('Failed to read S3 object metadata', error);
@@ -174,7 +180,12 @@ export class S3StorageAdapter implements IFileStoragePort {
     }
   }
 
-  async readHead(bucket: string, key: string, bytes: number): Promise<Buffer> {
+  async readHead(
+    bucket: string,
+    key: string,
+    bytes: number,
+    ifMatch?: string,
+  ): Promise<Buffer> {
     const limit = Math.floor(bytes);
     if (!(limit >= 1)) return Buffer.alloc(0);
     try {
@@ -183,10 +194,12 @@ export class S3StorageAdapter implements IFileStoragePort {
           Bucket: bucket,
           Key: key,
           Range: `bytes=0-${limit - 1}`,
+          IfMatch: ifMatch,
         }),
       );
       return await readAtMost(out.Body, limit);
     } catch (error) {
+      if (isPreconditionFailed(error)) throw new UploadObjectChangedError();
       this.logError('Failed to read S3 object head', error);
       throw new InternalServerErrorException('Error reading storage object');
     }
@@ -196,14 +209,35 @@ export class S3StorageAdapter implements IFileStoragePort {
     srcBucket: string,
     srcKey: string,
     destKey: string,
-    contentType?: string,
+    options: StorageCopyOptions = {},
   ): Promise<string> {
+    await this.copy(srcBucket, srcKey, this.bucketName, destKey, options);
+    return this.buildPublicUrl(destKey);
+  }
+
+  async copyToPrivate(
+    srcBucket: string,
+    srcKey: string,
+    destKey: string,
+    options: StorageCopyOptions = {},
+  ): Promise<void> {
+    await this.copy(srcBucket, srcKey, this.privateBucket, destKey, options);
+  }
+
+  private async copy(
+    srcBucket: string,
+    srcKey: string,
+    destBucket: string,
+    destKey: string,
+    { contentType, ifMatch }: StorageCopyOptions,
+  ): Promise<void> {
     try {
       await this.s3Client.send(
         new CopyObjectCommand({
-          Bucket: this.bucketName,
+          Bucket: destBucket,
           Key: destKey,
           CopySource: `${srcBucket}/${srcKey.split('/').map(encodeURIComponent).join('/')}`,
+          CopySourceIfMatch: ifMatch,
           ...(contentType
             ? {
                 ContentType: contentType,
@@ -212,9 +246,9 @@ export class S3StorageAdapter implements IFileStoragePort {
             : {}),
         }),
       );
-      return this.buildPublicUrl(destKey);
     } catch (error) {
-      this.logError('Failed to copy S3 object to public bucket', error);
+      if (isPreconditionFailed(error)) throw new UploadObjectChangedError();
+      this.logError(`Failed to copy S3 object to ${destBucket}`, error);
       throw new InternalServerErrorException('Error copying storage object');
     }
   }
@@ -256,6 +290,12 @@ function isNotFound(error: unknown): boolean {
     e.name === 'NoSuchKey' ||
     e.$metadata?.httpStatusCode === 404
   );
+}
+
+function isPreconditionFailed(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const e = error as { name?: string; $metadata?: { httpStatusCode?: number } };
+  return e.name === 'PreconditionFailed' || e.$metadata?.httpStatusCode === 412;
 }
 
 /**

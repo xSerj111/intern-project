@@ -75,6 +75,18 @@ describe('AppConfigService', () => {
       );
     });
 
+    it('accepts 0 for UPLOAD_SWEEP_GRACE_SEC', () => {
+      expect(build({ UPLOAD_SWEEP_GRACE_SEC: '0' }).uploads.sweepGraceSec).toBe(
+        0,
+      );
+    });
+
+    it('rejects a negative UPLOAD_SWEEP_GRACE_SEC', () => {
+      expect(() => build({ UPLOAD_SWEEP_GRACE_SEC: '-1' }).uploads).toThrow(
+        'UPLOAD_SWEEP_GRACE_SEC must be a non-negative integer',
+      );
+    });
+
     it('treats an empty numeric value as unset', () => {
       expect(build({ SLOW_QUERY_MS: '' }).slowQueryMs).toBe(200);
     });

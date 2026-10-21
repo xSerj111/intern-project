@@ -12,6 +12,7 @@ import {
   buildAttachmentDisposition,
 } from './s3-storage.adapter';
 import { AppConfigService } from '../../../../config/app-config.service';
+import { UploadObjectChangedError } from '../../domain/errors/asset.errors';
 
 describe('buildAttachmentDisposition', () => {
   it('quotes a plain ASCII name and repeats it in filename*', () => {
@@ -69,6 +70,11 @@ describe('S3StorageAdapter', () => {
 
   const firstCommand = (): unknown => (send.mock.calls as unknown[][])[0][0];
 
+  const preconditionFailed = () =>
+    Object.assign(new Error('PreconditionFailed'), {
+      name: 'PreconditionFailed',
+      $metadata: { httpStatusCode: 412 },
+    });
   const notFound = () =>
     Object.assign(new Error('NotFound'), {
       name: 'NotFound',
@@ -144,12 +150,17 @@ describe('S3StorageAdapter', () => {
   });
 
   describe('head', () => {
-    it('returns size and content type', async () => {
-      send.mockResolvedValue({ ContentLength: 1234, ContentType: 'image/png' });
+    it('returns size, content type and ETag', async () => {
+      send.mockResolvedValue({
+        ContentLength: 1234,
+        ContentType: 'image/png',
+        ETag: '"e1"',
+      });
 
       await expect(adapter.head('private-bucket', 'k')).resolves.toEqual({
         size: 1234,
         contentType: 'image/png',
+        etag: '"e1"',
       });
       const cmd = firstCommand() as HeadObjectCommand;
       expect(cmd).toBeInstanceOf(HeadObjectCommand);
@@ -201,6 +212,17 @@ describe('S3StorageAdapter', () => {
       expect(body.destroyed).toBe(true);
     });
 
+    it('pins the read to an ETag and maps 412 to UploadObjectChangedError', async () => {
+      send.mockRejectedValue(preconditionFailed());
+
+      await expect(
+        adapter.readHead('private-bucket', 'k', 10, '"e1"'),
+      ).rejects.toBeInstanceOf(UploadObjectChangedError);
+      expect((firstCommand() as GetObjectCommand).input).toMatchObject({
+        IfMatch: '"e1"',
+      });
+    });
+
     it('returns an empty buffer for an empty body', async () => {
       send.mockResolvedValue({ Body: undefined });
 
@@ -233,7 +255,9 @@ describe('S3StorageAdapter', () => {
     it('replaces the content type when given', async () => {
       send.mockResolvedValue({});
 
-      await adapter.copyToPublic('private-bucket', 'k', 'a1.jpg', 'image/jpeg');
+      await adapter.copyToPublic('private-bucket', 'k', 'a1.jpg', {
+        contentType: 'image/jpeg',
+      });
 
       const cmd = firstCommand() as CopyObjectCommand;
       expect(cmd.input).toMatchObject({
@@ -248,6 +272,44 @@ describe('S3StorageAdapter', () => {
       await expect(
         adapter.copyToPublic('private-bucket', 'k', 'a1.png'),
       ).rejects.toBeInstanceOf(InternalServerErrorException);
+    });
+
+    it('copies only the pinned ETag and maps 412 to UploadObjectChangedError', async () => {
+      send.mockRejectedValue(preconditionFailed());
+
+      await expect(
+        adapter.copyToPublic('private-bucket', 'k', 'a1.png', {
+          ifMatch: '"e1"',
+        }),
+      ).rejects.toBeInstanceOf(UploadObjectChangedError);
+      expect((firstCommand() as CopyObjectCommand).input).toMatchObject({
+        CopySourceIfMatch: '"e1"',
+      });
+    });
+  });
+
+  describe('copyToPrivate', () => {
+    it('copies inside the private bucket', async () => {
+      send.mockResolvedValue({});
+
+      await adapter.copyToPrivate(
+        'private-bucket',
+        'pending/u1/a1',
+        'chat/u1/a1',
+        {
+          contentType: 'application/pdf',
+          ifMatch: '"e1"',
+        },
+      );
+
+      expect((firstCommand() as CopyObjectCommand).input).toEqual({
+        Bucket: 'private-bucket',
+        Key: 'chat/u1/a1',
+        CopySource: 'private-bucket/pending/u1/a1',
+        CopySourceIfMatch: '"e1"',
+        ContentType: 'application/pdf',
+        MetadataDirective: 'REPLACE',
+      });
     });
   });
 

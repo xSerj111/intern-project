@@ -11,7 +11,10 @@ Read `DDD_ARCHITECTURE_GUIDE.md` before touching `core_microservice`. The rest o
 ```bash
 cd apps/core_microservice && npx jest comments.service         # one spec by filename pattern
 cd apps/core_microservice && npx jest -t "creates a comment"   # one test by name
+cd apps/core_microservice && npm run test:cov                  # unit tests + coverage (70/60 gate)
 cd apps/core_microservice && npm run test:e2e                  # uses test/jest-e2e.json
+npm run e2e                                                    # Playwright; stack + client must be running
+npm run perf                                                   # k6 gate; core :3001 and auth :3002 from dist
 npm run build -w core_microservice                             # nest build
 ```
 

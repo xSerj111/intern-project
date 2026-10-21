@@ -110,7 +110,7 @@ export class AppConfigService {
   get uploads() {
     return {
       linkTtlSec: this.positiveInt('UPLOAD_LINK_TTL_SEC', 300),
-      sweepGraceSec: this.positiveInt('UPLOAD_SWEEP_GRACE_SEC', 3600),
+      sweepGraceSec: this.nonNegativeInt('UPLOAD_SWEEP_GRACE_SEC', 3600),
       sweepIntervalSec: this.positiveInt('UPLOAD_SWEEP_INTERVAL_SEC', 900),
     };
   }
@@ -147,6 +147,17 @@ export class AppConfigService {
     const value = Number(raw);
     if (!Number.isInteger(value) || value < 1) {
       throw new Error(`${key} must be a positive integer`);
+    }
+    return value;
+  }
+
+  private nonNegativeInt(key: string, fallback: number): number {
+    const raw = this.config.get<string>(key);
+    if (raw === undefined || raw === '') return fallback;
+
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < 0) {
+      throw new Error(`${key} must be a non-negative integer`);
     }
     return value;
   }

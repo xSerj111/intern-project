@@ -376,6 +376,30 @@ describe('Profile page: author posts, summary, avatar (e2e)', () => {
       });
     });
 
+    it('lazy-creates a fresh profile idempotently under concurrent GET /profiles/me', async () => {
+      const fresh = randomUUID();
+      const responses = await Promise.all(
+        Array.from({ length: 5 }, () =>
+          http.get('/profiles/me').set(as(fresh)),
+        ),
+      );
+      try {
+        expect(responses.map((r) => r.status)).toEqual([
+          200, 200, 200, 200, 200,
+        ]);
+        expect(new Set(responses.map((r) => r.body.id)).size).toBe(1);
+        const [{ count }] = await rows<{ count: string }>(
+          'SELECT count(*)::int AS count FROM user_profiles WHERE "authUserId" = $1',
+          [fresh],
+        );
+        expect(Number(count)).toBe(1);
+      } finally {
+        await rows('DELETE FROM user_profiles WHERE "authUserId" = $1', [
+          fresh,
+        ]);
+      }
+    });
+
     it('404s for an unknown user and keeps existing profile routes working', async () => {
       await http.get(`/profiles/by-user/${randomUUID()}`).expect(404);
       await http.get('/profiles/me').set(as(author)).expect(200);

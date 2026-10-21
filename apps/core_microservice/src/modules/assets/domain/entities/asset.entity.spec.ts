@@ -194,14 +194,16 @@ describe('Asset', () => {
         ).toBe('application/pdf');
       });
 
-      it('keys public purposes under pending/ and chat under chat/', () => {
+      it('keys every purpose under pending/; only the published key differs', () => {
         const post = pending();
         const avatar = pending({ purpose: 'avatar' });
         const chat = pending({ purpose: 'chat-attachment' });
 
         expect(post.storageKey).toBe(`pending/user-1/${post.id}`);
         expect(avatar.storageKey).toBe(`pending/user-1/${avatar.id}`);
-        expect(chat.storageKey).toBe(`chat/user-1/${chat.id}`);
+        expect(chat.storageKey).toBe(`pending/user-1/${chat.id}`);
+        expect(post.publishedKey('.png')).toBe(`${post.id}.png`);
+        expect(chat.publishedKey('.png')).toBe(`chat/user-1/${chat.id}`);
       });
 
       it('sanitizes the file name and allows none', () => {

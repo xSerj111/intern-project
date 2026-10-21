@@ -268,4 +268,54 @@ describe('ProfilesService profile creation cache invalidation', () => {
     expect(repo.save).not.toHaveBeenCalled();
     expect(cache.invalidateProfile).not.toHaveBeenCalled();
   });
+
+  it('returns the winner row when a concurrent create loses on authUserId', async () => {
+    const winner = fakeUserProfile();
+    repo.findByAuthUserId
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(winner);
+    repo.save.mockRejectedValueOnce(
+      new UniqueConstraintViolationError(
+        'user_profiles',
+        'Key ("authUserId")=(x) already exists.',
+      ),
+    );
+
+    await expect(
+      service.getOrCreateProfileByAuthUserId(USER, 'amy@example.com'),
+    ).resolves.toBe(winner);
+    expect(repo.save).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns the winner row when the race is lost during the de-duplicated retry', async () => {
+    const winner = fakeUserProfile();
+    repo.findByAuthUserId
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(winner);
+    repo.save
+      .mockRejectedValueOnce(
+        new UniqueConstraintViolationError('user_profiles', 'username taken'),
+      )
+      .mockRejectedValueOnce(
+        new UniqueConstraintViolationError(
+          'user_profiles',
+          'Key ("authUserId")=(x) already exists.',
+        ),
+      );
+
+    await expect(service.createProfile(USER, 'amy')).resolves.toBe(winner);
+    expect(repo.save).toHaveBeenCalledTimes(2);
+  });
+
+  it('still rethrows a unique violation when no profile exists for the user', async () => {
+    repo.save.mockRejectedValue(
+      new UniqueConstraintViolationError('user_profiles', 'other'),
+    );
+
+    await expect(service.createProfile(USER, 'amy')).rejects.toBeInstanceOf(
+      UniqueConstraintViolationError,
+    );
+  });
 });

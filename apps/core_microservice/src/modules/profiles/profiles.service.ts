@@ -62,6 +62,12 @@ export class ProfilesService {
       });
       return savedProfile;
     } catch (error) {
+      // Concurrent first calls (lazy-init) race on the unique insert; the
+      // loser re-reads the winner's row instead of surfacing a 409.
+      const raced = await this.findAfterUniqueViolation(error, authUserId);
+      if (raced) {
+        return raced;
+      }
       if (!this.isUsernameCollision(error)) {
         throw error;
       }
@@ -87,6 +93,13 @@ export class ProfilesService {
           });
           return savedProfile;
         } catch (retryError) {
+          const raced = await this.findAfterUniqueViolation(
+            retryError,
+            authUserId,
+          );
+          if (raced) {
+            return raced;
+          }
           if (!this.isUsernameCollision(retryError)) {
             throw retryError;
           }
@@ -186,6 +199,20 @@ export class ProfilesService {
       props: { profileId: updatedProfile.id },
     });
     return updatedProfile;
+  }
+
+  /**
+   * After a unique violation, returns the profile another request created for
+   * this auth user in the meantime (null when the violation is unrelated).
+   */
+  private async findAfterUniqueViolation(
+    error: unknown,
+    authUserId: string,
+  ): Promise<UserProfile | null> {
+    if (!(error instanceof UniqueConstraintViolationError)) {
+      return null;
+    }
+    return this.userProfileRepository.findByAuthUserId(authUserId);
   }
 
   private isUsernameCollision(error: unknown): boolean {

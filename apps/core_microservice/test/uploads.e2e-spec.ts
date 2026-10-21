@@ -530,11 +530,14 @@ describe('Uploads, US6 (e2e)', () => {
         ]);
         expect(Date.now() - started).toBeLessThan(5000);
         const rest = ids.filter((id) => !held.includes(id));
-        // Neither concurrent claim sees the held rows; each gets only the free ones.
+        // Neither concurrent claim sees the held rows. When the two claims
+        // overlap, SKIP LOCKED hands the free row to only one of them.
         for (const claim of [first, second]) {
           expect(mine(claim, held)).toEqual([]);
-          expect(mine(claim, ids)).toEqual(rest);
         }
+        expect(
+          [...new Set([...mine(first, ids), ...mine(second, ids)])].sort(),
+        ).toEqual([...rest].sort());
 
         // With every row held, a claim returns none of them, without waiting.
         await qr.query(

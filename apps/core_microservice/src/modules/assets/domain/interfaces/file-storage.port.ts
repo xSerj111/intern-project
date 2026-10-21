@@ -23,19 +23,36 @@ export interface IFileStoragePort {
   /** Object metadata, or `null` when the object does not exist. */
   head(bucket: string, key: string): Promise<StorageObjectHead | null>;
 
-  /** First `bytes` bytes of the object (ranged GET); never returns more. */
-  readHead(bucket: string, key: string, bytes: number): Promise<Buffer>;
+  /**
+   * First `bytes` bytes of the object (ranged GET); never returns more. With
+   * `ifMatch` the read fails with `UploadObjectChangedError` unless the
+   * object still has that ETag.
+   */
+  readHead(
+    bucket: string,
+    key: string,
+    bytes: number,
+    ifMatch?: string,
+  ): Promise<Buffer>;
 
   /**
    * Server-side copy into the public bucket under `destKey`; returns the
-   * public URL. With `contentType` the copy's metadata is replaced.
+   * public URL. See `StorageCopyOptions`.
    */
   copyToPublic(
     srcBucket: string,
     srcKey: string,
     destKey: string,
-    contentType?: string,
+    options?: StorageCopyOptions,
   ): Promise<string>;
+
+  /** Server-side copy into the private bucket under `destKey`. */
+  copyToPrivate(
+    srcBucket: string,
+    srcKey: string,
+    destKey: string,
+    options?: StorageCopyOptions,
+  ): Promise<void>;
 
   /** Deletes an object from any bucket; a missing object is not an error. */
   deleteObject(bucket: string, key: string): Promise<void>;
@@ -58,4 +75,13 @@ export interface PresignedPostResult {
 export interface StorageObjectHead {
   size: number;
   contentType?: string;
+  /** Pins later reads and copies to exactly this version of the object. */
+  etag?: string;
+}
+
+export interface StorageCopyOptions {
+  /** Replaces the copy's metadata with this content type. */
+  contentType?: string;
+  /** Copy only if the source still has this ETag, else `UploadObjectChangedError`. */
+  ifMatch?: string;
 }

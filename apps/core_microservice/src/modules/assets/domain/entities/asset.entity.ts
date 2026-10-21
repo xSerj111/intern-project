@@ -143,8 +143,9 @@ export class Asset extends TypeormEntityBase {
   }
 
   /**
-   * A not-yet-uploaded asset in the private bucket. Public purposes upload under
-   * `pending/` and are promoted on confirm; chat attachments stay where they are.
+   * A not-yet-uploaded asset in the private bucket, uploaded under `pending/`.
+   * Confirm copies the checked bytes to a final key (`publishedKey`), because
+   * the signed POST stays reusable on the pending key until it expires.
    */
   static createPending(props: {
     uploaderId: string;
@@ -168,8 +169,7 @@ export class Asset extends TypeormEntityBase {
     asset.visibility = 'PRIVATE';
     asset.url = null;
     asset.bucket = props.bucket;
-    const prefix = props.purpose === 'chat-attachment' ? 'chat' : 'pending';
-    asset.storageKey = `${prefix}/${props.uploaderId}/${asset.id}`;
+    asset.storageKey = `pending/${props.uploaderId}/${asset.id}`;
     asset.mimeType = props.declaredMime;
     asset.size = props.declaredSize;
     asset.originalName =
@@ -178,6 +178,16 @@ export class Asset extends TypeormEntityBase {
         : sanitizeOriginalName(props.fileName);
     asset.expiresAt = new Date(props.now.getTime() + props.ttlSec * 1000);
     return asset;
+  }
+
+  /**
+   * Key the confirmed object lives under: `{id}{ext}` in the public bucket, or
+   * `chat/{uploaderId}/{id}` in the private bucket for chat attachments.
+   */
+  publishedKey(extension: string): string {
+    return this.purpose === 'chat-attachment'
+      ? `chat/${this.uploaderId}/${this.id}`
+      : `${this.id}${extension}`;
   }
 
   /** True when `userId` uploaded this asset. */

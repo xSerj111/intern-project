@@ -42,6 +42,13 @@ export class UploadContentRejectedError extends DomainError {
   }
 }
 
+/** The stored object was replaced while it was being confirmed. */
+export class UploadObjectChangedError extends DomainError {
+  constructor() {
+    super('The uploaded file changed during confirmation; confirm again.');
+  }
+}
+
 export class AssetNotAttachableError extends DomainError {
   constructor(target: string) {
     super(`This asset cannot be attached to a ${target}.`);

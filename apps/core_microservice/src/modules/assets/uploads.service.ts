@@ -157,8 +157,16 @@ export class UploadsService {
       throw error;
     }
 
-    // 5–6. Sniff the first bytes; the declared type is only a hint.
-    const bytes = await this.storage.readHead(bucket, key, UPLOAD_SNIFF_BYTES);
+    // 5–6. Sniff the first bytes; the declared type is only a hint. Reads and
+    // copies are pinned to the ETag seen here: the signed POST can still
+    // replace the pending object until it expires.
+    const ifMatch = head.etag;
+    const bytes = await this.storage.readHead(
+      bucket,
+      key,
+      UPLOAD_SNIFF_BYTES,
+      ifMatch,
+    );
     const sniff = await this.sniffer.detect(bytes, asset.mimeType, purpose);
     if (!sniff.allowed) {
       await this.discard(asset, 'rejected_content');
@@ -166,23 +174,21 @@ export class UploadsService {
     }
     const detectedMime = sniff.detectedMime ?? asset.mimeType;
 
-    // 7. Public purposes are copied inside storage, then the pending copy goes.
-    let target = { bucket, key, url: null as string | null };
-    let promoted = false;
+    // 7. The checked bytes are copied to their final key inside storage (the
+    // public bucket for public purposes), then the pending copy goes.
+    const destKey = asset.publishedKey(EXTENSION_BY_MIME[detectedMime] ?? '');
+    const copy = { contentType: detectedMime, ifMatch };
+    let target: { bucket: string; key: string; url: string | null };
     if (PUBLIC_PURPOSES.includes(purpose)) {
-      const destKey = `${asset.id}${EXTENSION_BY_MIME[detectedMime] ?? ''}`;
-      const url = await this.storage.copyToPublic(
-        bucket,
-        key,
-        destKey,
-        detectedMime,
-      );
-      promoted = true;
+      const url = await this.storage.copyToPublic(bucket, key, destKey, copy);
       target = { bucket: this.appConfig.s3.bucketName, key: destKey, url };
-      await this.storage.deleteObject(bucket, key);
+    } else {
+      await this.storage.copyToPrivate(bucket, key, destKey, copy);
+      target = { bucket, key: destKey, url: null };
     }
+    await this.storage.deleteObject(bucket, key);
 
-    // 8. READY; a failed save must not leave a public object behind.
+    // 8. READY; a failed save must not leave the copied object behind.
     asset.confirm({
       detectedMime,
       actualSize: head.size,
@@ -194,9 +200,7 @@ export class UploadsService {
     try {
       saved = await this.repo.save(asset);
     } catch (error) {
-      if (promoted) {
-        await this.safeDelete(target.bucket, target.key);
-      }
+      await this.safeDelete(target.bucket, target.key);
       throw error;
     }
 
@@ -219,7 +223,7 @@ export class UploadsService {
     try {
       await this.storage.deleteObject(bucket, key);
     } catch (error) {
-      this.logger.warn('Failed to remove promoted object after save failure', {
+      this.logger.warn('Failed to remove copied object after save failure', {
         props: { bucket, key, error: String(error) },
       });
     }

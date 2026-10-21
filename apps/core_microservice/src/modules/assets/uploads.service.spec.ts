@@ -7,6 +7,7 @@ import {
   UploadContentRejectedError,
   UploadExpiredError,
   UploadNotReadyError,
+  UploadObjectChangedError,
   UploadTooLargeError,
 } from './domain/errors/asset.errors';
 
@@ -46,13 +47,14 @@ describe('UploadsService', () => {
         url: 'http://s3/innogram-private',
         fields: { key: 'k', Policy: 'p' },
       }),
-      head: jest.fn().mockResolvedValue({ size: 2048 }),
+      head: jest.fn().mockResolvedValue({ size: 2048, etag: '"e1"' }),
       readHead: jest.fn().mockResolvedValue(Buffer.from([0xff, 0xd8, 0xff])),
       copyToPublic: jest
         .fn()
         .mockImplementation((_b: string, _k: string, dest: string) =>
           Promise.resolve(`http://s3/${PUBLIC}/${dest}`),
         ),
+      copyToPrivate: jest.fn().mockResolvedValue(undefined),
       deleteObject: jest.fn().mockResolvedValue(undefined),
     };
     const sniffer = {
@@ -225,6 +227,7 @@ describe('UploadsService', () => {
         PRIVATE,
         asset.storageKey,
         UPLOAD_SNIFF_BYTES,
+        '"e1"',
       );
       expect(sniffer.detect).toHaveBeenCalledWith(
         expect.any(Buffer),
@@ -252,7 +255,7 @@ describe('UploadsService', () => {
         PRIVATE,
         pendingKey,
         `${asset.id}.png`,
-        'image/png',
+        { contentType: 'image/png', ifMatch: '"e1"' },
       );
       expect(storage.deleteObject).toHaveBeenCalledWith(PRIVATE, pendingKey);
       expect(storage.copyToPublic.mock.invocationCallOrder[0]).toBeLessThan(
@@ -272,9 +275,9 @@ describe('UploadsService', () => {
       expect(await metric('post-image', 'confirmed')).toBe(1);
     });
 
-    it('keeps a chat attachment private and returns IUploadedAttachment', async () => {
+    it('moves a chat attachment off the reusable pending key, keeps it private and returns IUploadedAttachment', async () => {
       const asset = pending('chat-attachment');
-      const key = asset.storageKey;
+      const pendingKey = asset.storageKey;
       const { service, storage, sniffer } = build(asset);
       sniffer.detect.mockResolvedValue({
         allowed: true,
@@ -284,8 +287,15 @@ describe('UploadsService', () => {
       const response = await service.confirm('user-1', asset.id);
 
       expect(storage.copyToPublic).not.toHaveBeenCalled();
-      expect(storage.deleteObject).not.toHaveBeenCalled();
-      expect(asset.storageKey).toBe(key);
+      expect(storage.copyToPrivate).toHaveBeenCalledWith(
+        PRIVATE,
+        pendingKey,
+        `chat/user-1/${asset.id}`,
+        { contentType: 'application/pdf', ifMatch: '"e1"' },
+      );
+      expect(storage.deleteObject).toHaveBeenCalledWith(PRIVATE, pendingKey);
+      expect(asset.bucket).toBe(PRIVATE);
+      expect(asset.storageKey).toBe(`chat/user-1/${asset.id}`);
       expect(asset.visibility).toBe('PRIVATE');
       expect(response).toEqual({
         id: asset.id,
@@ -337,6 +347,19 @@ describe('UploadsService', () => {
         'db down',
       );
       expect(logger.warn).toHaveBeenCalled();
+    });
+
+    it('leaves the upload PENDING when the object is replaced mid-confirm', async () => {
+      const asset = pending('chat-attachment');
+      const { service, storage, repo } = build(asset);
+      storage.copyToPrivate.mockRejectedValue(new UploadObjectChangedError());
+
+      await expect(service.confirm('user-1', asset.id)).rejects.toBeInstanceOf(
+        UploadObjectChangedError,
+      );
+      expect(storage.deleteObject).not.toHaveBeenCalled();
+      expect(repo.save).not.toHaveBeenCalled();
+      expect(asset.status).toBe('PENDING');
     });
   });
 });
