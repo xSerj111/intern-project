@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { LoggerKey, RoutingKeys } from '@repo/shared';
+import { ProfileSummaryCache } from '../../common/cache/profile-summary-cache';
 import { OUTBOX_PORT } from '../../common/messaging/outbox.port';
 import { USER_DIRECTORY_PORT } from '../profiles/domain/interfaces/user-directory.port';
 import { Follow } from './domain/entities/follow.entity';
@@ -16,6 +17,7 @@ describe('FollowsService', () => {
     findFollowers: jest.Mock;
     findFollowing: jest.Mock;
     findFollowedAmong: jest.Mock;
+    delete: jest.Mock;
     save: jest.Mock;
     runInTransaction: jest.Mock;
   };
@@ -23,6 +25,7 @@ describe('FollowsService', () => {
   let txSave: jest.Mock;
   let outbox: { add: jest.Mock };
   let directory: { getUsers: jest.Mock };
+  let cache: { invalidateCounts: jest.Mock };
 
   beforeEach(async () => {
     txSave = jest.fn((f: Follow) =>
@@ -33,11 +36,13 @@ describe('FollowsService', () => {
       findFollowers: jest.fn(() => Promise.resolve([])),
       findFollowing: jest.fn(() => Promise.resolve([])),
       findFollowedAmong: jest.fn(() => Promise.resolve(new Set<string>())),
+      delete: jest.fn(() => Promise.resolve()),
       save: txSave,
       runInTransaction: jest.fn((work: (m: typeof tx) => Promise<unknown>) =>
         work(tx),
       ),
     };
+    cache = { invalidateCounts: jest.fn(() => Promise.resolve()) };
     outbox = { add: jest.fn(() => Promise.resolve({})) };
     directory = {
       getUsers: jest.fn((ids: string[]) =>
@@ -67,6 +72,7 @@ describe('FollowsService', () => {
         { provide: FollowRepositoryKey, useValue: repo },
         { provide: OUTBOX_PORT, useValue: outbox },
         { provide: USER_DIRECTORY_PORT, useValue: directory },
+        { provide: ProfileSummaryCache, useValue: cache },
       ],
     }).compile();
 
@@ -100,6 +106,48 @@ describe('FollowsService', () => {
 
     expect(txSave).not.toHaveBeenCalled();
     expect(outbox.add).not.toHaveBeenCalled();
+  });
+
+  it('invalidates both users counts after the follow transaction resolves', async () => {
+    let txDone = false;
+    repo.runInTransaction.mockImplementationOnce(
+      async (work: (m: typeof tx) => Promise<unknown>) => {
+        const result = await work(tx);
+        txDone = true;
+        return result;
+      },
+    );
+    cache.invalidateCounts.mockImplementationOnce(() => {
+      expect(txDone).toBe(true);
+      return Promise.resolve();
+    });
+
+    await service.follow(FOLLOWER, FOLLOWED);
+
+    expect(cache.invalidateCounts).toHaveBeenCalledWith(FOLLOWER, FOLLOWED);
+  });
+
+  it('does not invalidate when the follow transaction fails', async () => {
+    repo.runInTransaction.mockRejectedValueOnce(new Error('boom'));
+
+    await expect(service.follow(FOLLOWER, FOLLOWED)).rejects.toBeDefined();
+    expect(cache.invalidateCounts).not.toHaveBeenCalled();
+  });
+
+  it('invalidates both users counts after an unfollow', async () => {
+    repo.findByFollowerAndFollowing.mockResolvedValueOnce(
+      Object.assign(
+        Follow.create({ followerId: FOLLOWER, followingId: FOLLOWED }),
+        {
+          id: 'f-1',
+        },
+      ),
+    );
+
+    await service.unfollow(FOLLOWER, FOLLOWED);
+
+    expect(repo.delete).toHaveBeenCalledTimes(1);
+    expect(cache.invalidateCounts).toHaveBeenCalledWith(FOLLOWER, FOLLOWED);
   });
 
   it('saves a self-follow without an event', async () => {

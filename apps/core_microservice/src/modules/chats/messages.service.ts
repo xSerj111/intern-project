@@ -197,26 +197,29 @@ export class MessagesService {
    * fresh `changeSeq`; `message:deleted` goes out after the commit.
    */
   async delete(me: string, chatId: string, messageId: string): Promise<void> {
-    const { changeSeq, deletedAt, storageKeys } =
+    const { changeSeq, deletedAt, storageKeys, assetIds } =
       await this.chats.runInTransaction(async (tx) => {
         const found = await this.loadOwnVisible(me, chatId, messageId, tx);
-        const assetIds = [...found.attachmentIds];
+        const attachedIds = [...found.attachmentIds];
         const seq = await this.messages.allocateSeq(chatId, tx);
         found.delete(me, seq);
         await this.messages.update(found, tx);
         const keys = await this.onMessageDeleted(
           chatId,
           messageId,
-          assetIds,
+          attachedIds,
           tx,
         );
         return {
           changeSeq: seq,
           deletedAt: found.deletedAt,
           storageKeys: keys,
+          assetIds: attachedIds,
         };
       });
 
+    // After commit: a link cached for a now-deleted asset must not be served.
+    await this.storage.invalidateSignedUrls(assetIds);
     this.logger.debug('Message deleted', {
       props: { chatId, messageId, changeSeq },
     });
@@ -286,7 +289,10 @@ export class MessagesService {
     const attachment = message?.attachmentFor(participant, assetId);
     if (!attachment) throw new MessageNotFoundError(messageId);
 
-    const { url, expiresAt } = await this.storage.presign(attachment);
+    const { url, expiresAt } = await this.storage.presign({
+      ...attachment,
+      id: attachment.assetId,
+    });
     return { url, expiresAt: expiresAt.toISOString() };
   }
 

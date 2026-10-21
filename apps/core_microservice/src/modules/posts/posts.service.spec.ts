@@ -1,8 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { LoggerKey } from '@repo/shared';
+import { ProfileSummaryCache } from '../../common/cache/profile-summary-cache';
 import { PostsService } from './posts.service';
 import { POST_REPOSITORY } from './domain/interfaces/post-repository.port';
-import { PostStatus } from './domain/entities/post.entity';
+import {
+  InvalidPostStateError,
+  PostStatus,
+} from './domain/entities/post.entity';
 import { PostStatusNotVisibleError } from './domain/entities/post.entity';
 import { fakePost } from './__tests__/fakers/post.faker';
 import { FeedCursor } from './domain/feed-cursor';
@@ -16,7 +20,9 @@ describe('PostsService', () => {
     save: jest.fn(),
     findOneByIdOrThrow: jest.fn(),
     findFeedPage: jest.fn(),
+    softDelete: jest.fn(),
   };
+  const cache = { invalidateCounts: jest.fn() };
   const AUTHOR = '11111111-1111-1111-1111-111111111111';
 
   beforeEach(async () => {
@@ -26,6 +32,7 @@ describe('PostsService', () => {
         PostsService,
         { provide: LoggerKey, useValue: { debug: jest.fn() } },
         { provide: POST_REPOSITORY, useValue: postRepository },
+        { provide: ProfileSummaryCache, useValue: cache },
       ],
     }).compile();
 
@@ -176,6 +183,58 @@ describe('PostsService', () => {
 
       expect(postRepository.getLikeStats).not.toHaveBeenCalled();
       expect(postRepository.getCommentCounts).not.toHaveBeenCalled();
+    });
+  });
+  describe('counts cache invalidation', () => {
+    it('invalidates the author counts after publishing a draft', async () => {
+      const draft = fakePost({ id: 'p-1', authorId: AUTHOR });
+      postRepository.findOneByIdOrThrow.mockResolvedValue(draft);
+      postRepository.save.mockImplementation((p: unknown) =>
+        Promise.resolve(p),
+      );
+
+      await service.publishPost(AUTHOR, 'p-1');
+
+      expect(cache.invalidateCounts).toHaveBeenCalledWith(AUTHOR);
+      expect(
+        cache.invalidateCounts.mock.invocationCallOrder[0],
+      ).toBeGreaterThan(postRepository.save.mock.invocationCallOrder[0]);
+    });
+
+    it('does not invalidate when publish is rejected', async () => {
+      postRepository.findOneByIdOrThrow.mockResolvedValue(
+        fakePost({ authorId: AUTHOR, status: PostStatus.Published }),
+      );
+
+      await expect(service.publishPost(AUTHOR, 'p-1')).rejects.toBeInstanceOf(
+        InvalidPostStateError,
+      );
+      expect(cache.invalidateCounts).not.toHaveBeenCalled();
+    });
+
+    it('invalidates the author counts after a delete', async () => {
+      postRepository.findOneByIdOrThrow.mockResolvedValue(
+        fakePost({ authorId: AUTHOR }),
+      );
+      postRepository.softDelete.mockResolvedValue(undefined);
+
+      await service.softDeletePost(AUTHOR, 'p-1');
+
+      expect(postRepository.softDelete).toHaveBeenCalledTimes(1);
+      expect(cache.invalidateCounts).toHaveBeenCalledWith(AUTHOR);
+    });
+
+    it('invalidates the author counts after archiving', async () => {
+      postRepository.findOneByIdOrThrow.mockResolvedValue(
+        fakePost({ authorId: AUTHOR, status: PostStatus.Published }),
+      );
+      postRepository.save.mockImplementation((p: unknown) =>
+        Promise.resolve(p),
+      );
+
+      await service.archivePost(AUTHOR, 'p-1');
+
+      expect(cache.invalidateCounts).toHaveBeenCalledWith(AUTHOR);
     });
   });
 });

@@ -28,6 +28,17 @@ services:
     networks:
       - innogram-network
 
+  # Cache store for core (US5). Persistence is off and memory is capped, so
+  # it holds no durable state and needs no volume.
+  redis-cache:
+    image: redis:7-alpine
+    container_name: innogram-redis-cache
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "6380:6379"
+    networks:
+      - innogram-network
+
   rabbitmq:
     image: rabbitmq:3-management
     container_name: innogram-rabbitmq

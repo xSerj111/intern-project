@@ -1,3 +1,4 @@
+import { UniqueConstraintViolationError } from '@repo/shared';
 import { ProfilesService } from './profiles.service';
 import { fakeUserProfile } from './__tests__/fakers/user-profile.faker';
 import {
@@ -10,7 +11,12 @@ import {
 
 describe('ProfilesService.getUsersByIds', () => {
   const repo = { findByAuthUserIds: jest.fn() };
-  const service = new ProfilesService({} as never, repo as never, {} as never);
+  const service = new ProfilesService(
+    {} as never,
+    repo as never,
+    {} as never,
+    {} as never,
+  );
 
   beforeEach(() => jest.resetAllMocks());
 
@@ -40,7 +46,13 @@ describe('ProfilesService.updateProfile', () => {
   const repo = { findOneByIdOrThrow: jest.fn(), save: jest.fn() };
   const avatars = { findAvatarSource: jest.fn() };
   const logger = { debug: jest.fn() };
-  const service = new ProfilesService(logger as never, repo as never, avatars);
+  const cache = { invalidateProfile: jest.fn() };
+  const service = new ProfilesService(
+    logger as never,
+    repo as never,
+    avatars,
+    cache as never,
+  );
   const profile = () => fakeUserProfile({ authUserId: OWNER });
 
   beforeEach(() => {
@@ -78,6 +90,40 @@ describe('ProfilesService.updateProfile', () => {
       bio: 'hi',
       avatarUrl: 'https://cdn/a.png',
     });
+  });
+
+  it('invalidates the cached profile by auth user id after a profile edit', async () => {
+    repo.findOneByIdOrThrow.mockResolvedValue(profile());
+
+    await service.updateProfile('p-1', { displayName: 'New' }, OWNER);
+
+    expect(cache.invalidateProfile).toHaveBeenCalledWith(OWNER);
+    expect(cache.invalidateProfile.mock.invocationCallOrder[0]).toBeGreaterThan(
+      repo.save.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('invalidates the cached profile after an avatar change', async () => {
+    repo.findOneByIdOrThrow.mockResolvedValue(profile());
+    avatars.findAvatarSource.mockResolvedValue({
+      id: 'asset-1',
+      uploaderId: OWNER,
+      url: 'https://cdn/a.png',
+      mimeType: 'image/png',
+    });
+
+    await service.updateProfile('p-1', { avatarAssetId: 'asset-1' }, OWNER);
+
+    expect(cache.invalidateProfile).toHaveBeenCalledWith(OWNER);
+  });
+
+  it('does not invalidate when the edit is rejected', async () => {
+    repo.findOneByIdOrThrow.mockResolvedValue(profile());
+
+    await expect(
+      service.updateProfile('p-1', { bio: 'x' }, 'intruder'),
+    ).rejects.toBeInstanceOf(NotProfileOwnerError);
+    expect(cache.invalidateProfile).not.toHaveBeenCalled();
   });
 
   it('clears the avatar and bio with null without touching assets', async () => {
@@ -164,5 +210,62 @@ describe('ProfilesService.updateProfile', () => {
     await expect(
       service.updateProfile('p-1', { displayName: 'a'.repeat(101) }, OWNER),
     ).rejects.toBeInstanceOf(InvalidDisplayNameError);
+  });
+});
+
+describe('ProfilesService profile creation cache invalidation', () => {
+  const USER = '33333333-3333-3333-3333-333333333333';
+  const repo = { findByAuthUserId: jest.fn(), save: jest.fn() };
+  const cache = { invalidateProfile: jest.fn() };
+  const service = new ProfilesService(
+    { debug: jest.fn() } as never,
+    repo as never,
+    {} as never,
+    cache as never,
+  );
+
+  beforeEach(() => {
+    jest.resetAllMocks();
+    repo.findByAuthUserId.mockResolvedValue(null);
+    repo.save.mockImplementation((p: unknown) => Promise.resolve(p));
+  });
+
+  it('invalidates the profile after createProfile (internal user-created path)', async () => {
+    await service.createProfile(USER, 'amy');
+
+    expect(cache.invalidateProfile).toHaveBeenCalledWith(USER);
+    expect(cache.invalidateProfile.mock.invocationCallOrder[0]).toBeGreaterThan(
+      repo.save.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('invalidates the profile after the lazy-init path creates it', async () => {
+    await service.getOrCreateProfileByAuthUserId(USER, 'amy@example.com');
+
+    expect(repo.save).toHaveBeenCalledTimes(1);
+    expect(cache.invalidateProfile).toHaveBeenCalledWith(USER);
+  });
+
+  it('invalidates after a de-duplicated handle retry succeeds', async () => {
+    repo.save
+      .mockRejectedValueOnce(
+        new UniqueConstraintViolationError('user_profiles', 'username taken'),
+      )
+      .mockImplementation((p: unknown) => Promise.resolve(p));
+
+    await service.createProfile(USER, 'amy');
+
+    expect(repo.save).toHaveBeenCalledTimes(2);
+    expect(cache.invalidateProfile).toHaveBeenCalledTimes(1);
+    expect(cache.invalidateProfile).toHaveBeenCalledWith(USER);
+  });
+
+  it('does not invalidate when the profile already exists', async () => {
+    repo.findByAuthUserId.mockResolvedValue(fakeUserProfile());
+
+    await service.createProfile(USER, 'amy');
+
+    expect(repo.save).not.toHaveBeenCalled();
+    expect(cache.invalidateProfile).not.toHaveBeenCalled();
   });
 });

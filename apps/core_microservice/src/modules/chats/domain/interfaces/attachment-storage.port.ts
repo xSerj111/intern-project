@@ -25,6 +25,8 @@ export interface StoredAttachment {
 }
 
 export interface PresignableAttachment {
+  /** Asset id; keys the signed-link cache. */
+  id: string;
   storageKey: string;
   mimeType: string;
   originalName: string | null;
@@ -47,10 +49,13 @@ export interface IAttachmentStoragePort {
   /** Soft-deletes the asset rows inside the caller's transaction. */
   softDeleteAssets(ids: string[], tx: ChatTransaction): Promise<void>;
   /**
-   * Short-lived GET URL (`ATTACHMENT_URL_TTL_SECONDS`); non-media types get a
-   * download file name.
+   * Short-lived GET URL; non-media types get a download file name. A cached
+   * link is reused only while at least half of `ATTACHMENT_URL_TTL_SECONDS`
+   * remains, so callers always get a link valid for >= 7.5 min.
    */
   presign(asset: PresignableAttachment): Promise<PresignedAttachmentUrl>;
+  /** Drops the cached links (every disposition) of the assets; call after commit. */
+  invalidateSignedUrls(assetIds: string[]): Promise<void>;
   /** Deletes the objects; rejects if any delete failed (after trying all). */
   deleteObjects(keys: string[]): Promise<void>;
 }

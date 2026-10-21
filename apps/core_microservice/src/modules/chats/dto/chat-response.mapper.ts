@@ -50,7 +50,9 @@ export async function presignAttachments(
   const files: MessageAttachmentFile[] = messages
     .filter((m) => m.deletedAt == null)
     .flatMap((m) => m.attachments);
-  const signed = await Promise.allSettled(files.map((f) => storage.presign(f)));
+  const signed = await Promise.allSettled(
+    files.map((f) => storage.presign({ ...f, id: f.assetId })),
+  );
   const urls = new Map<string, PresignedAttachmentUrl>();
   signed.forEach((result, i) => {
     if (result.status === 'fulfilled') {

@@ -17,6 +17,7 @@ import type {
   IOffsetPage,
 } from '@repo/contracts';
 import type { EntityManager } from 'typeorm';
+import { ProfileSummaryCache } from '../../common/cache/profile-summary-cache';
 import {
   OUTBOX_PORT,
   type IOutboxPort,
@@ -42,6 +43,7 @@ export class FollowsService {
     @Inject(OUTBOX_PORT) private readonly outbox: IOutboxPort,
     @Inject(USER_DIRECTORY_PORT)
     private readonly userDirectory: IUserDirectoryPort,
+    private readonly profileCache: ProfileSummaryCache,
   ) {}
 
   async follow(followerId: string, followingId: string): Promise<Follow> {
@@ -70,6 +72,8 @@ export class FollowsService {
       }
       return saved;
     });
+    // After commit, so a concurrent reader cannot re-cache pre-follow counts.
+    await this.profileCache.invalidateCounts(followerId, followingId);
     this.logger.debug('Follow created', {
       props: { followId: savedFollow.id },
     });
@@ -117,6 +121,7 @@ export class FollowsService {
     );
     if (follow) {
       await this.followRepository.delete(follow);
+      await this.profileCache.invalidateCounts(followerId, followingId);
       this.logger.debug('Follow removed', { props: { followId: follow.id } });
     }
   }

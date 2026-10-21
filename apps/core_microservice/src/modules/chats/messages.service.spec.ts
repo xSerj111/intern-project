@@ -138,6 +138,7 @@ describe('MessagesService', () => {
     findAssets: jest.fn(),
     softDeleteAssets: jest.fn(),
     presign: jest.fn(),
+    invalidateSignedUrls: jest.fn(),
     deleteObjects: jest.fn(),
   };
   const outbox = { add: jest.fn() };
@@ -191,6 +192,7 @@ describe('MessagesService', () => {
     storage.findAssets.mockResolvedValue([]);
     storage.softDeleteAssets.mockResolvedValue(undefined);
     storage.deleteObjects.mockResolvedValue(undefined);
+    storage.invalidateSignedUrls.mockResolvedValue(undefined);
     storage.presign.mockImplementation((a: { storageKey: string }) =>
       Promise.resolve({
         url: `https://signed/${a.storageKey}`,
@@ -888,6 +890,25 @@ describe('MessagesService', () => {
         expect(order).toEqual(['soft:false', 'objects:true']);
       });
 
+      it('invalidates the cached signed links after commit', async () => {
+        stored.attachmentIds = [ASSET_1, ASSET_2];
+        storage.findAssets.mockResolvedValue([
+          storedAsset(ASSET_1),
+          storedAsset(ASSET_2),
+        ]);
+        storage.invalidateSignedUrls.mockImplementation(() => {
+          expect(committed).toBe(true);
+          return Promise.resolve();
+        });
+
+        await service.delete(ME, CHAT_ID, MESSAGE_ID);
+
+        expect(storage.invalidateSignedUrls).toHaveBeenCalledWith([
+          ASSET_1,
+          ASSET_2,
+        ]);
+      });
+
       it('logs, but does not throw, when deleting the objects fails', async () => {
         stored.attachmentIds = [ASSET_1];
         storage.findAssets.mockResolvedValue([storedAsset(ASSET_1)]);
@@ -955,7 +976,10 @@ describe('MessagesService', () => {
         MESSAGE_ID,
         1,
       );
-      expect(storage.presign).toHaveBeenCalledWith(stored.attachments[0]);
+      expect(storage.presign).toHaveBeenCalledWith({
+        ...stored.attachments[0],
+        id: ASSET_1,
+      });
       expect(result).toEqual({
         url: `https://signed/chat/${ME}/${ASSET_1}`,
         expiresAt: EXPIRES.toISOString(),

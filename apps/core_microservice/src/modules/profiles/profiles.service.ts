@@ -14,6 +14,7 @@ import {
   AVATAR_ASSET_PORT,
   type IAvatarAssetPort,
 } from './domain/interfaces/avatar-asset.port';
+import { ProfileSummaryCache } from '../../common/cache/profile-summary-cache';
 import { AvatarAssetNotFoundError } from './domain/errors/user-profile.errors';
 
 /** Max attempts to allocate a non-colliding username before giving up. */
@@ -33,6 +34,7 @@ export class ProfilesService {
     private readonly userProfileRepository: UserProfileRepository,
     @Inject(AVATAR_ASSET_PORT)
     private readonly avatarAssets: IAvatarAssetPort,
+    private readonly profileCache: ProfileSummaryCache,
   ) {}
 
   // Temporary: Used for testing until Event-Driven architecture is wired up
@@ -54,6 +56,7 @@ export class ProfilesService {
 
     try {
       const savedProfile = await this.userProfileRepository.save(profile);
+      await this.profileCache.invalidateProfile(authUserId);
       this.logger.debug('Profile created', {
         props: { profileId: savedProfile.id },
       });
@@ -75,6 +78,7 @@ export class ProfilesService {
         try {
           const savedProfile =
             await this.userProfileRepository.save(retryProfile);
+          await this.profileCache.invalidateProfile(authUserId);
           this.logger.debug('Profile created with de-duplicated handle', {
             props: {
               profileId: savedProfile.id,
@@ -177,6 +181,7 @@ export class ProfilesService {
     }
 
     const updatedProfile = await this.userProfileRepository.save(profile);
+    await this.profileCache.invalidateProfile(updatedProfile.authUserId);
     this.logger.debug('Profile updated', {
       props: { profileId: updatedProfile.id },
     });

@@ -1,5 +1,6 @@
 import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import { type Logger, LoggerKey } from '@repo/shared';
+import { ProfileSummaryCache } from '../../common/cache/profile-summary-cache';
 import { CreatePostDto } from './dto/create-post.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 import { Post, PostStatus } from './domain/entities/post.entity';
@@ -17,6 +18,7 @@ export class PostsService {
     @Inject(LoggerKey) private readonly logger: Logger,
     @Inject(POST_REPOSITORY)
     private readonly postRepository: IPostRepository,
+    private readonly profileCache: ProfileSummaryCache,
   ) {}
 
   /**
@@ -130,6 +132,7 @@ export class PostsService {
     }
 
     await this.postRepository.softDelete(post);
+    await this.profileCache.invalidateCounts(post.authorId);
     this.logger.debug('Post soft-deleted', { props: { postId: post.id } });
   }
 
@@ -142,6 +145,7 @@ export class PostsService {
     // publish() enforces the rule and throws InvalidPostStateError (-> HTTP 400).
     post.publish();
     const publishedPost = await this.postRepository.save(post);
+    await this.profileCache.invalidateCounts(publishedPost.authorId);
     this.logger.debug('Post published', {
       props: { postId: publishedPost.id },
     });
@@ -158,6 +162,7 @@ export class PostsService {
     post.archive();
 
     const archivedPost = await this.postRepository.save(post);
+    await this.profileCache.invalidateCounts(archivedPost.authorId);
     this.logger.debug('Post archived', { props: { postId: archivedPost.id } });
 
     return archivedPost;

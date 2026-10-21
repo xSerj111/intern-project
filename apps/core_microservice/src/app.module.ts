@@ -10,6 +10,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppConfigModule } from './config/app-config.module';
 import { AppConfigService } from './config/app-config.service';
 import { RedisModule } from './common/redis/redis.module';
+import { CacheModule } from './common/cache/cache.module';
 import { CommonAuthModule } from './common/auth/common-auth.module';
 import { MetricsModule } from './common/observability/metrics.module';
 import { QueryContextMiddleware } from './common/db/query-context';
@@ -32,6 +33,7 @@ import { NotificationsRelayModule } from './modules/notifications-relay/notifica
     AppConfigModule,
     MetricsModule,
     RedisModule,
+    CacheModule,
     CommonAuthModule,
 
     TypeOrmModule.forRootAsync({
