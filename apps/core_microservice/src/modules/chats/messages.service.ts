@@ -1,11 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
-import 'multer';
-import type {
-  IAttachmentUrl,
-  IChatUser,
-  ICursorPage,
-  IUploadedAttachment,
-} from '@repo/contracts';
+import type { IAttachmentUrl, IChatUser, ICursorPage } from '@repo/contracts';
 import {
   LoggerKey,
   MESSAGE_PREVIEW_MAX_LENGTH,
@@ -250,23 +244,6 @@ export class MessagesService {
       props: { chatId, messageId, count: assetIds.length },
     });
     return assets.flatMap((a) => (a.storageKey ? [a.storageKey] : []));
-  }
-
-  /** Stores an uploaded file as a private chat attachment (FR-025). */
-  async uploadAttachment(
-    me: string,
-    file: Express.Multer.File,
-  ): Promise<IUploadedAttachment> {
-    const asset = await this.storage.upload(me, file);
-    this.logger.debug('Chat attachment uploaded', {
-      props: { assetId: asset.id, uploaderId: me },
-    });
-    return {
-      id: asset.id,
-      mimeType: asset.mimeType,
-      size: asset.size,
-      originalName: asset.originalName ?? 'attachment',
-    };
   }
 
   /**

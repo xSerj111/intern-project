@@ -1,8 +1,50 @@
+import { randomUUID } from 'node:crypto';
 import { Entity, Column, Index } from 'typeorm';
-import { TypeormEntityBase } from '@repo/shared';
-import { MissingStorageKeyError } from '../errors/asset.errors';
+import { EntityByIdNotFoundError, TypeormEntityBase } from '@repo/shared';
+import {
+  UPLOAD_ALLOWLIST,
+  UPLOAD_MAX_BYTES,
+  type UploadPurpose,
+} from '@repo/contracts';
+import {
+  AssetNotAttachableError,
+  MissingStorageKeyError,
+  UploadExpiredError,
+  UploadNotPendingError,
+  UploadNotReadyError,
+  UploadTooLargeError,
+  UploadTypeNotAllowedError,
+} from '../errors/asset.errors';
 
 export type AssetVisibility = 'PUBLIC' | 'PRIVATE';
+export type AssetStatus = 'PENDING' | 'READY';
+export type AttachTarget = 'post' | 'avatar' | 'message';
+
+/** Clock-skew allowance after `expiresAt` during which a confirm still succeeds. */
+export const UPLOAD_CONFIRM_GRACE_SEC = 60;
+
+/** Purposes whose assets become PUBLIC on confirm. */
+const PUBLIC_PURPOSES: readonly UploadPurpose[] = ['post-image', 'avatar'];
+
+/** Upload purposes each attach target accepts. */
+const ATTACHABLE_PURPOSES: Record<AttachTarget, readonly UploadPurpose[]> = {
+  post: ['post-image'],
+  avatar: ['avatar', 'post-image'],
+  message: ['chat-attachment'],
+};
+
+/** Visibility legacy (null-purpose) rows need per target, as before uploads had a purpose. */
+const LEGACY_VISIBILITY: Record<AttachTarget, AssetVisibility> = {
+  post: 'PUBLIC',
+  avatar: 'PUBLIC',
+  message: 'PRIVATE',
+};
+
+function assertSizeInRange(size: number): void {
+  if (!Number.isInteger(size) || size < 1 || size > UPLOAD_MAX_BYTES) {
+    throw new UploadTooLargeError(UPLOAD_MAX_BYTES);
+  }
+}
 
 export const ASSET_ORIGINAL_NAME_MAX_LENGTH = 255;
 
@@ -46,6 +88,18 @@ export class Asset extends TypeormEntityBase {
   @Column({ type: 'varchar', length: 255, nullable: true })
   originalName!: string | null;
 
+  // Rows created outside the signed-upload flow are READY from the start.
+  @Column({ type: 'varchar', length: 16, default: 'READY' })
+  status: AssetStatus = 'READY';
+
+  // Null for legacy rows.
+  @Column({ type: 'varchar', length: 32, nullable: true })
+  purpose!: UploadPurpose | null;
+
+  // Signed-upload expiry; set only while PENDING.
+  @Column({ type: 'timestamptz', nullable: true })
+  expiresAt!: Date | null;
+
   // Factory wymuszająca poprawne utworzenie obiektu
   static create(props: {
     uploaderId: string;
@@ -86,5 +140,127 @@ export class Asset extends TypeormEntityBase {
 
   softDelete(): void {
     this.deletedAt = new Date();
+  }
+
+  /**
+   * A not-yet-uploaded asset in the private bucket. Public purposes upload under
+   * `pending/` and are promoted on confirm; chat attachments stay where they are.
+   */
+  static createPending(props: {
+    uploaderId: string;
+    purpose: UploadPurpose;
+    declaredMime: string;
+    declaredSize: number;
+    bucket: string;
+    fileName?: string;
+    now: Date;
+    ttlSec: number;
+  }): Asset {
+    assertSizeInRange(props.declaredSize);
+    if (!UPLOAD_ALLOWLIST[props.purpose].includes(props.declaredMime)) {
+      throw new UploadTypeNotAllowedError(props.declaredMime, props.purpose);
+    }
+    const asset = new Asset();
+    asset.id = randomUUID();
+    asset.uploaderId = props.uploaderId;
+    asset.purpose = props.purpose;
+    asset.status = 'PENDING';
+    asset.visibility = 'PRIVATE';
+    asset.url = null;
+    asset.bucket = props.bucket;
+    const prefix = props.purpose === 'chat-attachment' ? 'chat' : 'pending';
+    asset.storageKey = `${prefix}/${props.uploaderId}/${asset.id}`;
+    asset.mimeType = props.declaredMime;
+    asset.size = props.declaredSize;
+    asset.originalName =
+      props.fileName === undefined
+        ? null
+        : sanitizeOriginalName(props.fileName);
+    asset.expiresAt = new Date(props.now.getTime() + props.ttlSec * 1000);
+    return asset;
+  }
+
+  /** True when `userId` uploaded this asset. */
+  isOwnedBy(userId: string): boolean {
+    return this.uploaderId === userId;
+  }
+
+  /**
+   * Owner, PENDING and not past `expiresAt` plus the clock-skew grace. A foreign
+   * owner gets the same not-found as an unknown id, so ownership doesn't leak.
+   */
+  assertConfirmableBy(userId: string, now: Date): void {
+    if (!this.isOwnedBy(userId)) {
+      throw new EntityByIdNotFoundError('assets', this.id);
+    }
+    if (this.status !== 'PENDING') {
+      throw new UploadNotPendingError();
+    }
+    if (
+      !this.expiresAt ||
+      now.getTime() > this.expiresAt.getTime() + UPLOAD_CONFIRM_GRACE_SEC * 1000
+    ) {
+      throw new UploadExpiredError();
+    }
+  }
+
+  /** Checks the stored object's real size, before any content is read. */
+  assertStoredSizeAcceptable(actualSize: number): void {
+    assertSizeInRange(actualSize);
+  }
+
+  confirm(props: {
+    detectedMime: string;
+    actualSize: number;
+    bucket: string;
+    key: string;
+    url: string | null;
+  }): void {
+    if (this.status !== 'PENDING') {
+      throw new UploadNotPendingError();
+    }
+    this.status = 'READY';
+    this.mimeType = props.detectedMime;
+    this.size = props.actualSize;
+    this.bucket = props.bucket;
+    this.storageKey = props.key;
+    this.url = props.url;
+    if (this.purpose !== null && PUBLIC_PURPOSES.includes(this.purpose)) {
+      this.visibility = 'PUBLIC';
+    }
+    this.expiresAt = null;
+  }
+
+  /** Bad content or size at confirm: the row is soft-deleted. */
+  reject(): void {
+    if (this.status !== 'PENDING') {
+      throw new UploadNotPendingError();
+    }
+    this.softDelete();
+  }
+
+  assertAttachableTo(target: AttachTarget, userId: string): void {
+    if (this.status !== 'READY') {
+      throw new UploadNotReadyError();
+    }
+    if (!this.isOwnedBy(userId)) {
+      throw new AssetNotAttachableError(target);
+    }
+    const fits =
+      this.purpose === null
+        ? this.visibility === LEGACY_VISIBILITY[target]
+        : ATTACHABLE_PURPOSES[target].includes(this.purpose);
+    if (!fits) {
+      throw new AssetNotAttachableError(target);
+    }
+  }
+
+  /** PENDING and expired for longer than `graceSec`. */
+  isSweepable(now: Date, graceSec: number): boolean {
+    return (
+      this.status === 'PENDING' &&
+      this.expiresAt !== null &&
+      this.expiresAt.getTime() + graceSec * 1000 < now.getTime()
+    );
   }
 }

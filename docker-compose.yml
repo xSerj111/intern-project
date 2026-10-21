@@ -69,6 +69,8 @@ services:
     environment:
       S3_ACCESS_KEY: ${S3_ACCESS_KEY}
       S3_SECRET_KEY: ${S3_SECRET_KEY}
+      # Read by entrypoint.sh for the S3 CORS allow-list (-s3.allowedOrigins).
+      CLIENT_URL: ${CLIENT_URL:-http://localhost:3000}
     ports:
       - "9000:8333"
     volumes:

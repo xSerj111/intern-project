@@ -1,4 +1,3 @@
-import 'multer';
 import type { ChatTransaction } from './chat-repository.port';
 
 /** Presigned attachment URLs live 15 minutes (FR-027). */
@@ -39,11 +38,6 @@ export interface PresignedAttachmentUrl {
 
 /** Private attachment storage (asset rows + objects), owned by the assets module. */
 export interface IAttachmentStoragePort {
-  /** Stores the file privately and records the uploader. */
-  upload(
-    uploaderId: string,
-    file: Express.Multer.File,
-  ): Promise<StoredAttachment>;
   /** Live (not soft-deleted) assets among `ids`; missing ids are absent. */
   findAssets(ids: string[], tx?: ChatTransaction): Promise<StoredAttachment[]>;
   /** Soft-deletes the asset rows inside the caller's transaction. */

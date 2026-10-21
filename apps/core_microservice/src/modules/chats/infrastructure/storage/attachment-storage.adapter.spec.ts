@@ -120,3 +120,22 @@ describe('AttachmentStorageAdapter signed-link cache', () => {
     expect(cache.del).not.toHaveBeenCalled();
   });
 });
+
+describe('AttachmentStorageAdapter.findAssets', () => {
+  it('returns only READY assets', async () => {
+    const assets = {
+      findByIds: jest.fn().mockResolvedValue([
+        { id: 'a', status: 'READY', visibility: 'PRIVATE' },
+        { id: 'b', status: 'PENDING', visibility: 'PRIVATE' },
+      ]),
+    };
+    const adapter = new AttachmentStorageAdapter(
+      assets as unknown as AssetsService,
+      { get: jest.fn(), set: jest.fn(), del: jest.fn() },
+    );
+
+    const found = await adapter.findAssets(['a', 'b']);
+
+    expect(found.map((a) => a.id)).toEqual(['a']);
+  });
+});

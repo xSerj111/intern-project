@@ -34,7 +34,7 @@ export function getProfileSummary(
 
 /**
  * Update the caller's profile (`PATCH /profiles/:id`, profile id, owner only).
- * `avatarAssetId` must be an image the caller uploaded via `uploadAsset`.
+ * `avatarAssetId` must be an image the caller uploaded via `uploadFile` (`avatar`).
  */
 export function updateProfile(
   profileId: string,

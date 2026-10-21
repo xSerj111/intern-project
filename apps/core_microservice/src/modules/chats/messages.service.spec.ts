@@ -134,7 +134,6 @@ describe('MessagesService', () => {
     findAttachedAssetIds: jest.fn(),
   };
   const storage = {
-    upload: jest.fn(),
     findAssets: jest.fn(),
     softDeleteAssets: jest.fn(),
     presign: jest.fn(),
@@ -577,6 +576,18 @@ describe('MessagesService', () => {
       expect(realtime.emitToChat).not.toHaveBeenCalled();
     });
 
+    it('rejects a public (post/avatar) asset as a message attachment', async () => {
+      storage.findAssets.mockResolvedValue([
+        storedAsset(ASSET_1),
+        storedAsset(ASSET_2, { visibility: 'PUBLIC' }),
+      ]);
+
+      await expect(service.send(ME, CHAT_ID, withFiles)).rejects.toThrow(
+        InvalidAttachmentError,
+      );
+      expect(messageRepo.insert).not.toHaveBeenCalled();
+    });
+
     it('stores the links in the tx with displayOrder matching request order', async () => {
       await service.send(ME, CHAT_ID, withFiles);
 
@@ -1008,25 +1019,6 @@ describe('MessagesService', () => {
         service.attachmentUrl(ME, CHAT_ID, MESSAGE_ID, ASSET_1),
       ).rejects.toThrow(MessageNotFoundError);
       expect(storage.presign).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('uploadAttachment', () => {
-    it('stores the file through the port and returns its metadata', async () => {
-      storage.upload.mockResolvedValue(
-        storedAsset(ASSET_1, { originalName: 'cat.png' }),
-      );
-      const file = { originalname: 'cat.png' } as Express.Multer.File;
-
-      const result = await service.uploadAttachment(ME, file);
-
-      expect(storage.upload).toHaveBeenCalledWith(ME, file);
-      expect(result).toEqual({
-        id: ASSET_1,
-        mimeType: 'image/png',
-        size: 100,
-        originalName: 'cat.png',
-      });
     });
   });
 

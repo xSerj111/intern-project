@@ -5,7 +5,11 @@ import * as jwt from 'jsonwebtoken';
 import type { Registry } from 'prom-client';
 import { METRICS_REGISTRY } from '../src/common/observability/metrics.tokens';
 import { bearer, metricValue } from './helpers/api.helpers';
-import { PNG_BYTES, uniqueBytes } from './helpers/attachment.helpers';
+import {
+  PNG_BYTES,
+  presignedUpload,
+  uniqueBytes,
+} from './helpers/attachment.helpers';
 import { createE2eApp, type E2eApp } from './helpers/app.helpers';
 import { cleanupE2eData } from './helpers/cleanup.helpers';
 import { createPublishedPosts } from './helpers/data.helpers';
@@ -215,15 +219,15 @@ describe('Cache (e2e)', () => {
       chatId = chat.body.id;
       chatIds.push(chatId);
       const tag = randomUUID();
-      const upload = await http
-        .post('/chats/attachments')
-        .set(bearer(sender))
-        .attach('file', uniqueBytes(PNG_BYTES, tag), {
-          filename: `${tag}.png`,
-          contentType: 'image/png',
-        })
-        .expect(201);
-      assetId = upload.body.id;
+      const upload = await presignedUpload(
+        http,
+        sender,
+        'chat-attachment',
+        uniqueBytes(PNG_BYTES, tag),
+        'image/png',
+        `${tag}.png`,
+      );
+      assetId = upload.id;
       await http
         .post(`/chats/${chatId}/messages`)
         .set(bearer(sender))

@@ -14,10 +14,9 @@ import type {
   IRenameGroupRequest,
   IReadState,
   ISendMessageRequest,
-  IUploadedAttachment,
 } from '@repo/contracts';
 
-import { coreApi, uploadCoreFile, type UploadOptions } from './client';
+import { coreApi } from './client';
 
 /** TanStack Query key factories for chat data. */
 export const chatKeys = {
@@ -223,17 +222,6 @@ export function leaveChat(
     token,
     signal,
   });
-}
-
-/**
- * Upload one attachment (`POST /chats/attachments`, multipart field `file`, 201).
- * Server rejections (type not allowed, over 10 MB) surface in `ApiError.message`.
- */
-export function uploadAttachment(
-  file: File,
-  options: UploadOptions = {},
-): Promise<IUploadedAttachment> {
-  return uploadCoreFile<IUploadedAttachment>('/chats/attachments', file, options);
 }
 
 /** Fresh presigned download URL for a message attachment (404 when not visible). */

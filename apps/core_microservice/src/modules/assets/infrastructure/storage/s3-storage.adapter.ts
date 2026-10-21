@@ -5,15 +5,21 @@ import {
 } from '@nestjs/common';
 import {
   S3Client,
-  PutObjectCommand,
   GetObjectCommand,
   DeleteObjectCommand,
+  HeadObjectCommand,
+  CopyObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { IFileStoragePort } from '../../domain/interfaces/file-storage.port';
+import { createPresignedPost } from '@aws-sdk/s3-presigned-post';
+import { UPLOAD_MAX_BYTES } from '@repo/contracts';
+import {
+  IFileStoragePort,
+  PresignPostInput,
+  PresignedPostResult,
+  StorageObjectHead,
+} from '../../domain/interfaces/file-storage.port';
 import { AppConfigService } from '../../../../config/app-config.service';
-import * as crypto from 'crypto';
-import * as path from 'path';
 
 /**
  * `attachment` Content-Disposition with an ASCII `filename` fallback and an
@@ -86,57 +92,6 @@ export class S3StorageAdapter implements IFileStoragePort {
     });
   }
 
-  async upload(
-    file: Buffer,
-    filename: string,
-    mimeType: string,
-  ): Promise<string> {
-    try {
-      const extension = path.extname(filename);
-      const uniqueFilename = `${crypto.randomUUID()}${extension}`;
-
-      const command = new PutObjectCommand({
-        Bucket: this.bucketName,
-        Key: uniqueFilename,
-        Body: file,
-        ContentType: mimeType,
-      });
-
-      await this.s3Client.send(command);
-
-      return this.buildPublicUrl(uniqueFilename);
-    } catch (error) {
-      this.logger.error(
-        `Failed to upload file to S3: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        error,
-      );
-      throw new InternalServerErrorException('Error uploading file to storage');
-    }
-  }
-
-  async uploadPrivate(
-    file: Buffer,
-    key: string,
-    mimeType?: string,
-  ): Promise<void> {
-    try {
-      await this.s3Client.send(
-        new PutObjectCommand({
-          Bucket: this.privateBucket,
-          Key: key,
-          Body: file,
-          ContentType: mimeType,
-        }),
-      );
-    } catch (error) {
-      this.logger.error(
-        `Failed to upload private file to S3: ${error instanceof Error ? error.message : 'Unknown error'}`,
-        error,
-      );
-      throw new InternalServerErrorException('Error uploading file to storage');
-    }
-  }
-
   async presignGet(
     key: string,
     options: { ttlSeconds: number; downloadName?: string },
@@ -179,10 +134,166 @@ export class S3StorageAdapter implements IFileStoragePort {
     }
   }
 
+  async presignPost(input: PresignPostInput): Promise<PresignedPostResult> {
+    const { bucket, key, contentType } = input;
+    const maxBytes = Math.min(Math.floor(input.maxBytes), UPLOAD_MAX_BYTES);
+    if (!(maxBytes >= 1) || !key || key.includes('${filename}')) {
+      // `${filename}` would make the SDK sign a starts-with key condition.
+      throw new InternalServerErrorException('Invalid upload policy input');
+    }
+    try {
+      const { url, fields } = await createPresignedPost(this.presignClient, {
+        Bucket: bucket,
+        Key: key,
+        Fields: { 'Content-Type': contentType },
+        Conditions: [
+          { bucket },
+          { key },
+          ['content-length-range', 1, maxBytes],
+          { 'Content-Type': contentType },
+        ],
+        Expires: input.expiresSec ?? this.appConfig.uploads.linkTtlSec,
+      });
+      return { url, fields };
+    } catch (error) {
+      this.logError('Failed to presign S3 POST', error);
+      throw new InternalServerErrorException('Error signing storage URL');
+    }
+  }
+
+  async head(bucket: string, key: string): Promise<StorageObjectHead | null> {
+    try {
+      const out = await this.s3Client.send(
+        new HeadObjectCommand({ Bucket: bucket, Key: key }),
+      );
+      return { size: out.ContentLength ?? 0, contentType: out.ContentType };
+    } catch (error) {
+      if (isNotFound(error)) return null;
+      this.logError('Failed to read S3 object metadata', error);
+      throw new InternalServerErrorException('Error reading storage object');
+    }
+  }
+
+  async readHead(bucket: string, key: string, bytes: number): Promise<Buffer> {
+    const limit = Math.floor(bytes);
+    if (!(limit >= 1)) return Buffer.alloc(0);
+    try {
+      const out = await this.s3Client.send(
+        new GetObjectCommand({
+          Bucket: bucket,
+          Key: key,
+          Range: `bytes=0-${limit - 1}`,
+        }),
+      );
+      return await readAtMost(out.Body, limit);
+    } catch (error) {
+      this.logError('Failed to read S3 object head', error);
+      throw new InternalServerErrorException('Error reading storage object');
+    }
+  }
+
+  async copyToPublic(
+    srcBucket: string,
+    srcKey: string,
+    destKey: string,
+    contentType?: string,
+  ): Promise<string> {
+    try {
+      await this.s3Client.send(
+        new CopyObjectCommand({
+          Bucket: this.bucketName,
+          Key: destKey,
+          CopySource: `${srcBucket}/${srcKey.split('/').map(encodeURIComponent).join('/')}`,
+          ...(contentType
+            ? {
+                ContentType: contentType,
+                MetadataDirective: 'REPLACE' as const,
+              }
+            : {}),
+        }),
+      );
+      return this.buildPublicUrl(destKey);
+    } catch (error) {
+      this.logError('Failed to copy S3 object to public bucket', error);
+      throw new InternalServerErrorException('Error copying storage object');
+    }
+  }
+
+  async deleteObject(bucket: string, key: string): Promise<void> {
+    try {
+      await this.s3Client.send(
+        new DeleteObjectCommand({ Bucket: bucket, Key: key }),
+      );
+    } catch (error) {
+      if (isNotFound(error)) return;
+      this.logError('Failed to delete file from S3', error);
+      throw new InternalServerErrorException(
+        'Error deleting file from storage',
+      );
+    }
+  }
+
+  private logError(message: string, error: unknown): void {
+    this.logger.error(
+      `${message}: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      error,
+    );
+  }
+
   private buildPublicUrl(fileKey: string): string {
     const { endpoint, port, useSsl, bucketName } = this.appConfig.s3;
     const protocol = useSsl ? 'https' : 'http';
 
     return `${protocol}://${endpoint}:${port}/${bucketName}/${fileKey}`;
   }
+}
+
+function isNotFound(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const e = error as { name?: string; $metadata?: { httpStatusCode?: number } };
+  return (
+    e.name === 'NotFound' ||
+    e.name === 'NoSuchKey' ||
+    e.$metadata?.httpStatusCode === 404
+  );
+}
+
+/**
+ * Reads a response body up to `limit` bytes, then stops and destroys the
+ * stream, so a server that ignores `Range` cannot make us buffer the object.
+ */
+async function readAtMost(body: unknown, limit: number): Promise<Buffer> {
+  if (!body) return Buffer.alloc(0);
+  if (!isAsyncIterable(body)) {
+    throw new Error('Unsupported S3 response body');
+  }
+  const chunks: Buffer[] = [];
+  let total = 0;
+  try {
+    for await (const chunk of body) {
+      const buf = Buffer.isBuffer(chunk)
+        ? chunk
+        : typeof chunk === 'string'
+          ? Buffer.from(chunk)
+          : Buffer.from(chunk as Uint8Array);
+      const take = Math.min(buf.length, limit - total);
+      chunks.push(take === buf.length ? buf : buf.subarray(0, take));
+      total += take;
+      if (total >= limit) break;
+    }
+  } finally {
+    const destroy = (body as { destroy?: () => void }).destroy;
+    if (typeof destroy === 'function') destroy.call(body);
+  }
+  return Buffer.concat(chunks, total);
+}
+
+function isAsyncIterable(value: unknown): value is AsyncIterable<unknown> {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as { [Symbol.asyncIterator]?: unknown })[
+      Symbol.asyncIterator
+    ] === 'function'
+  );
 }

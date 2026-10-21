@@ -1,5 +1,6 @@
 import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
-import { type Logger, LoggerKey } from '@repo/shared';
+import { EntityByIdNotFoundError, type Logger, LoggerKey } from '@repo/shared';
+import { AssetsService } from '../assets/assets.service';
 import { ProfileSummaryCache } from '../../common/cache/profile-summary-cache';
 import { CreatePostDto } from './dto/create-post.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
@@ -19,6 +20,7 @@ export class PostsService {
     @Inject(POST_REPOSITORY)
     private readonly postRepository: IPostRepository,
     private readonly profileCache: ProfileSummaryCache,
+    private readonly assets: AssetsService,
   ) {}
 
   /**
@@ -75,6 +77,8 @@ export class PostsService {
     userId: string,
     createPostDto: CreatePostDto,
   ): Promise<Post> {
+    await this.assertAssetsAttachable(userId, createPostDto.assetIds);
+
     const postAssets = createPostDto.assetIds?.map((assetId, index) => {
       const asset = new PostAsset();
       asset.assetId = assetId;
@@ -94,6 +98,29 @@ export class PostsService {
 
     // Reload so the response carries the joined author and the assets' files.
     return this.postRepository.findOneByIdOrThrow(savedPost.id);
+  }
+
+  /**
+   * Every asset must be a confirmed (READY) upload of the caller that fits a
+   * post. Missing, unconfirmed and foreign ids all read as 404 so other
+   * users' ids can't be probed.
+   * @throws EntityByIdNotFoundError (404), AssetNotAttachableError (400)
+   */
+  private async assertAssetsAttachable(
+    userId: string,
+    assetIds: string[] | undefined,
+  ): Promise<void> {
+    if (!assetIds?.length) return;
+    const found = new Map(
+      (await this.assets.findByIds(assetIds)).map((a) => [a.id, a]),
+    );
+    for (const assetId of assetIds) {
+      const asset = found.get(assetId);
+      if (!asset || !asset.isOwnedBy(userId)) {
+        throw new EntityByIdNotFoundError('assets', assetId);
+      }
+      asset.assertAttachableTo('post', userId);
+    }
   }
 
   async getPost(id: string): Promise<Post> {

@@ -6,7 +6,7 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 
 import type { IProfileResponse } from '@repo/contracts';
 
-import { uploadAsset } from '../../lib/api/assets';
+import { uploadFile } from '../../lib/api/uploads';
 import { postKeys } from '../../lib/api/posts';
 import { profileKeys, updateProfile } from '../../lib/api/profile';
 import { useAuth } from '../../lib/auth/auth-context';
@@ -74,7 +74,7 @@ export function EditProfileForm({
   );
 
   const upload = useMutation({
-    mutationFn: (file: File) => uploadAsset(file, { token: accessToken }),
+    mutationFn: (file: File) => uploadFile(file, 'avatar', { token: accessToken }),
     onSuccess: (asset) => setAvatarAssetId(asset.id),
     onError: (error) => {
       setAvatarError(

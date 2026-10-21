@@ -1,5 +1,4 @@
 import { Inject, Injectable } from '@nestjs/common';
-import 'multer';
 import { AssetsService } from '../../../assets/assets.service';
 import {
   CACHE_STORE,
@@ -49,20 +48,14 @@ export class AttachmentStorageAdapter implements IAttachmentStoragePort {
     @Inject(CACHE_STORE) private readonly cache: ICacheStore,
   ) {}
 
-  async upload(
-    uploaderId: string,
-    file: Express.Multer.File,
-  ): Promise<StoredAttachment> {
-    return toStored(await this.assets.uploadPrivate(uploaderId, file));
-  }
-
   async findAssets(
     ids: string[],
     tx?: ChatTransaction,
   ): Promise<StoredAttachment[]> {
     if (ids.length === 0) return [];
     const assets = await this.assets.findByIds(ids, tx);
-    return assets.map(toStored);
+    // Unconfirmed uploads are never visible.
+    return assets.filter((a) => a.status === 'READY').map(toStored);
   }
 
   async softDeleteAssets(ids: string[], tx: ChatTransaction): Promise<void> {

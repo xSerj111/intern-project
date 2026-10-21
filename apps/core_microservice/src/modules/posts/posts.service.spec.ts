@@ -1,5 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { LoggerKey } from '@repo/shared';
+import { EntityByIdNotFoundError, LoggerKey } from '@repo/shared';
+import { AssetsService } from '../assets/assets.service';
+import { AssetNotAttachableError } from '../assets/domain/errors/asset.errors';
 import { ProfileSummaryCache } from '../../common/cache/profile-summary-cache';
 import { PostsService } from './posts.service';
 import { POST_REPOSITORY } from './domain/interfaces/post-repository.port';
@@ -23,16 +25,25 @@ describe('PostsService', () => {
     softDelete: jest.fn(),
   };
   const cache = { invalidateCounts: jest.fn() };
+  const assets = { findByIds: jest.fn() };
+  const fakeAsset = (id: string, over: Record<string, unknown> = {}) => ({
+    id,
+    isOwnedBy: (u: string) => u === AUTHOR,
+    assertAttachableTo: jest.fn(),
+    ...over,
+  });
   const AUTHOR = '11111111-1111-1111-1111-111111111111';
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    assets.findByIds.mockResolvedValue([]);
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         PostsService,
         { provide: LoggerKey, useValue: { debug: jest.fn() } },
         { provide: POST_REPOSITORY, useValue: postRepository },
         { provide: ProfileSummaryCache, useValue: cache },
+        { provide: AssetsService, useValue: assets },
       ],
     }).compile();
 
@@ -163,6 +174,8 @@ describe('PostsService', () => {
       const reloaded = fakePost({ id: 'new-1', content: 'reloaded' });
       postRepository.save.mockResolvedValue(saved);
       postRepository.findOneByIdOrThrow.mockResolvedValue(reloaded);
+      const asset = fakeAsset('a-1');
+      assets.findByIds.mockResolvedValue([asset]);
 
       const result = await service.createPost(AUTHOR, {
         content: 'hello',
@@ -171,6 +184,45 @@ describe('PostsService', () => {
 
       expect(postRepository.findOneByIdOrThrow).toHaveBeenCalledWith('new-1');
       expect(result).toBe(reloaded);
+      expect(asset.assertAttachableTo).toHaveBeenCalledWith('post', AUTHOR);
+    });
+
+    it.each([
+      ['missing or unconfirmed', []],
+      ['owned by someone else', [fakeAsset('a-1', { isOwnedBy: () => false })]],
+    ])(
+      'answers 404 and saves nothing when an asset is %s',
+      async (_n, rows) => {
+        assets.findByIds.mockResolvedValue(rows);
+
+        await expect(
+          service.createPost(AUTHOR, { content: 'hi', assetIds: ['a-1'] }),
+        ).rejects.toBeInstanceOf(EntityByIdNotFoundError);
+        expect(postRepository.save).not.toHaveBeenCalled();
+      },
+    );
+
+    it('propagates the asset rule when the asset does not fit a post', async () => {
+      const asset = fakeAsset('a-1', {
+        assertAttachableTo: jest.fn(() => {
+          throw new AssetNotAttachableError('post');
+        }),
+      });
+      assets.findByIds.mockResolvedValue([asset]);
+
+      await expect(
+        service.createPost(AUTHOR, { content: 'hi', assetIds: ['a-1'] }),
+      ).rejects.toBeInstanceOf(AssetNotAttachableError);
+      expect(postRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('skips the asset lookup when no assets are attached', async () => {
+      postRepository.save.mockResolvedValue(fakePost({ id: 'n' }));
+      postRepository.findOneByIdOrThrow.mockResolvedValue(fakePost());
+
+      await service.createPost(AUTHOR, { content: 'hi' });
+
+      expect(assets.findByIds).not.toHaveBeenCalled();
     });
 
     it('runs no like-stats or comment-count query for the new post', async () => {

@@ -7,6 +7,8 @@ import * as jwt from 'jsonwebtoken';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { AppModule } from './../src/app.module';
+import type { UploadPurpose } from '@repo/contracts';
+import { PDF_BYTES, presignedUpload } from './helpers/attachment.helpers';
 
 jest.setTimeout(60000);
 
@@ -86,19 +88,21 @@ describe('Profile page: author posts, summary, avatar (e2e)', () => {
   });
 
   describe('avatar', () => {
-    const upload = async (
+    const upload = (
       sub: string,
       buf: Buffer,
       name: string,
       type: string,
+      purpose: UploadPurpose = 'post-image',
     ) =>
-      (
-        await http
-          .post('/assets/upload')
-          .set(as(sub))
-          .attach('file', buf, { filename: name, contentType: type })
-          .expect(201)
-      ).body;
+      presignedUpload(
+        http,
+        { accessToken: token(sub) },
+        purpose,
+        buf,
+        type,
+        name,
+      );
     let profileId: string;
 
     beforeAll(async () => {
@@ -127,9 +131,10 @@ describe('Profile page: author posts, summary, avatar (e2e)', () => {
       const pdf = (
         await upload(
           author,
-          Buffer.from('%PDF-1.4'),
+          PDF_BYTES,
           'x.pdf',
           'application/pdf',
+          'chat-attachment',
         )
       ).id;
       await http

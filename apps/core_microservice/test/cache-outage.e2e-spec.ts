@@ -2,7 +2,11 @@
 import { randomUUID } from 'node:crypto';
 import * as jwt from 'jsonwebtoken';
 import { bearer } from './helpers/api.helpers';
-import { PNG_BYTES, uniqueBytes } from './helpers/attachment.helpers';
+import {
+  PNG_BYTES,
+  presignedUpload,
+  uniqueBytes,
+} from './helpers/attachment.helpers';
 import { createE2eApp, type E2eApp } from './helpers/app.helpers';
 import { cleanupE2eData } from './helpers/cleanup.helpers';
 import type { Session } from './helpers/realtime.helpers';
@@ -71,14 +75,14 @@ describe('Cache outage (e2e)', () => {
       .expect(201);
     const chatId: string = chat.body.id;
     const tag = randomUUID();
-    const upload = await http
-      .post('/chats/attachments')
-      .set(bearer(a))
-      .attach('file', uniqueBytes(PNG_BYTES, tag), {
-        filename: `${tag}.png`,
-        contentType: 'image/png',
-      })
-      .expect(201);
+    const upload = await presignedUpload(
+      http,
+      a,
+      'chat-attachment',
+      uniqueBytes(PNG_BYTES, tag),
+      'image/png',
+      `${tag}.png`,
+    );
     // Text and attachment messages, so the signed-URL cache is exercised too.
     await http
       .post(`/chats/${chatId}/messages`)
@@ -90,7 +94,7 @@ describe('Cache outage (e2e)', () => {
       .set(bearer(a))
       .send({
         clientMessageId: randomUUID(),
-        attachmentIds: [upload.body.id],
+        attachmentIds: [upload.id],
       })
       .expect(201);
 

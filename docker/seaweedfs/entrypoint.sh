@@ -15,4 +15,6 @@ cat > /etc/seaweedfs/s3.json <<EOF
 EOF
 
 # volume.max: the default of 8 volumes is exhausted by the first few buckets.
-exec weed server -dir=/data -volume.max=100 -s3 -s3.config=/etc/seaweedfs/s3.json -s3.port=8333
+# s3.allowedOrigins: CORS limited to the client origin instead of the default '*'.
+exec weed server -dir=/data -volume.max=100 -s3 -s3.config=/etc/seaweedfs/s3.json -s3.port=8333 \
+  -s3.allowedOrigins="${CLIENT_URL:-http://localhost:3000}"
