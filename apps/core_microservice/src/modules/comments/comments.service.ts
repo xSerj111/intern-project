@@ -81,7 +81,8 @@ export class CommentsService {
     this.logger.debug('Comment created', {
       props: { commentId: savedComment.id },
     });
-    return savedComment;
+    // Reload so the response carries the joined author (a saved row has none).
+    return this.commentRepository.findOneByIdOrThrow(savedComment.id);
   }
 
   async updateComment(
@@ -140,13 +141,21 @@ export class CommentsService {
   }
 
   /**
-   * Author identities for a set of comments (one `IN` query, de-duplicated);
-   * authors without a profile are absent from the map.
+   * Author identities read off the comments' joined `author` relation (the
+   * repository loads it); no extra query. Authors without a profile are absent.
    */
-  async getAuthors(comments: Comment[]): Promise<Map<string, IChatUser>> {
-    return this.userDirectory.getUsers([
-      ...new Set(comments.map((c) => c.authorId)),
-    ]);
+  getAuthors(comments: Comment[]): Map<string, IChatUser> {
+    const authors = new Map<string, IChatUser>();
+    for (const { authorId, author } of comments) {
+      if (!author || authors.has(authorId)) continue;
+      authors.set(authorId, {
+        userId: author.authUserId,
+        username: author.username,
+        displayName: author.displayName,
+        avatarUrl: author.avatarUrl ?? null,
+      });
+    }
+    return authors;
   }
 
   async softDeleteComment(userId: string, id: string): Promise<void> {

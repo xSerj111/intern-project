@@ -165,5 +165,17 @@ describe('PostsService', () => {
       expect(postRepository.findOneByIdOrThrow).toHaveBeenCalledWith('new-1');
       expect(result).toBe(reloaded);
     });
+
+    it('runs no like-stats or comment-count query for the new post', async () => {
+      postRepository.save.mockResolvedValue(fakePost({ id: 'new-2' }));
+      postRepository.findOneByIdOrThrow.mockResolvedValue(
+        fakePost({ id: 'new-2' }),
+      );
+
+      await service.createPost(AUTHOR, { content: 'hello' });
+
+      expect(postRepository.getLikeStats).not.toHaveBeenCalled();
+      expect(postRepository.getCommentCounts).not.toHaveBeenCalled();
+    });
   });
 });

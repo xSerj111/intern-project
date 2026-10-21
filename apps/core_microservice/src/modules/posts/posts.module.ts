@@ -8,13 +8,11 @@ import { PostAsset } from './domain/entities/post-asset.entity';
 import { PostRepository } from './infrastructure/repository/post.repository';
 import { LoggerModule } from '@repo/shared';
 import { POST_REPOSITORY } from './domain/interfaces/post-repository.port';
-import { FollowsModule } from '../follows/follows.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Post, PostLike, PostAsset]),
     LoggerModule.forFeature('PostsService'),
-    FollowsModule,
   ],
   controllers: [PostsController],
   providers: [

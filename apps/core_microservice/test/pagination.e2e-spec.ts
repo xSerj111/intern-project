@@ -2,7 +2,8 @@
 import { CHANGES_PAGE_SIZE_MAX, PAGE_SIZE_MAX } from '@repo/contracts';
 import { randomUUID } from 'node:crypto';
 import * as jwt from 'jsonwebtoken';
-import { bearer } from './helpers/api.helpers';
+import type request from 'supertest';
+import { bearer, dbQueryCount } from './helpers/api.helpers';
 import { createE2eApp, type E2eApp } from './helpers/app.helpers';
 import { cleanupE2eData } from './helpers/cleanup.helpers';
 import { createPublishedPosts, setCreatedAt } from './helpers/data.helpers';
@@ -13,7 +14,9 @@ jest.setTimeout(180000);
 /**
  * Pagination over real Postgres (US3): the page-size rule on every core list
  * endpoint, the feed cursor (tie-break, concurrent inserts, deleted cursor) and
- * the offset pages of followers/following/comments with `hasMore`.
+ * the offset pages of followers/following/comments with `hasMore`. The app runs
+ * with `PERF_INSTRUMENTATION=true` so the query-count cases (FR-013) can read
+ * `X-Db-Query-Count`.
  */
 describe('Pagination (e2e)', () => {
   let e2e: E2eApp;
@@ -79,7 +82,7 @@ describe('Pagination (e2e)', () => {
   };
 
   beforeAll(async () => {
-    e2e = await createE2eApp();
+    e2e = await createE2eApp({ PERF_INSTRUMENTATION: 'true' });
     http = e2e.http;
     secret = (process.env.JWT_ACCESS_SECRET || process.env.JWT_SECRET)!;
     [viewer, peer] = await newUsers(2);
@@ -580,6 +583,142 @@ describe('Pagination (e2e)', () => {
         limit: 20,
         hasMore: false,
       });
+    });
+  });
+
+  describe('query count does not grow with the page size (FR-013)', () => {
+    let author: Session;
+    let target: Session;
+    let countPost: string;
+
+    beforeAll(async () => {
+      [author, target] = await newUsers(2);
+      const followers = await newUsers(7);
+      const followed = await newUsers(7);
+      await publishedPosts(author, 8);
+      [countPost] = await publishedPosts(author, 1);
+      // 7 roots, three of them with a reply
+      const roots: string[] = [];
+      for (let i = 0; i < 7; i++) {
+        const res = await http
+          .post('/comments')
+          .set(bearer(author))
+          .send({ postId: countPost, content: `qc-root-${i}` })
+          .expect(201);
+        roots.push(res.body.id);
+      }
+      for (const parentId of roots.slice(0, 3)) {
+        await http
+          .post('/comments')
+          .set(bearer(author))
+          .send({ postId: countPost, content: 'qc-reply', parentId })
+          .expect(201);
+      }
+      for (const f of followers) {
+        await http
+          .post('/follows')
+          .set(bearer(f))
+          .send({ followingId: target.userId })
+          .expect(201);
+      }
+      for (const f of followed) {
+        await http
+          .post('/follows')
+          .set(bearer(target))
+          .send({ followingId: f.userId })
+          .expect(201);
+      }
+    });
+
+    const cases: Array<{
+      name: string;
+      get: (limit: number) => request.Test;
+      items: number;
+    }> = [
+      {
+        name: 'feed',
+        get: (limit) => feed(author, { limit }),
+        items: 9,
+      },
+      {
+        name: 'root comments (with replies)',
+        get: (limit) =>
+          http
+            .get(`/comments/post/${countPost}`)
+            .query({ limit })
+            .set(bearer(author)),
+        items: 10,
+      },
+      {
+        name: 'followers',
+        get: (limit) =>
+          http
+            .get(`/follows/${target.userId}/followers`)
+            .query({ limit })
+            .set(bearer(author)),
+        items: 7,
+      },
+      {
+        name: 'following',
+        get: (limit) =>
+          http
+            .get(`/follows/${target.userId}/following`)
+            .query({ limit })
+            .set(bearer(author)),
+        items: 7,
+      },
+    ];
+
+    it.each(cases)(
+      '$name runs the same number of queries for limit=5 and limit=50',
+      async ({ get, items }) => {
+        const small = await get(5).expect(200);
+        const large = await get(50).expect(200);
+        // the larger page really returns more rows, yet costs the same
+        expect(large.body.items.length).toBeGreaterThan(
+          small.body.items.length,
+        );
+        expect(large.body.items).toHaveLength(items);
+        expect(dbQueryCount(large)).toBe(dbQueryCount(small));
+        expect(dbQueryCount(small)).toBeGreaterThan(0);
+      },
+    );
+  });
+
+  describe('create responses (no extra enrichment queries)', () => {
+    it('POST /posts returns likeCount 0, commentCount 0 and likedByMe false', async () => {
+      const user = await newUser();
+      const res = await http
+        .post('/posts')
+        .set(bearer(user))
+        .send({ content: 'fresh post' })
+        .expect(201);
+      postIds.push(res.body.id);
+      expect(res.body).toMatchObject({
+        content: 'fresh post',
+        likeCount: 0,
+        commentCount: 0,
+        likedByMe: false,
+      });
+    });
+
+    it('POST /comments carries the joined author', async () => {
+      const user = await newUser();
+      const [post] = await publishedPosts(user, 1);
+      const res = await http
+        .post('/comments')
+        .set(bearer(user))
+        .send({ postId: post, content: 'hello author' })
+        .expect(201);
+      expect(res.body).toMatchObject({
+        authorId: user.userId,
+        content: 'hello author',
+        likeCount: 0,
+        likedByMe: false,
+        author: { userId: user.userId },
+      });
+      expect(res.body.author.username).toEqual(expect.any(String));
+      expect(res.body.author.displayName).toEqual(expect.any(String));
     });
   });
 });

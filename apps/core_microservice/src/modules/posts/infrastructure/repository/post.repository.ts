@@ -33,9 +33,12 @@ export class PostRepository
   }
 
   /**
-   * Ids first (index-only on the partial feed index, follows as a sub-select,
-   * no COUNT), then one hydration query by id. `t` is the raw Postgres
-   * timestamp text with microseconds, so the cursor never loses precision.
+   * Ids first, then one hydration query by id. The ids query fans out per
+   * author (viewer + active follows): each LATERAL branch is an index-only
+   * scan on `IDX_posts_feed` capped at the page size, and the outer sort only
+   * merges those few rows. An `authorId IN (...)` filter seq-scans posts
+   * instead. `t` is the raw Postgres timestamp text with microseconds, so the
+   * cursor never loses precision.
    */
   async findFeedPage(
     viewerId: string,
@@ -53,14 +56,19 @@ export class PostRepository
       `SELECT p.id,
               to_char(p."createdAt" AT TIME ZONE 'UTC',
                       'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS t
-         FROM posts p
-        WHERE p.status = '${PostStatus.Published}'
-          AND p."deletedAt" IS NULL
-          AND (p."authorId" = $1
-               OR p."authorId" IN (SELECT f."followingId" FROM follows f
-                                    WHERE f."followerId" = $1
-                                      AND f."deletedAt" IS NULL))
-          ${keyset}
+         FROM (SELECT $1::uuid AS "authorId"
+               UNION
+               SELECT f."followingId" FROM follows f
+                WHERE f."followerId" = $1
+                  AND f."deletedAt" IS NULL) a
+        CROSS JOIN LATERAL (
+              SELECT p.id, p."createdAt" FROM posts p
+               WHERE p."authorId" = a."authorId"
+                 AND p.status = '${PostStatus.Published}'
+                 AND p."deletedAt" IS NULL
+                 ${keyset}
+               ORDER BY p."createdAt" DESC, p.id DESC
+               LIMIT $2) p
         ORDER BY p."createdAt" DESC, p.id DESC
         LIMIT $2`,
       params,

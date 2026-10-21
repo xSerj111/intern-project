@@ -9,6 +9,7 @@ import { Post, PostStatus } from './domain/entities/post.entity';
 describe('PostsController', () => {
   let controller: PostsController;
   const postsService = {
+    createPost: jest.fn(),
     getPost: jest.fn(),
     getFeed: jest.fn(),
     searchPosts: jest.fn(),
@@ -41,6 +42,28 @@ describe('PostsController', () => {
 
   it('should be defined', () => {
     expect(controller).toBeDefined();
+  });
+
+  describe('createPost', () => {
+    it('responds with zero counts and no enrichment queries', async () => {
+      postsService.createPost.mockResolvedValue(post);
+
+      const response = await controller.createPost('viewer-1', {
+        content: 'hello',
+      });
+
+      expect(postsService.createPost).toHaveBeenCalledWith('viewer-1', {
+        content: 'hello',
+      });
+      expect(postsService.getLikeStats).not.toHaveBeenCalled();
+      expect(postsService.getCommentCounts).not.toHaveBeenCalled();
+      expect(response).toMatchObject({
+        id: post.id,
+        likeCount: 0,
+        commentCount: 0,
+        likedByMe: false,
+      });
+    });
   });
 
   describe('getPost', () => {

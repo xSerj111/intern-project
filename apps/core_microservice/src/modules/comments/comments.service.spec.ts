@@ -118,6 +118,19 @@ describe('CommentsService', () => {
       expect((payload.excerpt as string).length).toBeLessThanOrEqual(140);
     });
 
+    it('reloads the saved comment so the author is joined', async () => {
+      const reloaded = fakeComment({ id: 'c-1', authorId: COMMENTER });
+      commentFindOneByIdOrThrow.mockResolvedValueOnce(reloaded);
+
+      const result = await service.createComment(COMMENTER, {
+        postId: POST_ID,
+        content: 'hi',
+      });
+
+      expect(commentFindOneByIdOrThrow).toHaveBeenCalledWith('c-1');
+      expect(result).toBe(reloaded);
+    });
+
     it('writes no event when the commenter is the post author', async () => {
       await service.createComment(POST_AUTHOR, {
         postId: POST_ID,
@@ -231,18 +244,51 @@ describe('CommentsService', () => {
   });
 
   describe('getAuthors', () => {
-    it('resolves each distinct author with one directory call', async () => {
+    const profile = (authUserId: string, username: string) =>
+      ({
+        authUserId,
+        username,
+        displayName: username.toUpperCase(),
+        avatarUrl: undefined,
+      }) as Comment['author'];
+
+    it('maps the joined authors without a directory call, one entry per author', () => {
       const comments = [
-        fakeComment({ id: 'c-1', authorId: COMMENTER }),
-        fakeComment({ id: 'c-2', authorId: POST_AUTHOR }),
-        fakeComment({ id: 'c-3', authorId: COMMENTER }),
+        fakeComment({
+          id: 'c-1',
+          authorId: COMMENTER,
+          author: profile(COMMENTER, 'bob'),
+        }),
+        fakeComment({
+          id: 'c-2',
+          authorId: POST_AUTHOR,
+          author: profile(POST_AUTHOR, 'amy'),
+        }),
+        fakeComment({
+          id: 'c-3',
+          authorId: COMMENTER,
+          author: profile(COMMENTER, 'bob'),
+        }),
       ];
 
-      const authors = await service.getAuthors(comments);
+      const authors = service.getAuthors(comments);
 
-      expect(directory.getUsers).toHaveBeenCalledTimes(1);
-      expect(directory.getUsers).toHaveBeenCalledWith([COMMENTER, POST_AUTHOR]);
+      expect(directory.getUsers).not.toHaveBeenCalled();
       expect([...authors.keys()]).toEqual([COMMENTER, POST_AUTHOR]);
+      expect(authors.get(POST_AUTHOR)).toEqual({
+        userId: POST_AUTHOR,
+        username: 'amy',
+        displayName: 'AMY',
+        avatarUrl: null,
+      });
+    });
+
+    it('omits authors whose profile is not joined', () => {
+      const authors = service.getAuthors([
+        fakeComment({ authorId: COMMENTER, author: undefined }),
+      ]);
+
+      expect(authors.size).toBe(0);
     });
   });
 });

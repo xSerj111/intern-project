@@ -15,7 +15,7 @@ This is the Phase 0 output. Each open question from the plan's Technical Context
 | F3 | `FeedQueryDto` and `SearchQueryDto` have **no `@Max` on `limit`**. Other caps are inconsistent: messages `@Max(100)`, changes `@Max(500)`, profile search `@Max(20)`, chats `@Max(50)`, notifications `@Max(50)`, posts-by-author `@Max(50)`. Some repositories also clamp silently. | `posts/dto/feed-query.dto.ts:5`, `search-query.dto.ts:5`, `chats/dto/*query*.dto.ts`, `profiles/dto/search-profiles-query.dto.ts`, `chat.repository.ts:29`, `message.repository.ts:24-27` | One constant set in `@repo/contracts` (50, and 200 for changes), applied by every DTO. Repository clamps stay only as defense in depth below the validated maximum (§4). |
 | F4 | `GET /follows/:userId/followers` and `/following` return **every row**, with no `ORDER BY` and no limit. The client dialog also loads the viewer's *entire* following list to set button state, and its "newest first" comment is wrong. | `follows/follows.controller.ts:38-47`, `follow.repository.ts:31-37`; `client_app/src/components/profile/follow-list-dialog.tsx:26,53-75` | FR-007 covers "every list endpoint", so these are paged too. This is scope the spec didn't list (§4). |
 | F5 | `GET /comments/post/:postId` returns **all** comments, flat, with no paging. `findByPost` already joins `author`, and the service then fetches the same profiles again through `userDirectory.getUsers`. | `comments/comments.controller.ts:68`, `comment.repository.ts:57`, `comments.service.ts:130` | Page root comments with their replies inline, and drop the duplicate lookup (§4, §8). |
-| F6 | The notifications list cursor is `occurredAt < before` while it sorts `occurredAt DESC, id DESC`. Rows that share a timestamp can be skipped at a page boundary. | `notifications_consumer_microservice/src/modules/notifications/infrastructure/notification.repository.ts:46-53` | Already capped at 50. The tie-breaker bug is **outside FR-008** (feed only). It is recorded as a follow-up and fixed only if B2 has time. |
+| F6 | The notifications list cursor is `occurredAt < before` while it sorts `occurredAt DESC, id DESC`. Rows that share a timestamp can be skipped at a page boundary. | `notifications_consumer_microservice/src/modules/notifications/infrastructure/notification.repository.ts:46-53` | Already capped at 50. The tie-breaker bug is **outside FR-008** (feed only). It is recorded as a follow-up and fixed only if B2 has time. **B2 (2026-10-20): deferred**; still open as a follow-up (`occurredAt`+`id` keyset needed). |
 | F7 | Indexes: `posts` has only `authorId`. `comments` has only `authorId`: no `postId`, no `parentId`. Profile search is `username ILIKE 'q%'`, which can't use the plain unique btree. Post search `content ILIKE '%kw%'` is a sequential scan. There is no `pg_trgm`. | `migrations/1782126948542-InitialCoreSchema.ts:20-38`, `user-profile.repository.ts:43-59`, `post.repository.ts:107` | Index migration (§8). Post search is not a key endpoint, so a trigram index is optional and needs measured evidence. |
 | F8 | The runtime TypeORM config sets no `logging`, no `maxQueryExecutionTime` and no `extra.max` (pg default pool is 10). | `app.module.ts:26-33`, `config/app-config.service.ts:21-34` | Add a slow-query logger and a query counter (§2, §9). The pool size is exposed as a metric. |
 | F9 | Public profile is `GET /profiles/by-user/:userId` (`OptionalJwtAuthGuard`). It runs 1 profile query plus 4 parallel queries: follower, following and published-post counts, and the viewer-specific `isFollowedByMe`. **There are no private profiles**: no privacy flag exists, and the INO-9 notes list it as a backend blocker. | `profile-summary/profile-summary.controller.ts:26-27`, `profile-summary.service.ts:40-52` | Cache only the viewer-independent parts. `isFollowedByMe` stays a per-request, indexed `EXISTS` (§7). FR-020 applies to assets today, and the design is ready for private profiles. |
@@ -411,3 +411,462 @@ Repeatability (`npm run perf:compare -- --repeatability baseline baseline-2`, li
 | post_create_image | 123 | 117 | -4.9% |
 
 **Chat-list unread `COUNT`: not flagged by baseline, unchanged (T066 is skipped).** The correlated unread `COUNT` is part of the single membership query (`chat.repository.ts`, "per-viewer unread counts"). The 3 queries/request average comes from the membership query (with the COUNT), the chats-with-participants query and the latest-message query (plus conditional attachment and counterpart queries, max 5), not from a per-row count query. `EXPLAIN (ANALYZE, BUFFERS)` for the busiest perf user (7 chats) gives an execution time of 0.72 ms. The subplan is a `Bitmap Index Scan` on `IDX_messages_chatId_seq` with about 0.01 ms per participant row, and the `(chatId, seq)` index makes it a range scan, as §8 expected. The seed has at most 20 messages per chat, so this says nothing about very long chats. The chat list's p95 (64.6 ms) is well above its p50 (25.4 ms) and is not explained by the COUNT.
+
+## §8 Addendum: EXPLAIN evidence
+
+Captured on 2026-10-21 with `EXPLAIN (ANALYZE, BUFFERS)` in `psql` (read-only transaction, rolled back) against `innogram_core` on the `perf` v1 seed (25,858 posts, 50,051 comments, 10,020 follows, 1,445 profiles, 256 chats, 4,546 messages), Postgres from the local docker infra. Each query was run twice and the second (warm) run is kept. The SQL is copied from the current repository code; the TypeORM `find` calls are written out by hand with the same predicates and ordering. Plans are trimmed to the plan tree plus planning and execution time.
+
+Parameters (reuse them for the "after" plans):
+
+| Name | Value | Why |
+|---|---|---|
+| viewer (feed, following, search exclusion) | `d5e7628e-f352-5aa1-a3a5-10213a350887` (`perf0108`) | follows 23 authors, 1,548 published posts in the feed |
+| most-followed user (followers page) | `6ea8214a-c5ff-5b82-9cc3-ac0883069a92` (`perf0200`) | 214 followers |
+| post (root comments, replies) | `738b5b09-dfd6-5064-a578-13a036e011c4` | 17 root comments, 8 replies, the most roots in the seed |
+| search prefix | `perf01` | 100 matching usernames |
+| chat user | `305ca208-3c86-58fa-b58e-6e692ab69afc` | 7 active chats, the busiest |
+| page size | `limit + 1 = 21` (`20` for search and chat list), offset 0 | first page |
+
+### Before (pre-AddPerformanceIndexes)
+
+Indexes present at capture time: `posts("authorId")`, `comments("authorId")`, `follows("followerId")`, `follows("followingId")`, unique `follows("followerId","followingId")`, unique `user_profiles(username)`; no index on `comments("postId")` or `comments("parentId")`.
+
+| # | Query | Execution ms | Planning ms | Dominant node |
+|---|---|---|---|---|
+| 1 | Feed ids query | 9.100 | 0.759 | Seq Scan on posts |
+| 2 | Root comments page | 5.718 | 0.523 | Seq Scan on comments |
+| 3 | Replies of roots | 17.651 | 0.123 | 2x Seq Scan on comments (recursive) |
+| 4 | Profile search | 0.378 | 0.191 | Index Scan on username (filter ~~*) |
+| 5 | Followers page | 0.084 | 0.091 | Bitmap Scan + Sort (followingId) |
+| 6 | Following page | 0.039 | 0.039 | Bitmap Scan + Sort (followerId) |
+| 7 | Chat list (membership query with the unread `COUNT`) | 0.248 | 0.608 | Index/Bitmap scans, correlated COUNT |
+
+#### Before 1: Feed ids query
+
+`PostRepository.findFeedPage` (`posts/infrastructure/repository/post.repository.ts`), first page: `LIMIT 21`, no cursor.
+
+```
+Limit  (cost=1811.27..1811.32 rows=21 width=56) (actual time=9.030..9.036 rows=21 loops=1)
+  Buffers: shared hit=1010
+  ->  Sort  (cost=1811.27..1836.32 rows=10019 width=56) (actual time=9.029..9.032 rows=21 loops=1)
+        Sort Key: p."createdAt" DESC, p.id DESC
+        Sort Method: top-N heapsort  Memory: 29kB
+        Buffers: shared hit=1010
+        ->  Seq Scan on posts p  (cost=61.77..1541.14 rows=10019 width=56) (actual time=0.229..8.611 rows=1553 loops=1)
+              Filter: (("deletedAt" IS NULL) AND (status = 'published'::posts_status_enum) AND (("authorId" = 'd5e7628e-f352-5aa1-a3a5-10213a350887'::uuid) OR (hashed SubPlan 1)))
+              Rows Removed by Filter: 24305
+              Buffers: shared hit=1004
+              SubPlan 1
+                ->  Bitmap Heap Scan on follows f  (cost=4.46..61.71 rows=23 width=16) (actual time=0.042..0.111 rows=23 loops=1)
+                      Recheck Cond: ("followerId" = 'd5e7628e-f352-5aa1-a3a5-10213a350887'::uuid)
+                      Filter: ("deletedAt" IS NULL)
+                      Heap Blocks: exact=21
+                      Buffers: shared hit=23
+                      ->  Bitmap Index Scan on "UQ_105079775692df1f8799ed0fac8"  (cost=0.00..4.46 rows=23 width=0) (actual time=0.023..0.023 rows=23 loops=1)
+                            Index Cond: ("followerId" = 'd5e7628e-f352-5aa1-a3a5-10213a350887'::uuid)
+                            Buffers: shared hit=2
+Planning Time: 0.759 ms
+Execution Time: 9.100 ms
+```
+
+Seq scan on `posts` (25,858 rows, 24,305 removed by the filter, 1,004 buffers) feeding a top-N sort. The `authorId` index is not used because the `OR` with the `IN` subquery forces a hashed `SubPlan`. This is the cost that grows with the table size.
+
+#### Before 2: Root comments page
+
+`CommentRepository.findRootPage`, `postId = 738b5b09-…` with the author join, `LIMIT 21 OFFSET 0`. Rewritten by hand from the TypeORM `find` call; `deletedAt IS NULL` on both tables is what TypeORM adds.
+
+```
+Limit  (cost=2755.69..2755.73 rows=16 width=369) (actual time=5.686..5.690 rows=17 loops=1)
+  Buffers: shared hit=2080
+  ->  Sort  (cost=2755.69..2755.73 rows=16 width=369) (actual time=5.684..5.687 rows=17 loops=1)
+        Sort Key: c."createdAt" DESC, c.id DESC
+        Sort Method: quicksort  Memory: 32kB
+        Buffers: shared hit=2080
+        ->  Nested Loop Left Join  (cost=0.28..2755.37 rows=16 width=369) (actual time=0.078..5.663 rows=17 loops=1)
+              Buffers: shared hit=2080
+              ->  Seq Scan on comments c  (cost=0.00..2654.64 rows=16 width=152) (actual time=0.066..5.578 rows=17 loops=1)
+                    Filter: (("parentId" IS NULL) AND ("deletedAt" IS NULL) AND ("postId" = '738b5b09-dfd6-5064-a578-13a036e011c4'::uuid))
+                    Rows Removed by Filter: 50034
+                    Buffers: shared hit=2029
+              ->  Index Scan using "IDX_3a31e0a315109d8f5fbadbb933" on user_profiles a  (cost=0.28..6.29 rows=1 width=217) (actual time=0.004..0.004 rows=1 loops=17)
+                    Index Cond: ("authUserId" = c."authorId")
+                    Filter: ("deletedAt" IS NULL)
+                    Buffers: shared hit=51
+Planning Time: 0.523 ms
+Execution Time: 5.718 ms
+```
+
+Seq scan on `comments` (50,051 rows, 2,029 buffers) for 17 roots, then a sort. There is no index on `postId` or `parentId`, so every page costs a full table scan.
+
+#### Before 3: Replies of roots
+
+`CommentRepository.findRepliesOf`, the recursive CTE with the 20 newest roots of the same post (17 exist).
+
+```
+CTE Scan on thread  (cost=34525.90..34583.54 rows=2882 width=16) (actual time=4.118..17.529 rows=8 loops=1)
+  Buffers: shared hit=4058
+  CTE thread
+    ->  Recursive Union  (cost=0.04..34525.90 rows=2882 width=16) (actual time=4.116..17.523 rows=8 loops=1)
+          Buffers: shared hit=4058
+          ->  Seq Scan on comments  (cost=0.04..2779.81 rows=22 width=16) (actual time=4.110..6.068 rows=8 loops=1)
+                Filter: (("deletedAt" IS NULL) AND ("parentId" = ANY ('{<17 root ids>}'::uuid[])))
+                Rows Removed by Filter: 50043
+                Buffers: shared hit=2029
+          ->  Hash Join  (cost=3154.99..3168.85 rows=286 width=16) (actual time=11.442..11.443 rows=0 loops=1)
+                Hash Cond: (t.id = c."parentId")
+                Buffers: shared hit=2029
+                ->  WorkTable Scan on thread t  (cost=0.00..4.40 rows=220 width=16) (actual time=0.001..0.003 rows=8 loops=1)
+                ->  Hash  (cost=2529.51..2529.51 rows=50038 width=32) (actual time=11.256..11.257 rows=15010 loops=1)
+                      Buckets: 65536  Batches: 1  Memory Usage: 1451kB
+                      Buffers: shared hit=2029
+                      ->  Seq Scan on comments c  (cost=0.00..2529.51 rows=50038 width=32) (actual time=0.007..7.305 rows=50040 loops=1)
+                            Filter: ("deletedAt" IS NULL)
+                            Rows Removed by Filter: 11
+                            Buffers: shared hit=2029
+Planning Time: 0.123 ms
+Execution Time: 17.651 ms
+```
+
+Two seq scans of `comments` per execution: one for the anchor term, one for the hash side of the recursive join. Each level of nesting costs a full scan. This is the slowest of the seven.
+
+#### Before 4: Profile search
+
+`UserProfileRepository.searchByUsername`, `ILIKE 'perf01%'` with the viewer excluded, `LIMIT 20`.
+
+```
+Limit  (cost=0.28..26.66 rows=20 width=217) (actual time=0.356..0.368 rows=20 loops=1)
+  Buffers: shared hit=150
+  ->  Index Scan using "UQ_7bdaa0714f4c1087a926a2d8369" on user_profiles p  (cost=0.28..134.85 rows=102 width=217) (actual time=0.355..0.366 rows=20 loops=1)
+        Filter: (("deletedAt" IS NULL) AND ((username)::text ~~* 'perf01%'::text) AND ("authUserId" <> 'd5e7628e-f352-5aa1-a3a5-10213a350887'::uuid))
+        Rows Removed by Filter: 542
+        Buffers: shared hit=150
+Planning Time: 0.191 ms
+Execution Time: 0.378 ms
+```
+
+The planner walks the `UQ_…username` unique index in order and filters with `~~*` (542 rows removed). It is fast here only because the `LIMIT` stops early. `ILIKE` cannot use a prefix range, and a rarer prefix would scan more of the index.
+
+#### Before 5: Followers page
+
+`FollowRepository.findFollowers`, user `6ea8214a-…` (214 followers), `LIMIT 21 OFFSET 0`.
+
+```
+Limit  (cost=129.80..129.85 rows=21 width=72) (actual time=0.069..0.071 rows=21 loops=1)
+  Buffers: shared hit=10
+  ->  Sort  (cost=129.80..130.33 rows=214 width=72) (actual time=0.069..0.070 rows=21 loops=1)
+        Sort Key: "createdAt" DESC, id DESC
+        Sort Method: top-N heapsort  Memory: 29kB
+        Buffers: shared hit=10
+        ->  Bitmap Heap Scan on follows f  (cost=5.94..124.03 rows=214 width=72) (actual time=0.020..0.046 rows=214 loops=1)
+              Recheck Cond: ("followingId" = '6ea8214a-c5ff-5b82-9cc3-ac0883069a92'::uuid)
+              Filter: ("deletedAt" IS NULL)
+              Heap Blocks: exact=8
+              Buffers: shared hit=10
+              ->  Bitmap Index Scan on "IDX_ef463dd9a2ce0d673350e36e0f"  (cost=0.00..5.89 rows=214 width=0) (actual time=0.014..0.014 rows=214 loops=1)
+                    Index Cond: ("followingId" = '6ea8214a-c5ff-5b82-9cc3-ac0883069a92'::uuid)
+                    Buffers: shared hit=2
+Planning Time: 0.091 ms
+Execution Time: 0.084 ms
+```
+
+Bitmap scan on the single-column `followingId` index, then a top-N sort of all 214 rows. Cost grows with the follower count, not the page size.
+
+#### Before 6: Following page
+
+`FollowRepository.findFollowing`, user `d5e7628e-…` (23 followed), `LIMIT 21 OFFSET 0`.
+
+```
+Limit  (cost=62.23..62.28 rows=21 width=72) (actual time=0.029..0.032 rows=21 loops=1)
+  Buffers: shared hit=23
+  ->  Sort  (cost=62.23..62.29 rows=23 width=72) (actual time=0.028..0.030 rows=21 loops=1)
+        Sort Key: "createdAt" DESC, id DESC
+        Sort Method: quicksort  Memory: 28kB
+        Buffers: shared hit=23
+        ->  Bitmap Heap Scan on follows f  (cost=4.46..61.71 rows=23 width=72) (actual time=0.008..0.024 rows=23 loops=1)
+              Recheck Cond: ("followerId" = 'd5e7628e-f352-5aa1-a3a5-10213a350887'::uuid)
+              Filter: ("deletedAt" IS NULL)
+              Heap Blocks: exact=21
+              Buffers: shared hit=23
+              ->  Bitmap Index Scan on "UQ_105079775692df1f8799ed0fac8"  (cost=0.00..4.46 rows=23 width=0) (actual time=0.005..0.005 rows=23 loops=1)
+                    Index Cond: ("followerId" = 'd5e7628e-f352-5aa1-a3a5-10213a350887'::uuid)
+                    Buffers: shared hit=2
+Planning Time: 0.039 ms
+Execution Time: 0.039 ms
+```
+
+Bitmap scan on the `(followerId, followingId)` unique index, then a sort of all 23 rows. Same shape as the followers page.
+
+#### Before 7: Chat list (membership query with the unread `COUNT`)
+
+`ChatRepository.buildSummaries`, step 1, user `305ca208-…` (7 active chats), `LIMIT 20`, no `before`. The other two chat-list queries (chats with participants, latest message) are not included.
+
+```
+Limit  (cost=28.23..197.30 rows=7 width=48) (actual time=0.129..0.181 rows=7 loops=1)
+  Buffers: shared hit=35
+  ->  Result  (cost=28.23..197.30 rows=7 width=48) (actual time=0.129..0.180 rows=7 loops=1)
+        Buffers: shared hit=35
+        ->  Sort  (cost=28.23..28.25 rows=7 width=72) (actual time=0.108..0.109 rows=7 loops=1)
+              Sort Key: c."lastActivityAt" DESC, p."chatId" DESC
+              Sort Method: quicksort  Memory: 25kB
+              Buffers: shared hit=14
+              ->  Hash Join  (cost=18.89..28.13 rows=7 width=72) (actual time=0.060..0.094 rows=7 loops=1)
+                    Hash Cond: (c.id = p."chatId")
+                    Buffers: shared hit=14
+                    ->  Seq Scan on chats c  (cost=0.00..8.56 rows=256 width=24) (actual time=0.003..0.045 rows=256 loops=1)
+                          Filter: ("deletedAt" IS NULL)
+                          Buffers: shared hit=6
+                    ->  Hash  (cost=18.80..18.80 rows=7 width=48) (actual time=0.025..0.025 rows=7 loops=1)
+                          Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                          Buffers: shared hit=8
+                          ->  Bitmap Heap Scan on chat_participants p  (cost=4.33..18.80 rows=7 width=48) (actual time=0.015..0.022 rows=7 loops=1)
+                                Recheck Cond: (("userId" = '305ca208-3c86-58fa-b58e-6e692ab69afc'::uuid) AND ("leftAt" IS NULL))
+                                Heap Blocks: exact=6
+                                Buffers: shared hit=8
+                                ->  Bitmap Index Scan on "IDX_chat_participants_userId_active"  (cost=0.00..4.33 rows=7 width=0) (actual time=0.010..0.010 rows=7 loops=1)
+                                      Index Cond: ("userId" = '305ca208-3c86-58fa-b58e-6e692ab69afc'::uuid)
+                                      Buffers: shared hit=2
+        SubPlan 1
+          ->  Aggregate  (cost=24.13..24.14 rows=1 width=8) (actual time=0.009..0.009 rows=1 loops=7)
+                Buffers: shared hit=21
+                ->  Bitmap Heap Scan on messages m  (cost=4.35..24.12 rows=6 width=0) (actual time=0.008..0.008 rows=3 loops=7)
+                      Recheck Cond: (("chatId" = p."chatId") AND (seq > GREATEST(p."lastReadSeq", p."joinedSeq")))
+                      Filter: (("deletedAt" IS NULL) AND ("authorId" <> p."userId") AND ((kind)::text = 'USER'::text))
+                      Heap Blocks: exact=7
+                      Buffers: shared hit=21
+                      ->  Bitmap Index Scan on "IDX_messages_chatId_seq"  (cost=0.00..4.34 rows=6 width=0) (actual time=0.004..0.004 rows=3 loops=7)
+                            Index Cond: (("chatId" = p."chatId") AND (seq > GREATEST(p."lastReadSeq", p."joinedSeq")))
+                            Buffers: shared hit=14
+Planning Time: 0.608 ms
+Execution Time: 0.248 ms
+```
+
+Already index-driven: `IDX_chat_participants_userId_active` for the memberships, and `IDX_messages_chatId_seq` for each correlated `COUNT` (about 0.01 ms per participant row). `chats` is read with a seq scan, which is cheap at 256 rows.
+
+#### T066: chat list unread count
+
+T066 chat list unread count: not flagged by baseline, unchanged
+
+### After (AddPerformanceIndexes1792450000000 applied)
+
+Captured 2026-10-21 on the same seed, with the same parameters and method as the Before section (read-only transaction, rolled back, warm second run kept, plans trimmed). Queries 1 and 4 use the current repository SQL; the rest are unchanged. Query 1 (feed) is the LATERAL per-author version of `PostRepository.findFeedPage`, and query 4 (profile search) is `lower(p.username) LIKE (lower($1) || '%') ESCAPE '\'`. Both were run as `PREPARE` / `EXECUTE` with bound parameters, like node-pg sends them.
+
+| # | Query | Before ms | After ms | Before scan node | After scan node | Index used (After) |
+|---|---|---|---|---|---|---|
+| 1 | Feed ids query | 9.100 | 0.536 | Seq Scan on posts (24,305 rows filtered) | Index Only Scan per author (24 loops, `Heap Fetches: 0`) | `IDX_posts_feed` (follows branch: `IDX_follows_follower_created`) |
+| 2 | Root comments page | 5.718 | 0.470 | Seq Scan on comments | Bitmap Index Scan | `IDX_comments_post_roots` |
+| 3 | Replies of roots | 17.651 | 0.128 | 2x Seq Scan on comments | Bitmap Index Scan (anchor), Index Scan (recursive) | `IDX_comments_parent` |
+| 4 | Profile search (custom plan) | 0.378 | 0.097 | Index Scan on `UQ_…username`, filter `~~*` (542 rows removed) | Bitmap Index Scan with range condition | `IDX_user_profiles_username_lower` |
+| 5 | Followers page | 0.084 | 0.021 | Bitmap Scan + top-N Sort | Index Scan, no Sort | `IDX_follows_following_created` |
+| 6 | Following page | 0.039 | 0.038 | Bitmap Scan + Sort | Bitmap Scan + Sort | `IDX_follows_follower_created` |
+| 7 | Chat list (membership query) | 0.248 | 0.225 | Bitmap Scan, correlated COUNT | Same plan (unchanged) | `IDX_chat_participants_userId_active`, `IDX_messages_chatId_seq` (both pre-existing, not part of this migration) |
+
+Notes on the table:
+
+- Feed: 9.1 ms to 0.54 ms. The old `authorId = $1 OR authorId IN (…)` filter could not drive an index. The LATERAL fan-out reads at most `LIMIT` rows per author from `IDX_posts_feed` and merges 313 rows with a top-N sort. The cursor page (same shape, `Index Cond` adds the `(createdAt, id)` row comparison) ran in 0.365 ms; see `impl/run/B3-L-feedsql.md`.
+- Following page (6): the planner still picks a Bitmap Scan plus a quicksort of 23 rows over walking `IDX_follows_follower_created` in order, because the viewer follows only 23 authors. The new index is used and the time is unchanged (0.04 ms); the gain shows with larger follow counts.
+- Chat list (7): no new index is needed. Its two indexes existed before the migration, and `chats` is read with a Seq Scan because the table has 256 rows, where a seq scan is cheaper than an index.
+- Roots (2): the left join reads `user_profiles` with a Seq Scan and hash (1,445 rows, 43 buffers). It is cheap at this size and not part of the migration.
+
+#### After 1: Feed ids query
+
+```
+Limit  (cost=486.92..486.97 rows=21 width=56) (actual time=0.468..0.471 rows=21 loops=1)
+  Buffers: shared hit=80
+  ->  Sort  (cost=486.92..488.12 rows=480 width=56) (actual time=0.467..0.469 rows=21 loops=1)
+        Sort Key: p."createdAt" DESC, p.id DESC
+        Sort Method: top-N heapsort  Memory: 30kB
+        Buffers: shared hit=80
+        ->  Nested Loop  (cost=62.55..473.98 rows=480 width=56) (actual time=0.137..0.398 rows=313 loops=1)
+              Buffers: shared hit=74
+              ->  HashAggregate  (cost=62.26..62.50 rows=24 width=16) (actual time=0.074..0.077 rows=24 loops=1)
+                    Group Key: ('d5e7628e-f352-5aa1-a3a5-10213a350887'::uuid)
+                    Batches: 1  Memory Usage: 24kB
+                    Buffers: shared hit=23
+                    ->  Append  (cost=0.00..62.20 rows=24 width=16) (actual time=0.001..0.068 rows=24 loops=1)
+                          Buffers: shared hit=23
+                          ->  Result  (cost=0.00..0.01 rows=1 width=16) (actual time=0.001..0.001 rows=1 loops=1)
+                          ->  Bitmap Heap Scan on follows f  (cost=4.46..61.83 rows=23 width=16) (actual time=0.022..0.065 rows=23 loops=1)
+                                Recheck Cond: ("followerId" = 'd5e7628e-f352-5aa1-a3a5-10213a350887'::uuid)
+                                Filter: ("deletedAt" IS NULL)
+                                Heap Blocks: exact=21
+                                Buffers: shared hit=23
+                                ->  Bitmap Index Scan on "IDX_follows_follower_created"  (cost=0.00..4.46 rows=23 width=0) (actual time=0.011..0.012 rows=23 loops=1)
+                                      Index Cond: ("followerId" = 'd5e7628e-f352-5aa1-a3a5-10213a350887'::uuid)
+                                      Buffers: shared hit=2
+              ->  Limit  (cost=0.29..16.63 rows=20 width=24) (actual time=0.003..0.005 rows=13 loops=24)
+                    Buffers: shared hit=51
+                    ->  Index Only Scan using "IDX_posts_feed" on posts p  (cost=0.29..16.63 rows=20 width=24) (actual time=0.003..0.004 rows=13 loops=24)
+                          Index Cond: ("authorId" = ('d5e7628e-f352-5aa1-a3a5-10213a350887'::uuid))
+                          Heap Fetches: 0
+                          Buffers: shared hit=51
+Planning Time: 0.591 ms
+Execution Time: 0.536 ms
+```
+
+#### After 2: Root comments page
+
+```
+Limit  (cost=141.03..141.07 rows=16 width=369) (actual time=0.442..0.445 rows=17 loops=1)
+  Buffers: shared hit=63
+  ->  Sort  (cost=141.03..141.07 rows=16 width=369) (actual time=0.442..0.443 rows=17 loops=1)
+        Sort Key: c."createdAt" DESC, c.id DESC
+        Sort Method: quicksort  Memory: 32kB
+        Buffers: shared hit=63
+        ->  Hash Left Join  (cost=80.73..140.71 rows=16 width=369) (actual time=0.385..0.431 rows=17 loops=1)
+              Hash Cond: (c."authorId" = a."authUserId")
+              Buffers: shared hit=63
+              ->  Bitmap Heap Scan on comments c  (cost=4.54..64.48 rows=16 width=152) (actual time=0.022..0.063 rows=17 loops=1)
+                    Recheck Cond: (("postId" = '738b5b09-dfd6-5064-a578-13a036e011c4'::uuid) AND ("parentId" IS NULL) AND ("deletedAt" IS NULL))
+                    Heap Blocks: exact=17
+                    Buffers: shared hit=20
+                    ->  Bitmap Index Scan on "IDX_comments_post_roots"  (cost=0.00..4.54 rows=16 width=0) (actual time=0.016..0.016 rows=17 loops=1)
+                          Index Cond: ("postId" = '738b5b09-dfd6-5064-a578-13a036e011c4'::uuid)
+                          Buffers: shared hit=3
+              ->  Hash  (cost=57.75..57.75 rows=1475 width=217) (actual time=0.354..0.354 rows=1445 loops=1)
+                    Buckets: 2048  Batches: 1  Memory Usage: 222kB
+                    Buffers: shared hit=43
+                    ->  Seq Scan on user_profiles a  (cost=0.00..57.75 rows=1475 width=217) (actual time=0.006..0.186 rows=1445 loops=1)
+                          Filter: ("deletedAt" IS NULL)
+                          Buffers: shared hit=43
+Planning Time: 0.534 ms
+Execution Time: 0.470 ms
+```
+
+#### After 3: Replies of roots
+
+```
+CTE Scan on thread  (cost=12670.70..12728.34 rows=2882 width=16) (actual time=0.055..0.097 rows=8 loops=1)
+  Buffers: shared hit=57
+  CTE thread
+    ->  Recursive Union  (cost=69.11..12670.70 rows=2882 width=16) (actual time=0.054..0.095 rows=8 loops=1)
+          Buffers: shared hit=57
+          ->  Bitmap Heap Scan on comments  (cost=69.11..150.56 rows=22 width=16) (actual time=0.054..0.067 rows=8 loops=1)
+                Recheck Cond: (("parentId" = ANY ('{<17 root ids>}'::uuid[])) AND ("deletedAt" IS NULL))
+                Heap Blocks: exact=7
+                Buffers: shared hit=41
+                ->  Bitmap Index Scan on "IDX_comments_parent"  (cost=0.00..69.06 rows=22 width=0) (actual time=0.049..0.049 rows=8 loops=1)
+                      Index Cond: ("parentId" = ANY ('{<17 root ids>}'::uuid[]))
+                      Buffers: shared hit=34
+          ->  Nested Loop  (cost=0.29..1246.25 rows=286 width=16) (actual time=0.024..0.025 rows=0 loops=1)
+                Buffers: shared hit=16
+                ->  WorkTable Scan on thread t  (cost=0.00..4.40 rows=220 width=16) (actual time=0.000..0.001 rows=8 loops=1)
+                ->  Index Scan using "IDX_comments_parent" on comments c  (cost=0.29..5.63 rows=1 width=32) (actual time=0.003..0.003 rows=0 loops=8)
+                      Index Cond: ("parentId" = t.id)
+                      Buffers: shared hit=16
+Planning Time: 0.087 ms
+Execution Time: 0.128 ms
+```
+
+#### After 4: Profile search
+
+`UserProfileRepository.searchByUsername`, prefix `perf01`, viewer excluded, `LIMIT 20`: `PREPARE srch(text, uuid, bigint)`, then `EXECUTE srch('perf01', viewer, 20)` (custom plan, bound values visible to the planner).
+
+```
+Limit  (cost=24.10..24.11 rows=7 width=217) (actual time=0.086..0.088 rows=20 loops=1)
+  Buffers: shared hit=8
+  ->  Sort  (cost=24.10..24.11 rows=7 width=217) (actual time=0.086..0.087 rows=20 loops=1)
+        Sort Key: username
+        Sort Method: top-N heapsort  Memory: 28kB
+        Buffers: shared hit=8
+        ->  Bitmap Heap Scan on user_profiles p  (cost=4.35..24.00 rows=7 width=217) (actual time=0.016..0.048 rows=99 loops=1)
+              Filter: (("deletedAt" IS NULL) AND ("authUserId" <> 'd5e7628e-f352-5aa1-a3a5-10213a350887'::uuid) AND (lower((username)::text) ~~ 'perf01%'::text))
+              Rows Removed by Filter: 1
+              Heap Blocks: exact=3
+              Buffers: shared hit=5
+              ->  Bitmap Index Scan on "IDX_user_profiles_username_lower"  (cost=0.00..4.35 rows=7 width=0) (actual time=0.011..0.011 rows=100 loops=1)
+                    Index Cond: ((lower((username)::text) ~>=~ 'perf01'::text) AND (lower((username)::text) ~<~ 'perf02'::text))
+                    Buffers: shared hit=2
+Planning Time: 0.146 ms
+Execution Time: 0.097 ms
+```
+
+Generic plan (`SET LOCAL plan_cache_mode = force_generic_plan`, same statement):
+
+```
+Limit  (cost=0.28..21.69 rows=1 width=217) (actual time=0.381..0.393 rows=20 loops=1)
+  Buffers: shared hit=150
+  ->  Index Scan using "UQ_7bdaa0714f4c1087a926a2d8369" on user_profiles p  (cost=0.28..150.20 rows=7 width=217) (actual time=0.381..0.391 rows=20 loops=1)
+        Filter: (("deletedAt" IS NULL) AND ("authUserId" <> $2) AND (lower((username)::text) ~~ like_escape((lower($1) || '%'::text), '\'::text)))
+        Rows Removed by Filter: 542
+        Buffers: shared hit=150
+Planning Time: 0.042 ms
+Execution Time: 0.399 ms
+```
+
+`IDX_user_profiles_username_lower` is used only in custom plans. In a generic plan the pattern is `like_escape(lower($1) || '%', '\')`, unknown at plan time, so the planner cannot derive the prefix range and falls back to walking `UQ_…username` in order with a filter (0.399 ms here, the same as Before). TypeORM through node-pg uses the unnamed extended-protocol statement, which Postgres plans with the bound values, so the app gets the custom plan. A named, reused prepared statement (for example through a pooler that keeps named statements) could switch to the generic plan after five executions, but only when it is not costlier than the custom plan.
+
+#### After 5: Followers page
+
+```
+Limit  (cost=0.29..44.04 rows=21 width=72) (actual time=0.008..0.015 rows=21 loops=1)
+  Buffers: shared hit=15
+  ->  Index Scan using "IDX_follows_following_created" on follows f  (cost=0.29..450.35 rows=216 width=72) (actual time=0.008..0.014 rows=21 loops=1)
+        Index Cond: ("followingId" = '6ea8214a-c5ff-5b82-9cc3-ac0883069a92'::uuid)
+        Filter: ("deletedAt" IS NULL)
+        Buffers: shared hit=15
+Planning Time: 0.054 ms
+Execution Time: 0.021 ms
+```
+
+#### After 6: Following page
+
+```
+Limit  (cost=62.35..62.40 rows=21 width=72) (actual time=0.029..0.031 rows=21 loops=1)
+  Buffers: shared hit=23
+  ->  Sort  (cost=62.35..62.41 rows=23 width=72) (actual time=0.029..0.030 rows=21 loops=1)
+        Sort Key: "createdAt" DESC, id DESC
+        Sort Method: quicksort  Memory: 28kB
+        Buffers: shared hit=23
+        ->  Bitmap Heap Scan on follows f  (cost=4.46..61.83 rows=23 width=72) (actual time=0.008..0.025 rows=23 loops=1)
+              Recheck Cond: ("followerId" = 'd5e7628e-f352-5aa1-a3a5-10213a350887'::uuid)
+              Filter: ("deletedAt" IS NULL)
+              Heap Blocks: exact=21
+              Buffers: shared hit=23
+              ->  Bitmap Index Scan on "IDX_follows_follower_created"  (cost=0.00..4.46 rows=23 width=0) (actual time=0.005..0.005 rows=23 loops=1)
+                    Index Cond: ("followerId" = 'd5e7628e-f352-5aa1-a3a5-10213a350887'::uuid)
+                    Buffers: shared hit=2
+Planning Time: 0.031 ms
+Execution Time: 0.038 ms
+```
+
+#### After 7: Chat list (membership query with the unread `COUNT`)
+
+```
+Limit  (cost=28.23..197.30 rows=7 width=48) (actual time=0.117..0.166 rows=7 loops=1)
+  Buffers: shared hit=35
+  ->  Result  (cost=28.23..197.30 rows=7 width=48) (actual time=0.117..0.165 rows=7 loops=1)
+        Buffers: shared hit=35
+        ->  Sort  (cost=28.23..28.25 rows=7 width=72) (actual time=0.098..0.099 rows=7 loops=1)
+              Sort Key: c."lastActivityAt" DESC, p."chatId" DESC
+              Sort Method: quicksort  Memory: 25kB
+              Buffers: shared hit=14
+              ->  Hash Join  (cost=18.89..28.13 rows=7 width=72) (actual time=0.059..0.094 rows=7 loops=1)
+                    Hash Cond: (c.id = p."chatId")
+                    Buffers: shared hit=14
+                    ->  Seq Scan on chats c  (cost=0.00..8.56 rows=256 width=24) (actual time=0.002..0.043 rows=256 loops=1)
+                          Filter: ("deletedAt" IS NULL)
+                          Buffers: shared hit=6
+                    ->  Hash  (cost=18.80..18.80 rows=7 width=48) (actual time=0.027..0.027 rows=7 loops=1)
+                          Buckets: 1024  Batches: 1  Memory Usage: 9kB
+                          Buffers: shared hit=8
+                          ->  Bitmap Heap Scan on chat_participants p  (cost=4.33..18.80 rows=7 width=48) (actual time=0.016..0.023 rows=7 loops=1)
+                                Recheck Cond: (("userId" = '305ca208-3c86-58fa-b58e-6e692ab69afc'::uuid) AND ("leftAt" IS NULL))
+                                Heap Blocks: exact=6
+                                Buffers: shared hit=8
+                                ->  Bitmap Index Scan on "IDX_chat_participants_userId_active"  (cost=0.00..4.33 rows=7 width=0) (actual time=0.012..0.012 rows=7 loops=1)
+                                      Index Cond: ("userId" = '305ca208-3c86-58fa-b58e-6e692ab69afc'::uuid)
+                                      Buffers: shared hit=2
+        SubPlan 1
+          ->  Aggregate  (cost=24.13..24.14 rows=1 width=8) (actual time=0.009..0.009 rows=1 loops=7)
+                Buffers: shared hit=21
+                ->  Bitmap Heap Scan on messages m  (cost=4.35..24.12 rows=6 width=0) (actual time=0.007..0.008 rows=3 loops=7)
+                      Recheck Cond: (("chatId" = p."chatId") AND (seq > GREATEST(p."lastReadSeq", p."joinedSeq")))
+                      Filter: (("deletedAt" IS NULL) AND ("authorId" <> p."userId") AND ((kind)::text = 'USER'::text))
+                      Heap Blocks: exact=7
+                      Buffers: shared hit=21
+                      ->  Bitmap Index Scan on "IDX_messages_chatId_seq"  (cost=0.00..4.34 rows=6 width=0) (actual time=0.004..0.004 rows=3 loops=7)
+                            Index Cond: (("chatId" = p."chatId") AND (seq > GREATEST(p."lastReadSeq", p."joinedSeq")))
+                            Buffers: shared hit=14
+Planning Time: 0.523 ms
+Execution Time: 0.225 ms
+```

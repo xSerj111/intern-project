@@ -61,10 +61,13 @@ export class PostsController {
     @CurrentUser('sub') userId: string,
     @Body() createPostDto: CreatePostDto,
   ): Promise<PostResponseDto> {
-    return this.toResponse(
-      await this.postsService.createPost(userId, createPostDto),
-      userId,
-    );
+    const post = await this.postsService.createPost(userId, createPostDto);
+    // A new post has no likes or comments yet: skip the enrichment queries.
+    return new PostResponseDto(post, {
+      likeCount: 0,
+      commentCount: 0,
+      likedByMe: false,
+    });
   }
 
   @Get('feed')

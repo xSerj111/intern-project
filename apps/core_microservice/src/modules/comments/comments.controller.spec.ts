@@ -29,7 +29,7 @@ describe('CommentsController', () => {
       new Map([[comment.id, { likeCount: 2, likedByMe: true }]]),
     );
 
-    commentsService.getAuthors.mockResolvedValue(
+    commentsService.getAuthors.mockReturnValue(
       new Map([
         [
           comment.authorId,
@@ -103,7 +103,7 @@ describe('CommentsController', () => {
     });
 
     it('sets author to null when the profile no longer exists', async () => {
-      commentsService.getAuthors.mockResolvedValue(new Map());
+      commentsService.getAuthors.mockReturnValue(new Map());
 
       const response = await controller.getCommentsByPost(
         undefined,

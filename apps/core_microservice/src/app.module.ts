@@ -44,6 +44,7 @@ import { NotificationsRelayModule } from './modules/notifications-relay/notifica
         // Query logging feeds the per-request query counter; the logger prints nothing for queries.
         logging: ['query', 'error'] as ('query' | 'error')[],
         logger: new TypeOrmPerfLogger(),
+        maxQueryExecutionTime: config.slowQueryMs,
       }),
     }),
     MessagingModule,

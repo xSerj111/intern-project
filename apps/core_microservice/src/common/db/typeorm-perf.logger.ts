@@ -1,6 +1,9 @@
+import { createHash } from 'crypto';
 import { Logger as TypeOrmLogger } from 'typeorm';
 import { Logger, WinstonLogger } from '@repo/shared';
 import { incrementQueryCount } from './query-context';
+
+const MAX_QUERY_LENGTH = 2048;
 
 /**
  * TypeORM logger that counts queries per request and prints nothing for them.
@@ -19,8 +22,20 @@ export class TypeOrmPerfLogger implements TypeOrmLogger {
     this.logger.error(`Query failed: ${message}`, { props: { query } });
   }
 
-  // Filled in T060 (slow-query logging).
-  logQuerySlow(): void {}
+  // Deliberately takes no `parameters` argument (SC-012): it is never read.
+  logQuerySlow(time: number, query: string): void {
+    const queryId = createHash('sha1')
+      .update(query.replace(/\s+/g, ' ').trim())
+      .digest('hex')
+      .slice(0, 12);
+    this.logger.warn('Slow query', {
+      props: {
+        durationMs: time,
+        queryId,
+        query: query.slice(0, MAX_QUERY_LENGTH),
+      },
+    });
+  }
 
   logSchemaBuild(message: string): void {
     this.logger.debug(message);
