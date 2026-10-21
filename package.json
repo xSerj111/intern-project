@@ -19,7 +19,8 @@
     "db:migrate": "turbo run db:migrate",
     "db:seed": "turbo run db:seed",
     "perf:baseline": "MODE=measure bash apps/core_microservice/test/load/run-k6.sh",
-    "perf:compare": "ts-node apps/core_microservice/test/load/compare-reports.ts"
+    "perf:compare": "ts-node apps/core_microservice/test/load/compare-reports.ts",
+    "perf": "MODE=gate bash apps/core_microservice/test/load/run-k6.sh && npx ts-node apps/core_microservice/test/load/group-fanout.ts --members 100 --messages 50"
   },
   "devDependencies": {
     "@types/jest": "^30.0.0",

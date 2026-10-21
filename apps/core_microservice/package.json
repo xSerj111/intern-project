@@ -22,7 +22,8 @@
     "migration:generate": "npx typeorm-ts-node-commonjs migration:generate -d ./data-source.ts",
     "migration:run": "npx typeorm-ts-node-commonjs migration:run -d ./data-source.ts",
     "migration:revert": "npx typeorm-ts-node-commonjs migration:revert -d ./data-source.ts",
-    "db:seed": "ts-node seed/seed.ts"
+    "db:seed": "ts-node seed/seed.ts",
+    "perf:upload-memory": "ts-node test/load/upload-memory.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1102.0",
