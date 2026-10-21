@@ -228,6 +228,33 @@ describe('ProfileSummaryService', () => {
       expect(logger.warn).toHaveBeenCalled();
     });
 
+    it('logs the stringified reason when the cache rejects with a non-Error', async () => {
+      cache.getCounts.mockRejectedValue('redis gone');
+
+      await service.getSummary(TARGET, VIEWER);
+
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('read counts'),
+        { props: { authUserId: TARGET, error: 'redis gone' } },
+      );
+    });
+
+    it('serves a profile with null bio and avatar from the DB and caches nulls', async () => {
+      profiles.getProfileByAuthUserId.mockResolvedValue(
+        fakeUserProfile({
+          authUserId: TARGET,
+          bio: undefined,
+          avatarUrl: undefined,
+        }),
+      );
+
+      await service.getSummary(TARGET, VIEWER);
+
+      expect(cache.setProfile).toHaveBeenCalledWith(
+        expect.objectContaining({ bio: null, avatarUrl: null }),
+      );
+    });
+
     it('treats a corrupt cached profile as a miss', async () => {
       cache.getProfile.mockResolvedValue({
         ...cachedProfile,

@@ -1,5 +1,6 @@
 import { signedUrlKey } from '../../../../common/cache/cache-keys';
 import type { AssetsService } from '../../../assets/assets.service';
+import type { ChatTransaction } from '../../domain/interfaces/chat-repository.port';
 import {
   ATTACHMENT_URL_TTL_SECONDS,
   type PresignableAttachment,
@@ -121,21 +122,147 @@ describe('AttachmentStorageAdapter signed-link cache', () => {
   });
 });
 
-describe('AttachmentStorageAdapter.findAssets', () => {
-  it('returns only READY assets', async () => {
-    const assets = {
-      findByIds: jest.fn().mockResolvedValue([
-        { id: 'a', status: 'READY', visibility: 'PRIVATE' },
-        { id: 'b', status: 'PENDING', visibility: 'PRIVATE' },
-      ]),
-    };
-    const adapter = new AttachmentStorageAdapter(
+describe('AttachmentStorageAdapter storage operations', () => {
+  const assets = {
+    findByIds: jest.fn(),
+    softDeleteMany: jest.fn(),
+    presignGet: jest.fn(),
+    deleteObject: jest.fn(),
+  };
+  const cache = { get: jest.fn(), set: jest.fn(), del: jest.fn() };
+  const tx = {} as ChatTransaction;
+  let adapter: AttachmentStorageAdapter;
+
+  beforeEach(() => {
+    jest.resetAllMocks();
+    cache.get.mockResolvedValue(null);
+    adapter = new AttachmentStorageAdapter(
       assets as unknown as AssetsService,
-      { get: jest.fn(), set: jest.fn(), del: jest.fn() },
+      cache,
     );
+  });
 
-    const found = await adapter.findAssets(['a', 'b']);
+  describe('findAssets', () => {
+    it('returns only READY assets, mapped to the stored shape', async () => {
+      assets.findByIds.mockResolvedValue([
+        {
+          id: 'a',
+          uploaderId: 'u1',
+          status: 'READY',
+          visibility: 'PRIVATE',
+          storageKey: 'k/a',
+          mimeType: 'image/png',
+          size: 10,
+          originalName: 'a.png',
+          extra: 'dropped',
+        },
+        { id: 'b', status: 'PENDING', visibility: 'PRIVATE' },
+      ]);
 
-    expect(found.map((a) => a.id)).toEqual(['a']);
+      const found = await adapter.findAssets(['a', 'b']);
+
+      expect(found).toEqual([
+        {
+          id: 'a',
+          uploaderId: 'u1',
+          visibility: 'PRIVATE',
+          storageKey: 'k/a',
+          mimeType: 'image/png',
+          size: 10,
+          originalName: 'a.png',
+        },
+      ]);
+    });
+
+    it('forwards the transaction to the assets service', async () => {
+      assets.findByIds.mockResolvedValue([]);
+
+      await adapter.findAssets(['a'], tx);
+
+      expect(assets.findByIds).toHaveBeenCalledWith(['a'], tx);
+    });
+
+    it('skips the lookup for an empty id list', async () => {
+      await expect(adapter.findAssets([])).resolves.toEqual([]);
+      expect(assets.findByIds).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('softDeleteAssets', () => {
+    it('soft-deletes in the given transaction', async () => {
+      assets.softDeleteMany.mockResolvedValue(undefined);
+
+      await adapter.softDeleteAssets(['a', 'b'], tx);
+
+      expect(assets.softDeleteMany).toHaveBeenCalledWith(['a', 'b'], tx);
+    });
+
+    it('does nothing for an empty id list', async () => {
+      await adapter.softDeleteAssets([], tx);
+
+      expect(assets.softDeleteMany).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('presign', () => {
+    it('falls back to a generic download name for unnamed files', async () => {
+      assets.presignGet.mockResolvedValue('https://signed/x');
+      cache.set.mockResolvedValue(undefined);
+
+      await adapter.presign({ ...doc, originalName: null });
+
+      expect(assets.presignGet).toHaveBeenCalledWith('chat/u/asset-2', {
+        ttlSeconds: ATTACHMENT_URL_TTL_SECONDS,
+        downloadName: 'attachment',
+      });
+    });
+
+    it('treats video as inline media', async () => {
+      assets.presignGet.mockResolvedValue('https://signed/v');
+      cache.set.mockResolvedValue(undefined);
+
+      await adapter.presign({ ...image, mimeType: 'video/mp4' });
+
+      expect(cache.get).toHaveBeenCalledWith(signedUrlKey('asset-1', 'inline'));
+      expect(assets.presignGet).toHaveBeenCalledWith(
+        'chat/u/asset-1',
+        expect.objectContaining({ downloadName: undefined }),
+      );
+    });
+
+    it('propagates a signing failure without caching', async () => {
+      assets.presignGet.mockRejectedValue(new Error('s3 down'));
+
+      await expect(adapter.presign(image)).rejects.toThrow('s3 down');
+      expect(cache.set).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('deleteObjects', () => {
+    it('deletes every key', async () => {
+      assets.deleteObject.mockResolvedValue(undefined);
+
+      await adapter.deleteObjects(['k1', 'k2']);
+
+      expect(assets.deleteObject).toHaveBeenCalledWith('k1');
+      expect(assets.deleteObject).toHaveBeenCalledWith('k2');
+    });
+
+    it('is a no-op for an empty key list', async () => {
+      await expect(adapter.deleteObjects([])).resolves.toBeUndefined();
+      expect(assets.deleteObject).not.toHaveBeenCalled();
+    });
+
+    it('attempts all keys, then reports the failed ones', async () => {
+      assets.deleteObject
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new Error('gone'))
+        .mockResolvedValueOnce(undefined);
+
+      await expect(adapter.deleteObjects(['k1', 'k2', 'k3'])).rejects.toThrow(
+        'Failed to delete 1 of 3 objects: k2',
+      );
+      expect(assets.deleteObject).toHaveBeenCalledTimes(3);
+    });
   });
 });

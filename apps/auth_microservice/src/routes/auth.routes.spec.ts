@@ -6,7 +6,13 @@ process.env.INTERNAL_API_TOKEN = 'x'.repeat(32);
 import express, { Application } from 'express';
 import cookieParser from 'cookie-parser';
 import request from 'supertest';
+import bcrypt from 'bcrypt';
+import type { DataSource } from 'typeorm';
+import type { Redis } from 'ioredis';
 import { UnauthorizedError } from '@repo/shared';
+import type { WinstonLogger } from '@repo/shared';
+import { createApp } from '../app';
+import { RedisService } from '../infrastructure/cache/redis.service';
 import { createAuthRouter, REFRESH_COOKIE } from './auth.routes';
 import { AuthService, LoginResult } from '../services/auth.service';
 import { errorHandler } from '../middleware/error-handler.middleware';
@@ -128,5 +134,106 @@ describe('auth routes', () => {
 
     expect(authService.logout).toHaveBeenCalledWith(undefined, undefined);
     expect(refreshCookieOf(res)).toContain(`${REFRESH_COOKIE}=;`);
+  });
+});
+
+describe('auth routes through createApp (mocked ports)', () => {
+  const ORIGIN = 'http://localhost:3000';
+  let app: Application;
+  let setWithExpiry: jest.Mock;
+
+  beforeEach(() => {
+    const storedUser = {
+      id: 'user-1',
+      email: 'a@b.com',
+      passwordHash: bcrypt.hashSync('password123', 4),
+      googleId: null,
+      isEmailVerified: true,
+    };
+    const dataSource = {
+      getRepository: () => ({
+        metadata: { tableName: 'auth_users' },
+        findOne: jest.fn().mockResolvedValue(storedUser),
+      }),
+    } as unknown as DataSource;
+    const logger = {
+      debug: jest.fn(),
+      info: jest.fn(),
+      warn: jest.fn(),
+      error: jest.fn(),
+    } as unknown as WinstonLogger;
+    setWithExpiry = jest.fn().mockResolvedValue(undefined);
+    app = createApp(
+      dataSource,
+      logger,
+      { setWithExpiry } as unknown as RedisService,
+      { publish: jest.fn() } as unknown as Redis,
+    );
+  });
+
+  const login = (origin?: string) => {
+    const req = request(app)
+      .post('/auth/login')
+      .send({ email: 'a@b.com', password: 'password123' });
+    return origin ? req.set('Origin', origin) : req;
+  };
+
+  it('the login body is exactly { accessToken, user } and the user has no password hash', async () => {
+    const res = await login().expect(200);
+
+    const body = res.body as { accessToken: string; user: object };
+    expect(Object.keys(body).sort()).toEqual(['accessToken', 'user']);
+    expect(typeof body.accessToken).toBe('string');
+    expect(body.user).toMatchObject({ id: 'user-1', email: 'a@b.com' });
+    expect(body.user).not.toHaveProperty('passwordHash');
+  });
+
+  it('login sets a signed httpOnly refresh_token cookie on path /auth', async () => {
+    const res = await login().expect(200);
+
+    const cookie = refreshCookieOf(res);
+    expect(cookie).toMatch(/^refresh_token=[\w-]+\.[\w-]+\.[\w-]+;/);
+    expect(cookie).toContain('Path=/auth');
+    expect(cookie).toContain('HttpOnly');
+    expect(setWithExpiry).toHaveBeenCalled();
+  });
+
+  it('a wrong password is a 401 with no cookie and no tokens', async () => {
+    const res = await request(app)
+      .post('/auth/login')
+      .send({ email: 'a@b.com', password: 'wrong-password' })
+      .expect(401);
+
+    expect(refreshCookieOf(res)).toBeUndefined();
+    expect(res.body).not.toHaveProperty('accessToken');
+  });
+
+  it('allows credentials for an origin listed in AUTH_ALLOWED_ORIGINS on the real response', async () => {
+    const res = await login(ORIGIN).expect(200);
+
+    expect(res.headers['access-control-allow-origin']).toBe(ORIGIN);
+    expect(res.headers['access-control-allow-credentials']).toBe('true');
+  });
+
+  it('preflight from an allowed origin permits credentials and the Authorization header', async () => {
+    const res = await request(app)
+      .options('/auth/refresh')
+      .set('Origin', ORIGIN)
+      .set('Access-Control-Request-Method', 'POST')
+      .set('Access-Control-Request-Headers', 'authorization,content-type');
+
+    expect(res.headers['access-control-allow-origin']).toBe(ORIGIN);
+    expect(res.headers['access-control-allow-credentials']).toBe('true');
+    expect(res.headers['access-control-allow-headers']).toMatch(/Authorization/i);
+  });
+
+  it('gives an origin outside the list no CORS grant', async () => {
+    const res = await login('http://evil.test').expect(200);
+
+    expect(res.headers['access-control-allow-origin']).toBeUndefined();
+  });
+
+  it('refresh without the cookie is a 401 through the full app', async () => {
+    await request(app).post('/auth/refresh').expect(401);
   });
 });

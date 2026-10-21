@@ -8,8 +8,6 @@ import { AuthService } from './auth.service';
 import { UsersService } from './users.service';
 import { AuthUser } from '../domain/entities/auth-user.entity';
 import { ICacheService } from '../domain/interfaces/cache.service';
-import { ICryptoService } from '../domain/interfaces/crypto.service.interface';
-import { IOAuthService } from '../domain/interfaces/oauth.service.interface';
 import { JwtService } from '../infrastructure/jwt/jwt.service';
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env';
@@ -55,27 +53,35 @@ describe('AuthService', () => {
   let service: AuthService;
   let publisher: { publish: jest.Mock };
   let logger: { debug: jest.Mock; warn: jest.Mock; error: jest.Mock; info: jest.Mock };
+  let usersService: {
+    findByEmailWithPassword: jest.Mock;
+    getUserById: jest.Mock;
+    findOrCreateByGoogle: jest.Mock;
+  };
+  let cryptoService: { hash: jest.Mock; compare: jest.Mock };
+  let oauthService: { verifyIdToken: jest.Mock };
 
   beforeEach(() => {
     cache = new FakeCache();
     jwtService = new JwtService();
     logger = { debug: jest.fn(), warn: jest.fn(), error: jest.fn(), info: jest.fn() };
 
-    const usersService = {
+    usersService = {
       findByEmailWithPassword: jest.fn().mockResolvedValue(user),
       getUserById: jest.fn().mockResolvedValue(user),
-    } as unknown as UsersService;
-    const cryptoService: ICryptoService = {
+      findOrCreateByGoogle: jest.fn().mockResolvedValue(user),
+    };
+    cryptoService = {
       hash: jest.fn(),
       compare: jest.fn().mockResolvedValue(true),
     };
-    const oauthService: IOAuthService = { verifyIdToken: jest.fn() };
+    oauthService = { verifyIdToken: jest.fn() };
     publisher = {
       publish: jest.fn().mockImplementation(async () => {}),
     };
 
     service = new AuthService(
-      usersService,
+      usersService as unknown as UsersService,
       cache,
       logger as unknown as WinstonLogger,
       cryptoService,
@@ -245,5 +251,267 @@ describe('AuthService', () => {
     );
 
     await expect(service.verifyToken(token)).rejects.toBeInstanceOf(UnauthorizedError);
+  });
+
+  describe('login failures', () => {
+    it('rejects an unknown email', async () => {
+      usersService.findByEmailWithPassword.mockResolvedValue(null);
+
+      await expect(service.login('x@y.com', 'pw', ctx)).rejects.toThrow(
+        'Invalid email or password',
+      );
+      expect(cryptoService.compare).not.toHaveBeenCalled();
+    });
+
+    it('rejects a Google-only account that has no password hash', async () => {
+      usersService.findByEmailWithPassword.mockResolvedValue({
+        ...user,
+        passwordHash: null,
+      });
+
+      await expect(service.login(user.email, 'pw', ctx)).rejects.toBeInstanceOf(
+        UnauthorizedError,
+      );
+      expect(cache.store.size).toBe(0);
+    });
+
+    it('rejects a wrong password without creating a session', async () => {
+      cryptoService.compare.mockResolvedValue(false);
+
+      await expect(service.login(user.email, 'bad', ctx)).rejects.toThrow(
+        'Invalid email or password',
+      );
+      expect(cryptoService.compare).toHaveBeenCalledWith('bad', user.passwordHash);
+      expect(cache.store.size).toBe(0);
+    });
+
+    it('never returns the password hash', async () => {
+      const result = await service.login(user.email, 'password', ctx);
+
+      expect(result.user).not.toHaveProperty('passwordHash');
+      expect(result.user).toMatchObject({ id: user.id, email: user.email });
+    });
+  });
+
+  describe('loginWithGoogle', () => {
+    const googlePayload = { email: 'g@gmail.com', sub: 'google-sub-1' };
+
+    beforeEach(() => {
+      oauthService.verifyIdToken.mockResolvedValue(googlePayload);
+    });
+
+    it('creates a new user and returns a session for them', async () => {
+      const created = {
+        id: 'user-new',
+        email: googlePayload.email,
+        googleId: googlePayload.sub,
+        passwordHash: null,
+      } as unknown as AuthUser;
+      usersService.findOrCreateByGoogle.mockResolvedValue(created);
+
+      const result = await service.loginWithGoogle('id-token', ctx);
+
+      expect(oauthService.verifyIdToken).toHaveBeenCalledWith('id-token');
+      expect(usersService.findOrCreateByGoogle).toHaveBeenCalledWith(
+        googlePayload.email,
+        googlePayload.sub,
+      );
+      expect(result.user).toMatchObject({ id: 'user-new', email: googlePayload.email });
+      expect(result.user).not.toHaveProperty('passwordHash');
+      expect(cache.store.has(RedisKeys.refreshSession(jtiOf(result.refreshToken)))).toBe(
+        true,
+      );
+    });
+
+    it('logs in an existing Google user', async () => {
+      const existing = {
+        id: 'user-google',
+        email: googlePayload.email,
+        googleId: googlePayload.sub,
+      } as unknown as AuthUser;
+      usersService.findOrCreateByGoogle.mockResolvedValue(existing);
+
+      const result = await service.loginWithGoogle('id-token', ctx);
+
+      expect((jwt.decode(result.accessToken) as { sub: string }).sub).toBe('user-google');
+      expect(sidOf(result.accessToken)).toBe(sidOf(result.refreshToken));
+    });
+
+    it('logs in a password account linked to the Google identity', async () => {
+      const linked = {
+        ...user,
+        email: googlePayload.email,
+        googleId: googlePayload.sub,
+      } as AuthUser;
+      usersService.findOrCreateByGoogle.mockResolvedValue(linked);
+
+      const result = await service.loginWithGoogle('id-token', ctx);
+
+      expect(result.user).toMatchObject({ id: user.id, googleId: googlePayload.sub });
+      expect(result.user).not.toHaveProperty('passwordHash');
+    });
+
+    it('maps a verification failure to UnauthorizedError', async () => {
+      oauthService.verifyIdToken.mockRejectedValue(new Error('bad signature'));
+
+      await expect(service.loginWithGoogle('bad', ctx)).rejects.toThrow(
+        'Invalid Google token',
+      );
+      expect(usersService.findOrCreateByGoogle).not.toHaveBeenCalled();
+      expect(logger.error).toHaveBeenCalled();
+    });
+
+    it('maps a user lookup failure to UnauthorizedError', async () => {
+      usersService.findOrCreateByGoogle.mockRejectedValue(new Error('db down'));
+
+      await expect(service.loginWithGoogle('id-token', ctx)).rejects.toBeInstanceOf(
+        UnauthorizedError,
+      );
+      expect(cache.store.size).toBe(0);
+    });
+  });
+
+  describe('verifyToken', () => {
+    it('rejects a token signed with the wrong secret', async () => {
+      const token = jwt.sign({ sub: user.id }, 'wrong-secret', { jwtid: 'j1' });
+
+      await expect(service.verifyToken(token)).rejects.toThrow(
+        'Invalid or expired access token',
+      );
+    });
+
+    it('propagates a cache failure (fail closed)', async () => {
+      const { accessToken } = await service.login(user.email, 'password', ctx);
+      jest.spyOn(cache, 'has').mockRejectedValue(new Error('redis down'));
+
+      await expect(service.verifyToken(accessToken)).rejects.toThrow('redis down');
+    });
+  });
+
+  describe('refreshToken failures', () => {
+    const signRefresh = (
+      payload: object,
+      opts: jwt.SignOptions = {},
+      secret = env.jwt.refreshTokenSecret,
+    ) => jwt.sign(payload, secret, { subject: user.id, jwtid: 'jti-x', ...opts });
+
+    it('rejects an invalid token', async () => {
+      await expect(service.refreshToken('garbage', ctx)).rejects.toThrow(
+        'Invalid or expired refresh token',
+      );
+    });
+
+    it('rejects an expired token', async () => {
+      const expired = signRefresh({ exp: Math.floor(Date.now() / 1000) - 10 });
+
+      await expect(service.refreshToken(expired, ctx)).rejects.toBeInstanceOf(
+        UnauthorizedError,
+      );
+      expect(usersService.getUserById).not.toHaveBeenCalled();
+    });
+
+    it('rejects a revoked (blacklisted) token and logs reuse', async () => {
+      const { refreshToken } = await service.login(user.email, 'password', ctx);
+      await cache.setWithExpiry(
+        RedisKeys.refreshBlacklist(jtiOf(refreshToken)),
+        'true',
+        60,
+      );
+
+      await expect(service.refreshToken(refreshToken, ctx)).rejects.toBeInstanceOf(
+        UnauthorizedError,
+      );
+      expect(logger.warn).toHaveBeenCalledWith(
+        'Refresh token reuse detected',
+        expect.anything(),
+      );
+    });
+
+    it('rejects a token whose session is gone', async () => {
+      const token = signRefresh({}, { expiresIn: 60 });
+
+      await expect(service.refreshToken(token, ctx)).rejects.toThrow(
+        'Invalid or expired refresh token',
+      );
+    });
+
+    it('rejects a corrupt session record', async () => {
+      const token = signRefresh({}, { expiresIn: 60 });
+      await cache.setWithExpiry(RedisKeys.refreshSession('jti-x'), '{not json', 60);
+
+      await expect(service.refreshToken(token, ctx)).rejects.toBeInstanceOf(
+        UnauthorizedError,
+      );
+    });
+
+    it('rejects a session owned by a different user', async () => {
+      const token = signRefresh({}, { expiresIn: 60 });
+      await cache.setWithExpiry(
+        RedisKeys.refreshSession('jti-x'),
+        JSON.stringify({ userId: 'someone-else' }),
+        60,
+      );
+
+      await expect(service.refreshToken(token, ctx)).rejects.toBeInstanceOf(
+        UnauthorizedError,
+      );
+      expect(cache.store.has(RedisKeys.refreshSession('jti-x'))).toBe(true);
+    });
+
+    it('rejects the loser of a concurrent refresh', async () => {
+      const { refreshToken } = await service.login(user.email, 'password', ctx);
+      jest.spyOn(cache, 'delete').mockResolvedValueOnce(0);
+
+      await expect(service.refreshToken(refreshToken, ctx)).rejects.toBeInstanceOf(
+        UnauthorizedError,
+      );
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('concurrent refresh'),
+        expect.anything(),
+      );
+      expect(usersService.getUserById).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('logout edge cases', () => {
+    it('does nothing and publishes nothing without tokens', async () => {
+      await service.logout();
+
+      expect(cache.store.size).toBe(0);
+      expect(publisher.publish).not.toHaveBeenCalled();
+    });
+
+    it('ignores an invalid access token', async () => {
+      await service.logout(undefined, 'garbage');
+
+      expect(cache.store.size).toBe(0);
+      expect(publisher.publish).not.toHaveBeenCalled();
+    });
+
+    it('publishes with the refresh sid and a null jti when only the refresh token is given', async () => {
+      const { refreshToken } = await service.login(user.email, 'password', ctx);
+
+      await service.logout(refreshToken);
+
+      expect(publisher.publish).toHaveBeenCalledWith({
+        userId: user.id,
+        sid: sidOf(refreshToken),
+        jti: null,
+        revokedAt: expect.any(String) as string,
+      });
+    });
+
+    it('skips the access blacklist for a token without jti', async () => {
+      const token = jwt.sign({ sub: user.id }, env.jwt.accessTokenSecret, {
+        expiresIn: 60,
+      });
+
+      await service.logout(undefined, token);
+
+      expect(cache.store.size).toBe(0);
+      expect(publisher.publish).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: user.id, sid: null, jti: null }),
+      );
+    });
   });
 });

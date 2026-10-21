@@ -34,12 +34,20 @@ jobs:
         # Turborepo will build all applications, ensuring type correctness
         run: npx turbo run build
 
-  # Job 2: Unit tests ONLY within Core Microservice
+  # Job 2: Unit tests with coverage for every backend app and the shared package
   unit-tests:
-    name: Core Microservice Unit Tests
+    name: Unit tests (${{ matrix.name }})
     runs-on: ubuntu-latest
     needs: lint-and-type-check
-    
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: core, ws: core_microservice, dir: apps/core_microservice }
+          - { name: auth, ws: auth_microservice, dir: apps/auth_microservice }
+          - { name: notifications, ws: notifications_consumer_microservice, dir: apps/notifications_consumer_microservice }
+          - { name: shared, ws: '@repo/shared', dir: packages/shared }
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -53,7 +61,15 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run unit tests (Core Microservice)
-        # Navigate directly to the core_microservice folder and run tests
-        working-directory: ./apps/core_microservice
-        run: npm run test
+      - name: Build shared packages
+        run: npm run build -w @repo/contracts -w @repo/shared
+
+      - name: Run unit tests with coverage
+        run: npm run test:cov -w ${{ matrix.ws }}
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-${{ matrix.name }}
+          path: ${{ matrix.dir }}/coverage

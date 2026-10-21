@@ -1,5 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { LoggerKey, RoutingKeys } from '@repo/shared';
+import { QueryFailedError } from 'typeorm';
+import {
+  DatabaseQueryError,
+  LoggerKey,
+  PostgresErrorCode,
+  RoutingKeys,
+  UniqueConstraintViolationError,
+} from '@repo/shared';
 import { ProfileSummaryCache } from '../../common/cache/profile-summary-cache';
 import { OUTBOX_PORT } from '../../common/messaging/outbox.port';
 import { USER_DIRECTORY_PORT } from '../profiles/domain/interfaces/user-directory.port';
@@ -26,6 +33,7 @@ describe('FollowsService', () => {
   let outbox: { add: jest.Mock };
   let directory: { getUsers: jest.Mock };
   let cache: { invalidateCounts: jest.Mock };
+  let logger: { debug: jest.Mock; warn: jest.Mock; error: jest.Mock };
 
   beforeEach(async () => {
     txSave = jest.fn((f: Follow) =>
@@ -42,6 +50,7 @@ describe('FollowsService', () => {
         work(tx),
       ),
     };
+    logger = { debug: jest.fn(), warn: jest.fn(), error: jest.fn() };
     cache = { invalidateCounts: jest.fn(() => Promise.resolve()) };
     outbox = { add: jest.fn(() => Promise.resolve({})) };
     directory = {
@@ -65,10 +74,7 @@ describe('FollowsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         FollowsService,
-        {
-          provide: LoggerKey,
-          useValue: { debug: jest.fn(), warn: jest.fn(), error: jest.fn() },
-        },
+        { provide: LoggerKey, useValue: logger },
         { provide: FollowRepositoryKey, useValue: repo },
         { provide: OUTBOX_PORT, useValue: outbox },
         { provide: USER_DIRECTORY_PORT, useValue: directory },
@@ -164,6 +170,80 @@ describe('FollowsService', () => {
 
     expect(txSave).toHaveBeenCalledTimes(1);
     expect(outbox.add).not.toHaveBeenCalled();
+  });
+
+  it('returns the existing follow without invalidating the cache', async () => {
+    const existing = Follow.create({
+      followerId: FOLLOWER,
+      followingId: FOLLOWED,
+    });
+    repo.findByFollowerAndFollowing.mockResolvedValueOnce(existing);
+
+    await expect(service.follow(FOLLOWER, FOLLOWED)).resolves.toBe(existing);
+    expect(cache.invalidateCounts).not.toHaveBeenCalled();
+  });
+
+  it('does nothing when unfollowing a user that is not followed', async () => {
+    await service.unfollow(FOLLOWER, FOLLOWED);
+
+    expect(repo.delete).not.toHaveBeenCalled();
+    expect(cache.invalidateCounts).not.toHaveBeenCalled();
+  });
+
+  describe('transaction failures', () => {
+    const queryFailed = (code: string, detail?: string) =>
+      new QueryFailedError('INSERT', [], {
+        code,
+        detail,
+      } as unknown as Error);
+
+    it('maps a unique violation (concurrent follow) to UniqueConstraintViolationError', async () => {
+      repo.runInTransaction.mockRejectedValueOnce(
+        queryFailed(PostgresErrorCode.UniqueViolation, 'Key already exists'),
+      );
+
+      await expect(service.follow(FOLLOWER, FOLLOWED)).rejects.toThrow(
+        UniqueConstraintViolationError,
+      );
+    });
+
+    it('maps a unique violation without detail to UniqueConstraintViolationError', async () => {
+      repo.runInTransaction.mockRejectedValueOnce(
+        queryFailed(PostgresErrorCode.UniqueViolation),
+      );
+
+      await expect(service.follow(FOLLOWER, FOLLOWED)).rejects.toThrow(
+        UniqueConstraintViolationError,
+      );
+    });
+
+    it('maps other database errors to DatabaseQueryError and logs the message', async () => {
+      repo.runInTransaction.mockRejectedValueOnce(
+        queryFailed(PostgresErrorCode.ForeignKeyViolation),
+      );
+
+      await expect(service.follow(FOLLOWER, FOLLOWED)).rejects.toThrow(
+        DatabaseQueryError,
+      );
+      expect(logger.error).toHaveBeenCalledTimes(1);
+    });
+
+    it('maps a non-Error rejection to DatabaseQueryError', async () => {
+      repo.runInTransaction.mockRejectedValueOnce('boom');
+
+      await expect(service.follow(FOLLOWER, FOLLOWED)).rejects.toThrow(
+        DatabaseQueryError,
+      );
+      expect(logger.error).toHaveBeenCalledWith('boom');
+    });
+
+    it('rethrows a domain error untouched', async () => {
+      const error = new DatabaseQueryError();
+      repo.runInTransaction.mockRejectedValueOnce(error);
+
+      await expect(service.follow(FOLLOWER, FOLLOWED)).rejects.toBe(error);
+      expect(logger.error).not.toHaveBeenCalled();
+    });
   });
 
   describe('list pages', () => {

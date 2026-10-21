@@ -1,5 +1,6 @@
 import {
   AccessDeniedError,
+  DomainError,
   DatabaseQueryError,
   EntityByIdNotFoundError,
   EntityNotFoundError,
@@ -36,6 +37,21 @@ describe('errorHandler', () => {
     );
   });
 
+  it('maps a plain DomainError subclass without a specific mapping to 400', () => {
+    class CustomDomainError extends DomainError {
+      constructor() {
+        super('custom rule broken');
+      }
+    }
+    const { status, json } = run(new CustomDomainError());
+    expect(status).toHaveBeenCalledWith(400);
+    expect(json).toHaveBeenCalledWith({
+      statusCode: 400,
+      error: 'CustomDomainError',
+      message: 'custom rule broken',
+    });
+  });
+
   it('maps non-domain errors to 500 without leaking the message', () => {
     const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
     const { status, json } = run(new Error('boom'));
@@ -44,6 +60,8 @@ describe('errorHandler', () => {
       statusCode: 500,
       message: 'Internal Server Error',
     });
+    expect(JSON.stringify(json.mock.calls)).not.toContain('boom');
+    expect(spy).toHaveBeenCalledWith('Unhandled Server Error:', expect.any(Error));
     spy.mockRestore();
   });
 });

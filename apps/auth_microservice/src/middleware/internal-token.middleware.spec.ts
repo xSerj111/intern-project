@@ -64,6 +64,22 @@ describe('internal token middleware', () => {
     expect(logger.warn).not.toHaveBeenCalled();
   });
 
+  it('defaults to INTERNAL_API_TOKEN from env when no token is injected', () => {
+    const defaulted = createInternalTokenMiddleware(logger as unknown as WinstonLogger);
+    const call = (value: string) => {
+      const next = jest.fn() as unknown as NextFunction & jest.Mock;
+      defaulted(
+        { headers: { 'x-internal-token': value }, path: '/x' } as unknown as Request,
+        {} as Response,
+        next,
+      );
+      return next;
+    };
+
+    expect(call(TOKEN)).toHaveBeenCalledWith();
+    expect(call('b'.repeat(40))).toHaveBeenCalledWith(expect.any(UnauthorizedError));
+  });
+
   it('compares with crypto.timingSafeEqual', () => {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const crypto = require('crypto') as typeof import('crypto');

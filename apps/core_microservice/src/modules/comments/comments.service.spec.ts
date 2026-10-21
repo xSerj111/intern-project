@@ -1,6 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenException } from '@nestjs/common';
-import { EntityByIdNotFoundError, LoggerKey, RoutingKeys } from '@repo/shared';
+import {
+  DatabaseQueryError,
+  EntityByIdNotFoundError,
+  LoggerKey,
+  RoutingKeys,
+} from '@repo/shared';
 import { OUTBOX_PORT } from '../../common/messaging/outbox.port';
 import { USER_DIRECTORY_PORT } from '../profiles/domain/interfaces/user-directory.port';
 import { fakePost } from '../posts/__tests__/fakers';
@@ -25,6 +30,9 @@ describe('CommentsService', () => {
   let postFindById: jest.Mock;
   let outbox: { add: jest.Mock };
   let directory: { getUsers: jest.Mock };
+  let runInTransaction: jest.Mock;
+  let getLikeStats: jest.Mock;
+  let logger: { debug: jest.Mock; warn: jest.Mock; error: jest.Mock };
 
   beforeEach(async () => {
     commentSave = jest.fn((c: Comment) =>
@@ -36,16 +44,19 @@ describe('CommentsService', () => {
     softDeleteWithReplies = jest.fn(() => Promise.resolve());
     findRootPage = jest.fn(() => Promise.resolve([]));
     findRepliesOf = jest.fn(() => Promise.resolve([]));
+    runInTransaction = jest.fn((work: (m: typeof tx) => Promise<unknown>) =>
+      work(tx),
+    );
+    getLikeStats = jest.fn();
+    logger = { debug: jest.fn(), warn: jest.fn(), error: jest.fn() };
     const commentRepository = {
       findRootPage,
       findRepliesOf,
       save: commentSave,
       findOneByIdOrThrow: commentFindOneByIdOrThrow,
       softDeleteWithReplies,
-      runInTransaction: jest.fn((work: (m: typeof tx) => Promise<unknown>) =>
-        work(tx),
-      ),
-      getLikeStats: jest.fn(),
+      runInTransaction,
+      getLikeStats,
     };
     postFindById = jest.fn(() =>
       Promise.resolve(fakePost({ id: POST_ID, authorId: POST_AUTHOR })),
@@ -73,10 +84,7 @@ describe('CommentsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         CommentsService,
-        {
-          provide: LoggerKey,
-          useValue: { debug: jest.fn(), warn: jest.fn(), error: jest.fn() },
-        },
+        { provide: LoggerKey, useValue: logger },
         { provide: COMMENT_REPOSITORY, useValue: commentRepository },
         { provide: POST_REPOSITORY, useValue: postRepository },
         { provide: OUTBOX_PORT, useValue: outbox },
@@ -172,6 +180,86 @@ describe('CommentsService', () => {
       ).rejects.toThrow(EntityByIdNotFoundError);
       expect(commentSave).not.toHaveBeenCalled();
       expect(outbox.add).not.toHaveBeenCalled();
+    });
+
+    it('rethrows a domain error from the transaction unchanged', async () => {
+      const domainError = new EntityByIdNotFoundError('Post', POST_ID);
+      runInTransaction.mockRejectedValueOnce(domainError);
+
+      await expect(
+        service.createComment(COMMENTER, { postId: POST_ID, content: 'hi' }),
+      ).rejects.toBe(domainError);
+      expect(logger.error).not.toHaveBeenCalled();
+    });
+
+    it('maps an unexpected Error from the transaction to DatabaseQueryError and logs it', async () => {
+      runInTransaction.mockRejectedValueOnce(new Error('connection lost'));
+
+      await expect(
+        service.createComment(COMMENTER, { postId: POST_ID, content: 'hi' }),
+      ).rejects.toThrow(DatabaseQueryError);
+      expect(logger.error).toHaveBeenCalledWith('connection lost');
+    });
+
+    it('maps a non-Error rejection to DatabaseQueryError', async () => {
+      runInTransaction.mockRejectedValueOnce('weird');
+
+      await expect(
+        service.createComment(COMMENTER, { postId: POST_ID, content: 'hi' }),
+      ).rejects.toThrow(DatabaseQueryError);
+      expect(logger.error).toHaveBeenCalledWith('weird');
+    });
+  });
+
+  describe('updateComment', () => {
+    it('edits the content and saves for the author', async () => {
+      const result = await service.updateComment(COMMENTER, 'c-1', {
+        content: '  edited  ',
+      });
+
+      expect(commentSave).toHaveBeenCalledWith(
+        expect.objectContaining({ content: 'edited' }),
+      );
+      expect(result.content).toBe('edited');
+    });
+
+    it('saves without touching the content when none is given', async () => {
+      const result = await service.updateComment(COMMENTER, 'c-1', {});
+
+      expect(result.content).toBe('a faked comment');
+      expect(commentSave).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects anyone but the author and saves nothing', async () => {
+      await expect(
+        service.updateComment(POST_AUTHOR, 'c-1', { content: 'x' }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(commentSave).not.toHaveBeenCalled();
+    });
+
+    it('rejects blank content before saving', async () => {
+      await expect(
+        service.updateComment(COMMENTER, 'c-1', { content: '   ' }),
+      ).rejects.toThrow();
+      expect(commentSave).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getLikeStats', () => {
+    it('delegates to the repository with the viewer', async () => {
+      const stats = new Map([['c-1', { likeCount: 2, likedByMe: true }]]);
+      getLikeStats.mockResolvedValueOnce(stats);
+
+      const result = await service.getLikeStats(['c-1'], COMMENTER);
+
+      expect(getLikeStats).toHaveBeenCalledWith(['c-1'], COMMENTER);
+      expect(result).toBe(stats);
+    });
+
+    it('passes an undefined viewer for anonymous reads', async () => {
+      await service.getLikeStats(['c-1']);
+
+      expect(getLikeStats).toHaveBeenCalledWith(['c-1'], undefined);
     });
   });
 
