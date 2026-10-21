@@ -2,11 +2,25 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { DomainExceptionFilter, WinstonLogger } from '@repo/shared';
+import { DataSource } from 'typeorm';
+import {
+  DomainExceptionFilter,
+  WinstonLogger,
+  httpMetricsMiddleware,
+  registerDbPoolGauge,
+} from '@repo/shared';
+import type { Registry } from 'prom-client';
+import { METRICS_REGISTRY } from './common/observability/metrics.tokens';
 import { AppConfigService } from './config/app-config.service';
 import 'reflect-metadata';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
+
+interface PgPoolStats {
+  totalCount: number;
+  idleCount: number;
+  waitingCount: number;
+}
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -15,6 +29,10 @@ async function bootstrap() {
 
   // 1. HELMET - Ustawia bezpieczne nagłówki HTTP (np. ukrywa X-Powered-By)
   app.use(helmet());
+
+  // 1b. HTTP METRICS - przed routingiem; trasa jest odczytywana dopiero przy `finish`
+  const registry = app.get<Registry>(METRICS_REGISTRY);
+  app.use(httpMetricsMiddleware(registry));
 
   // 2. COOKIE PARSER - Umożliwia odczytywanie refresh_token z ciasteczek
   app.use(cookieParser());
@@ -33,6 +51,20 @@ async function bootstrap() {
 
   const appConfig = app.get(AppConfigService);
   appConfig.assertSafeForEnvironment();
+  appConfig.assertInternalApiToken();
+
+  // Pool gauge is read on each scrape; `master` is the pg Pool of the TypeORM driver.
+  const dataSource = app.get(DataSource);
+  registerDbPoolGauge(registry, () => {
+    const pool = (dataSource.driver as { master?: PgPoolStats }).master;
+    return (
+      pool && {
+        totalCount: pool.totalCount,
+        idleCount: pool.idleCount,
+        waitingCount: pool.waitingCount,
+      }
+    );
+  });
 
   // Validate & sanitize all incoming DTOs (strips unknown props, coerces types).
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));

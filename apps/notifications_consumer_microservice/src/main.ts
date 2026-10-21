@@ -1,9 +1,18 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { DomainExceptionFilter, WinstonLogger } from '@repo/shared';
+import {
+  type DbPoolStats,
+  DomainExceptionFilter,
+  httpMetricsMiddleware,
+  registerDbPoolGauge,
+  WinstonLogger,
+  type createMetricsRegistry,
+} from '@repo/shared';
 import 'reflect-metadata';
+import { DataSource } from 'typeorm';
 import { AppModule } from './app.module';
+import { METRICS_REGISTRY } from './common/observability/metrics.tokens';
 import { AppConfigService } from './config/app-config.service';
 
 async function bootstrap() {
@@ -11,6 +20,16 @@ async function bootstrap() {
     logger: new WinstonLogger('NotificationsSystem'),
   });
   const appConfig = app.get(AppConfigService);
+
+  const registry =
+    app.get<ReturnType<typeof createMetricsRegistry>>(METRICS_REGISTRY);
+  app.use(httpMetricsMiddleware(registry));
+  const dataSource = app.get(DataSource);
+  registerDbPoolGauge(
+    registry,
+    // pg's Pool is the postgres driver's `master`; it is absent until connected.
+    () => (dataSource.driver as unknown as { master?: DbPoolStats }).master,
+  );
 
   app.enableCors({
     origin: appConfig.clientUrl,

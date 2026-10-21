@@ -57,5 +57,7 @@ import { NotificationsService } from './notifications.service';
     EmailWorker,
     ProcessedEventPurgeScheduler,
   ],
+  // Read-only: the health check calls `verify()` on the mailer.
+  exports: [MAILER],
 })
 export class NotificationsModule {}

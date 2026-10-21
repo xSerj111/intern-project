@@ -1,6 +1,7 @@
 import { Global, Module } from '@nestjs/common';
 import { EVENT_BUS } from '../../modules/notifications/domain/interfaces/event-bus.port';
 import {
+  AMQP_CONNECTION,
   AmqpConnectionLifecycle,
   amqpConnectionProvider,
 } from './amqp-connection.provider';
@@ -23,6 +24,7 @@ import { CONSUMER_REGISTRY } from './consumer.types';
     { provide: EVENT_BUS, useClass: AmqpEventBusAdapter },
     { provide: CONSUMER_REGISTRY, useClass: AmqpConsumerHost },
   ],
-  exports: [EVENT_BUS, CONSUMER_REGISTRY],
+  // AMQP_CONNECTION is exported read-only for the broker health check.
+  exports: [EVENT_BUS, CONSUMER_REGISTRY, AMQP_CONNECTION],
 })
 export class MessagingModule {}

@@ -1,0 +1,32 @@
+# Scrapes the three services running on the host (npm run dev / built artifacts).
+# /metrics is internal: the token comes from a file written by entrypoint.sh,
+# never from this repo. Series already carry a `service` label from the apps,
+# so targets are distinguished by `job` only.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: core
+    metrics_path: /metrics
+    http_headers:
+      X-Internal-Token:
+        files: [/run/secrets/internal_token]
+    static_configs:
+      - targets: ['host.docker.internal:3001']
+
+  - job_name: auth
+    metrics_path: /metrics
+    http_headers:
+      X-Internal-Token:
+        files: [/run/secrets/internal_token]
+    static_configs:
+      - targets: ['host.docker.internal:3002']
+
+  - job_name: notifications
+    metrics_path: /metrics
+    http_headers:
+      X-Internal-Token:
+        files: [/run/secrets/internal_token]
+    static_configs:
+      - targets: ['host.docker.internal:3003']

@@ -1,16 +1,20 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { assertInternalApiToken } from '@repo/shared';
 
 /**
  * Typed application configuration, backed by `@nestjs/config`'s ConfigService.
  * The single place the running app reads environment-derived settings. Required
  * settings use `getOrThrow`, so a missing variable fails fast at first read.
  */
-const INTERNAL_API_TOKEN_MIN_LENGTH = 32;
-
 @Injectable()
-export class AppConfigService {
+export class AppConfigService implements OnModuleInit {
   constructor(private readonly config: ConfigService) {}
+
+  /** Fail fast at bootstrap: a missing or short INTERNAL_API_TOKEN stops the service. */
+  onModuleInit(): void {
+    void this.internalApiToken;
+  }
 
   /** HTTP port the Notifications service listens on. */
   get port(): number {
@@ -61,13 +65,9 @@ export class AppConfigService {
 
   /** Shared secret for service-to-service calls to auth's internal API. */
   get internalApiToken(): string {
-    const token = this.config.getOrThrow<string>('INTERNAL_API_TOKEN');
-    // Same floor as auth's own check, so a weak token fails here too.
-    if (token.length < INTERNAL_API_TOKEN_MIN_LENGTH) {
-      throw new Error(
-        `INTERNAL_API_TOKEN must be at least ${INTERNAL_API_TOKEN_MIN_LENGTH} characters long`,
-      );
-    }
+    // Same floor (32 chars) as auth's own check, via the shared assertion.
+    const token = this.config.get<string>('INTERNAL_API_TOKEN');
+    assertInternalApiToken(token);
     return token;
   }
 

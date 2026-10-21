@@ -1,9 +1,20 @@
 import type { Server } from 'node:http';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
-import { DomainExceptionFilter } from '@repo/shared';
+import { Test, type TestingModuleBuilder } from '@nestjs/testing';
+import {
+  DomainExceptionFilter,
+  httpMetricsMiddleware,
+  registerDbPoolGauge,
+} from '@repo/shared';
+import type { Registry } from 'prom-client';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
+
+interface PoolStats {
+  totalCount: number;
+  idleCount: number;
+  waitingCount: number;
+}
 
 export interface E2eApp {
   app: INestApplication;
@@ -25,6 +36,8 @@ export interface E2eApp {
  */
 export async function createE2eApp(
   env: Record<string, string> = {},
+  /** Hook to `overrideProvider(...)` before the module is compiled. */
+  customize: (builder: TestingModuleBuilder) => TestingModuleBuilder = (b) => b,
 ): Promise<E2eApp> {
   const previous = new Map<string, string | undefined>();
   for (const [key, value] of Object.entries(env)) {
@@ -46,10 +59,29 @@ export async function createE2eApp(
     const { AppModule } =
       require('../../src/app.module') as typeof import('../../src/app.module');
     /* eslint-enable @typescript-eslint/no-require-imports */
-    const moduleRef = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
+    /* eslint-disable @typescript-eslint/no-require-imports */
+    const { METRICS_REGISTRY } =
+      require('../../src/common/observability/metrics.tokens') as typeof import('../../src/common/observability/metrics.tokens');
+    /* eslint-enable @typescript-eslint/no-require-imports */
+    const moduleRef = await customize(
+      Test.createTestingModule({ imports: [AppModule] }),
+    ).compile();
     const app = moduleRef.createNestApplication();
+    // main.ts wiring: the registry is created per app (MetricsModule factory),
+    // so the non-idempotent pool gauge is registered exactly once here.
+    const registry = app.get<Registry>(METRICS_REGISTRY);
+    app.use(httpMetricsMiddleware(registry));
+    const db = app.get(DataSource);
+    registerDbPoolGauge(registry, () => {
+      const pool = (db.driver as { master?: PoolStats }).master;
+      return (
+        pool && {
+          totalCount: pool.totalCount,
+          idleCount: pool.idleCount,
+          waitingCount: pool.waitingCount,
+        }
+      );
+    });
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, transform: true }),
     );
@@ -58,7 +90,7 @@ export async function createE2eApp(
     return {
       app,
       http: request(app.getHttpServer() as Server),
-      db: app.get(DataSource),
+      db,
       close: async () => {
         try {
           await app.close();

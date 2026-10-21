@@ -53,7 +53,7 @@ import { CACHE_REDIS_CLIENT, RedisCacheAdapter } from './redis-cache.adapter';
     { provide: CACHE_STORE, useClass: RedisCacheAdapter },
     ProfileSummaryCache,
   ],
-  exports: [CACHE_STORE, ProfileSummaryCache],
+  exports: [CACHE_STORE, ProfileSummaryCache, CACHE_REDIS_CLIENT],
 })
 export class CacheModule implements OnModuleDestroy {
   constructor(@Inject(CACHE_REDIS_CLIENT) private readonly client: Redis) {}

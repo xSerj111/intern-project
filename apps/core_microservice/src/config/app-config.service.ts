@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { assertInternalApiToken } from '@repo/shared';
 
 /**
  * Typed application configuration, backed by `@nestjs/config`'s ConfigService.
@@ -117,6 +118,11 @@ export class AppConfigService {
   /** Raw shared token for internal endpoints; length validation is added separately. */
   get internalApiToken(): string | undefined {
     return this.config.get<string>('INTERNAL_API_TOKEN') || undefined;
+  }
+
+  /** Fails fast unless `INTERNAL_API_TOKEN` is set and at least 32 chars; called during bootstrap. */
+  assertInternalApiToken(): void {
+    assertInternalApiToken(this.internalApiToken);
   }
 
   /**

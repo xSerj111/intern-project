@@ -13,6 +13,7 @@ import { RedisModule } from './common/redis/redis.module';
 import { CacheModule } from './common/cache/cache.module';
 import { CommonAuthModule } from './common/auth/common-auth.module';
 import { MetricsModule } from './common/observability/metrics.module';
+import { ObservabilityModule } from './common/observability/observability.module';
 import { QueryContextMiddleware } from './common/db/query-context';
 import { TypeOrmPerfLogger } from './common/db/typeorm-perf.logger';
 import { QueryCountInterceptor } from './common/perf/query-count.interceptor';
@@ -61,6 +62,7 @@ import { NotificationsRelayModule } from './modules/notifications-relay/notifica
     LikesModule,
     InternalEventsModule,
     NotificationsRelayModule,
+    ObservabilityModule,
   ],
   providers: [{ provide: APP_INTERCEPTOR, useClass: QueryCountInterceptor }],
 })

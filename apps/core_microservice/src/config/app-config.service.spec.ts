@@ -77,6 +77,28 @@ describe('AppConfigService', () => {
     });
   });
 
+  describe('assertInternalApiToken', () => {
+    it('throws when the token is unset', () => {
+      expect(() => build().assertInternalApiToken()).toThrow(
+        /INTERNAL_API_TOKEN/,
+      );
+    });
+
+    it('throws when the token is shorter than 32 characters', () => {
+      const service = build({ INTERNAL_API_TOKEN: 'x'.repeat(31) });
+
+      expect(() => service.assertInternalApiToken()).toThrow(
+        /at least 32 characters/,
+      );
+    });
+
+    it('accepts a token of 32 characters or more', () => {
+      const service = build({ INTERNAL_API_TOKEN: 'x'.repeat(32) });
+
+      expect(() => service.assertInternalApiToken()).not.toThrow();
+    });
+  });
+
   describe('assertSafeForEnvironment', () => {
     it('throws when instrumentation is on in production', () => {
       const service = build({
