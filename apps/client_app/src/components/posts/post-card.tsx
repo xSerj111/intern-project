@@ -30,6 +30,7 @@ export function PostCard({ post }: { post: IPostResponse }) {
   return (
     <article
       className={styles.card}
+      data-testid="feed-item"
       aria-label={`Post by ${post.author?.displayName ?? 'a deleted user'}`}
       onClick={open}
     >

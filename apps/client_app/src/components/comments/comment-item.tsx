@@ -88,7 +88,7 @@ export function CommentItem({ node, onChanged, onDelete }: CommentItemProps) {
   }
 
   return (
-    <li className={styles.item}>
+    <li className={styles.item} data-testid="comment-item">
       <div className={styles.comment}>
         <Avatar src={author?.avatarUrl} name={name} size="sm" decorative />
         <div className={styles.body}>
@@ -216,6 +216,7 @@ export function CommentItem({ node, onChanged, onDelete }: CommentItemProps) {
       )}
       {replies.length > 0 && !collapsed && (
         <ul
+          data-testid="comment-replies"
           className={cx(
             styles.replies,
             depth >= MAX_COMMENT_DEPTH && styles.repliesFlat,
