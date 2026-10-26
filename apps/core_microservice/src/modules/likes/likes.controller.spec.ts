@@ -48,7 +48,7 @@ describe('LikesController', () => {
   ] as const)(
     '%s passes the target id and the caller id (sub) to the service',
     async (method, serviceMethod) => {
-      const state: ILikeState = { likeCount: 4, likedByMe: true };
+      const state: ILikeState = { likeCount: 4, liked: true };
       service[serviceMethod].mockResolvedValue(state);
 
       const result = await controller[method](USER_ID, TARGET_ID);

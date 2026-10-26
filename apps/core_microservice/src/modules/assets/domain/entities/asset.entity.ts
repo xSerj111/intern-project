@@ -100,7 +100,7 @@ export class Asset extends TypeormEntityBase {
   @Column({ type: 'timestamptz', nullable: true })
   expiresAt!: Date | null;
 
-  // Factory wymuszająca poprawne utworzenie obiektu
+  // Factory that forces the object to be created correctly
   static create(props: {
     uploaderId: string;
     url: string;

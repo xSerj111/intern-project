@@ -46,5 +46,3 @@ export * from "./observability";
 
 // Filters (domain errors -> HTTP)
 export * from "./filters/domain-exception.filter";
-
-// Types/Enums (we will add these later)

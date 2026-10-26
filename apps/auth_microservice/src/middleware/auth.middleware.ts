@@ -10,7 +10,7 @@ export function requireAuth(authService: AuthService) {
       if (!authHeader || !authHeader.startsWith('Bearer')) {
         throw new UnauthorizedError('Missing or invalid Authorization header');
       }
-      // Wyciągamy sam token pomijając słowo "Bearer "
+      // Extract the bare token, skipping the "Bearer " prefix
       const token = authHeader.split(' ')[1];
 
       if (!token) {

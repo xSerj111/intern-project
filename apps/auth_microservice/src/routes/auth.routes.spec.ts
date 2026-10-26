@@ -15,7 +15,7 @@ import { createApp } from '../app';
 import { RedisService } from '../infrastructure/cache/redis.service';
 import { createAuthRouter, REFRESH_COOKIE } from './auth.routes';
 import { AuthService, LoginResult } from '../services/auth.service';
-import { errorHandler } from '../middleware/error-handler.middleware';
+import { createErrorHandler } from '../middleware/error-handler.middleware';
 
 const setCookies = (res: request.Response): string[] => {
   const header = res.headers['set-cookie'] as unknown;
@@ -54,7 +54,7 @@ describe('auth routes', () => {
     app.use(express.json());
     app.use(cookieParser());
     app.use('/auth', createAuthRouter(authService as unknown as AuthService));
-    app.use(errorHandler);
+    app.use(createErrorHandler({ error: jest.fn() } as unknown as WinstonLogger));
   });
 
   it('login sets an httpOnly refresh cookie scoped to /auth and keeps it out of the body', async () => {

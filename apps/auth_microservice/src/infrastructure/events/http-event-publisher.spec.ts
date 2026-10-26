@@ -2,8 +2,11 @@ process.env.CORE_SERVICE_URL = 'http://core.test:3001';
 process.env.AUTH_ALLOWED_ORIGINS = 'http://localhost:3000';
 process.env.INTERNAL_API_TOKEN = 'a'.repeat(40);
 
+import { INTERNAL_TOKEN_HEADER } from '@repo/shared';
 import type { UserCreatedEvent, WinstonLogger } from '@repo/shared';
 import { HttpEventPublisher } from './http-event-publisher';
+
+const TOKEN = 't'.repeat(40);
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -18,14 +21,21 @@ describe('HttpEventPublisher', () => {
     fetchMock = jest.fn();
     global.fetch = fetchMock;
     logger = { warn: jest.fn(), error: jest.fn() };
-    publisher = new HttpEventPublisher(logger as unknown as WinstonLogger);
+    publisher = new HttpEventPublisher(logger as unknown as WinstonLogger, TOKEN);
   });
 
   afterEach(() => {
     global.fetch = originalFetch;
   });
 
-  it('POSTs the event as JSON to the core internal endpoint', async () => {
+  const loggedText = () =>
+    JSON.stringify(
+      [logger.warn.mock.calls as unknown[], logger.error.mock.calls as unknown[]],
+      (_k, v: unknown) =>
+        v instanceof Error ? { message: v.message, stack: v.stack } : v,
+    );
+
+  it('POSTs the event as JSON to the core internal endpoint with the internal token', async () => {
     fetchMock.mockResolvedValue({ ok: true, status: 201 });
 
     publisher.publishUserCreatedEvent(payload);
@@ -35,7 +45,10 @@ describe('HttpEventPublisher', () => {
       'http://core.test:3001/internal/events/user-created',
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          [INTERNAL_TOKEN_HEADER]: TOKEN,
+        },
         body: JSON.stringify(payload),
       },
     );
@@ -59,6 +72,7 @@ describe('HttpEventPublisher', () => {
     expect(logger.warn).toHaveBeenCalledWith(
       'Failed to publish event to Core. Status: 500',
     );
+    expect(loggedText()).not.toContain(TOKEN);
   });
 
   it('logs an error and does not throw when the network call fails', async () => {
@@ -69,8 +83,20 @@ describe('HttpEventPublisher', () => {
     await flush();
 
     expect(logger.error).toHaveBeenCalledWith(
-      'Network error while publishing event to Core',
-      { error: err },
+      'Network error while publishing event to Core: ECONNREFUSED',
     );
+  });
+
+  it('never logs the token on the failure paths', async () => {
+    fetchMock.mockRejectedValue(new Error('request failed'));
+    publisher.publishUserCreatedEvent(payload);
+    await flush();
+    fetchMock.mockResolvedValue({ ok: false, status: 401 });
+    publisher.publishUserCreatedEvent(payload);
+    await flush();
+
+    expect(logger.error).toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalled();
+    expect(loggedText()).not.toContain(TOKEN);
   });
 });

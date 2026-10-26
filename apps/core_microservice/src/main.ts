@@ -23,25 +23,24 @@ interface PgPoolStats {
 }
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
-    logger: new WinstonLogger('CoreSystem'),
-  });
+  const logger = new WinstonLogger('CoreSystem');
+  const app = await NestFactory.create(AppModule, { logger });
 
-  // 1. HELMET - Ustawia bezpieczne nagłówki HTTP (np. ukrywa X-Powered-By)
+  // 1. HELMET - sets secure HTTP headers (e.g. hides X-Powered-By)
   app.use(helmet());
 
-  // 1b. HTTP METRICS - przed routingiem; trasa jest odczytywana dopiero przy `finish`
+  // 1b. HTTP METRICS - before routing; the route is only read on `finish`
   const registry = app.get<Registry>(METRICS_REGISTRY);
   app.use(httpMetricsMiddleware(registry));
 
-  // 2. COOKIE PARSER - Umożliwia odczytywanie refresh_token z ciasteczek
+  // 2. COOKIE PARSER - makes the refresh_token cookie readable
   app.use(cookieParser());
 
-  // 3. CORS - Konfiguracja pozwalająca frontendowi na dostęp
+  // 3. CORS - lets the frontend access the API
   app.enableCors({
     origin: process.env.CLIENT_URL || 'http://localhost:3000',
 
-    // Pozwala na przesyłanie ciasteczek między domenami
+    // Allows cookies to be sent across origins
     credentials: true,
 
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -87,6 +86,6 @@ async function bootstrap() {
 
   app.enableShutdownHooks();
   await app.listen(appConfig.port);
-  console.log(`Core microservice runs on ${appConfig.port}`);
+  logger.info(`Core microservice runs on ${appConfig.port}`);
 }
 void bootstrap();

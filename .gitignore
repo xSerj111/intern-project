@@ -131,3 +131,7 @@ apps/client_app/test-results/
 apps/core_microservice/test/load/reports/*.json
 !apps/core_microservice/test/load/reports/baseline.json
 !apps/core_microservice/test/load/reports/final.json
+
+# Per-workspace lockfiles (the root package-lock.json is the only lockfile)
+apps/*/package-lock.json
+packages/*/package-lock.json

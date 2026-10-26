@@ -1,5 +1,5 @@
 export interface JwtPayload {
-  sub: string; // Identyfikator użytkownika (User ID)
+  sub: string; // User identifier (User ID)
   email: string;
   jti?: string; // Unique token ID, used as the blacklist key
   sid?: string; // Session id, stable across refresh rotation

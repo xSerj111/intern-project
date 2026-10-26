@@ -3,7 +3,7 @@ import * as path from 'path';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../../.env') });
 
-// Funkcja pomocnicza wymuszająca obecność zmiennych (Fail-Fast)
+// Helper that enforces required variables are present (fail-fast)
 const requireEnv = (key: string, defaultValue?: string): string => {
   const value = process.env[key] || defaultValue;
   if (!value) {
@@ -40,7 +40,7 @@ const parseSameSite = (value: string | undefined): SameSite => {
 
 export const env = {
   app: {
-    // Auth service domyślnie działa na 3002 (zgodnie z AUTH_SERVICE_URL z .env)
+    // Auth service listens on 3002 by default (matches AUTH_SERVICE_URL in .env)
     // Own variable, not the shared PORT: every service reads the same root
     // config file, so a single PORT makes two services fight over one socket.
     port: parseInt(process.env.AUTH_PORT || '3002', 10),
@@ -63,7 +63,7 @@ export const env = {
   redis: {
     host: requireEnv('REDIS_HOST', 'localhost'),
     port: parseInt(requireEnv('REDIS_PORT', '6379'), 10),
-    password: process.env.REDIS_PASSWORD || undefined, // Hasło może być puste
+    password: process.env.REDIS_PASSWORD || undefined, // Password may be empty
   },
   jwt: {
     accessTokenSecret: requireEnv('JWT_SECRET', 'your-super-secret-jwt-key-here'),

@@ -21,7 +21,7 @@ import { createUsersRouter } from './routes/users.routes';
 import { createAuthRouter } from './routes/auth.routes';
 import { createInternalRouter } from './routes/internal.routes';
 import { createInternalTokenMiddleware } from './middleware/internal-token.middleware';
-import { errorHandler } from './middleware/error-handler.middleware';
+import { createErrorHandler } from './middleware/error-handler.middleware';
 import { UsersService } from './services/users.service';
 import { AuthService } from './services/auth.service';
 import { setupSwagger } from './config/swagger';
@@ -119,7 +119,7 @@ export function createApp(
   const authUserRepository = new AuthUserRepository(dataSource);
   const jwtService = new JwtService();
   const oauthService = new GoogleOAuthService();
-  const eventPublisher = new HttpEventPublisher(logger);
+  const eventPublisher = new HttpEventPublisher(logger, env.app.internalApiToken);
 
   const usersService = new UsersService(
     authUserRepository,
@@ -141,7 +141,7 @@ export function createApp(
   app.use('/users', createUsersRouter(usersService));
   app.use('/auth', createAuthRouter(authService));
 
-  app.use(errorHandler);
+  app.use(createErrorHandler(logger));
 
   return app;
 }
@@ -166,7 +166,7 @@ export function createInternalApp(
     createInternalRouter(new AuthUserRepository(dataSource)),
   );
 
-  app.use(errorHandler);
+  app.use(createErrorHandler(logger));
 
   return app;
 }

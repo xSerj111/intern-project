@@ -7,14 +7,26 @@ import {
   UnauthorizedError,
   UniqueConstraintViolationError,
 } from '@repo/shared';
+import type { WinstonLogger } from '@repo/shared';
 import { Request, Response } from 'express';
-import { errorHandler } from './error-handler.middleware';
+import { createErrorHandler } from './error-handler.middleware';
 
-describe('errorHandler', () => {
-  const run = (err: Error) => {
+describe('createErrorHandler', () => {
+  let logger: { error: jest.Mock };
+
+  beforeEach(() => {
+    logger = { error: jest.fn() };
+  });
+
+  const run = (err: Error, req: Partial<Request> = {}) => {
     const json = jest.fn();
     const status = jest.fn().mockReturnValue({ json });
-    errorHandler(err, {} as Request, { status } as unknown as Response, jest.fn());
+    createErrorHandler(logger as unknown as WinstonLogger)(
+      err,
+      req as Request,
+      { status } as unknown as Response,
+      jest.fn(),
+    );
     return { status, json };
   };
 
@@ -53,7 +65,6 @@ describe('errorHandler', () => {
   });
 
   it('maps non-domain errors to 500 without leaking the message', () => {
-    const spy = jest.spyOn(console, 'error').mockImplementation(() => {});
     const { status, json } = run(new Error('boom'));
     expect(status).toHaveBeenCalledWith(500);
     expect(json).toHaveBeenCalledWith({
@@ -61,7 +72,24 @@ describe('errorHandler', () => {
       message: 'Internal Server Error',
     });
     expect(JSON.stringify(json.mock.calls)).not.toContain('boom');
-    expect(spy).toHaveBeenCalledWith('Unhandled Server Error:', expect.any(Error));
-    spy.mockRestore();
+  });
+
+  it('logs message and stack only, never the raw error or the request body', () => {
+    const err = new Error('boom');
+    run(err, { body: { password: 'secret-pass' } });
+
+    expect(logger.error).toHaveBeenCalledWith(
+      'Unhandled Server Error: boom',
+      err.stack,
+      'ErrorHandler',
+    );
+    const args = logger.error.mock.calls[0] as unknown[];
+    expect(args).not.toContain(err);
+    expect(JSON.stringify(args)).not.toContain('secret-pass');
+  });
+
+  it('does not log domain errors', () => {
+    run(new AccessDeniedError());
+    expect(logger.error).not.toHaveBeenCalled();
   });
 });

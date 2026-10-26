@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { UsersService } from '../services/users.service';
 import { validateBody } from '../middleware/validate.middleware';
-import { CreateUserDto } from '@repo/shared'; // Twój import DTO
+import { CreateUserDto } from '@repo/shared'; // DTO import
 
 export function createUsersRouter(usersService: UsersService): Router {
   const router = Router();

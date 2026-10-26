@@ -15,14 +15,14 @@ Where a new type goes: wire-format request/response → `@repo/contracts`; `clas
 
 ## Commands
 
-Root scripts delegate to `turbo run` (`dev`, `build`, `test`, `lint`, `type-check`). To target one package: `npm run <script> -w <name>`, e.g. `npm run test -w core_microservice` or `cd apps/core_microservice && npm run test`.
+Root scripts delegate to `turbo run` (`dev`, `build`, `test`, `lint`, `lint:check`, `type-check`, `db:migrate`, `db:seed`). To target one package: `npm run <script> -w <name>`, e.g. `npm run test -w core_microservice` or `cd apps/core_microservice && npm run test`.
 
 - **Tests**: Jest, unit specs are `*.spec.ts` with `rootDir: src`. `test:e2e` uses a separate config in `test/`. `core_microservice`, `auth_microservice` and `notifications_consumer_microservice` have real specs (notifications also has `test/notifications.e2e-spec.ts`).
 - **Coverage**: `npm run test:cov -w <ws>` writes `coverage/` and enforces 70 lines / 60 branches global thresholds in `core_microservice`, `auth_microservice`, `notifications_consumer_microservice` and `@repo/shared`.
 - **Browser E2E** (local only, not in CI): root `npm run e2e` runs Playwright in `apps/client_app` (`test:e2e`) against the already running stack and client. Nothing starts a `webServer`; `CLIENT_URL` defaults to `http://localhost:3000`.
 - **Performance** (local only, not in CI): `npm run perf` runs the k6 gate (`MODE=gate`, pinned `grafana/k6` image, needs Docker) and the group fan-out script. `npm run perf:baseline` measures and writes `apps/core_microservice/test/load/reports/<REPORT>.json`; `npm run perf:compare` diffs two reports. Core (`:3001`) and auth (`:3002`) must already run as `node dist/main`, so build them first. Seed the perf dataset in both DBs with `npm run db:seed -w {auth,core}_microservice -- --profile perf --reset`.
 - **Build order matters**: `@repo/shared` and `@repo/contracts` are consumed via their built `dist/` (`main`/`types` point at `dist/index.js`). Turborepo's `^build` dependency handles this for `build`/`test`/`dev`, but running a single app standalone requires `npm run build -w @repo/shared -w @repo/contracts` first. A stale `dist/` shows up as confusing type errors.
-- **`npm run type-check` is incomplete**: only `auth_microservice` and `client_app` define a `type-check` script. CI uses `turbo run build` as the de-facto type check.
+- **Read-only lint and type-check**: `npm run lint:check` (root, or `-w <app>`) runs ESLint without `--fix` in `auth_microservice`, `core_microservice`, `notifications_consumer_microservice` and `client_app`, and never mutates files. `npm run type-check` runs `tsc --noEmit` in those four apps plus `@repo/shared` and `@repo/contracts`. CI runs both through Turborepo (`turbo run lint:check`, then `turbo run build`, then `turbo run type-check`).
 - **`npm run lint` only lints the apps** — `packages/*` define no `lint` script.
 
 ## Migrations (TypeORM, `synchronize: false`)
@@ -34,7 +34,7 @@ cd apps/core_microservice && npm run migration:run   # also migration:generate /
 cd apps/auth_microservice && npm run migration:run
 ```
 
-The CLI uses the `data-source.ts` at the app root (not `src/`), which loads the root `.env` itself. Migrations live in `src/migrations/`. **Root `npm run db:migrate` is still a no-op** (no workspace defines it; the README is stale here). Root `npm run db:seed` runs `turbo run db:seed` over `auth_microservice` and `core_microservice`, which seed dev data into both DBs. Use `npm run db:seed -w <app> -- --profile perf [--reset]` for the perf dataset.
+The CLI uses the `data-source.ts` at the app root (not `src/`), which loads the root `.env` itself. Migrations live in `src/migrations/`. Root `npm run db:migrate` runs `turbo run db:migrate`, which maps to `npm run migration:run` in each of the three backends (`auth_microservice`, `core_microservice`, `notifications_consumer_microservice`). Root `npm run db:seed` runs `turbo run db:seed` over `auth_microservice` and `core_microservice`, which seed dev data into both DBs. Use `npm run db:seed -w <app> -- --profile perf [--reset]` for the perf dataset.
 
 ## Environment & databases
 
@@ -62,9 +62,9 @@ The CLI uses the `data-source.ts` at the app root (not `src/`), which loads the 
 
 ## Lint / format
 
-- Root `.eslintrc.json` is **legacy/unused**. Each app uses flat `eslint.config.mjs` (typescript-eslint type-checked) and `.prettierrc` (`singleQuote: true`, `trailingComma: "all"`).
-- The `lint` script runs `eslint --fix` — it mutates files.
+- The root `.eslintrc.json` has been removed. Each app uses flat `eslint.config.mjs` (typescript-eslint type-checked) and `.prettierrc` (`singleQuote: true`, `trailingComma: "all"`).
+- The `lint` script runs `eslint --fix` and mutates files. Use `lint:check` for a read-only check.
 
 ## CI
 
-`.github/workflows/ci-pipepline.yml` (note the misspelled filename) has two jobs. `lint-and-type-check` (Node 20, `npm ci`, `npx turbo run lint` → `npx turbo run build`). `unit-tests` is a 4-entry matrix (`core`, `auth`, `notifications`, `@repo/shared`) that builds `@repo/contracts` and `@repo/shared`, runs `npm run test:cov -w <ws>` and uploads each `coverage/` directory as an artifact. Browser E2E and perf tests are not in CI; run them locally (see Commands).
+`.github/workflows/ci.yml` has two jobs. `lint-and-type-check` (Node 20, `npm ci`, `npx turbo run lint:check` → `npx turbo run build` → `npx turbo run type-check`). `unit-tests` is a 4-entry matrix (`core`, `auth`, `notifications`, `@repo/shared`) that builds `@repo/contracts` and `@repo/shared`, runs `npm run test:cov -w <ws>` and uploads each `coverage/` directory as an artifact. Browser E2E and perf tests are not in CI; run them locally (see Commands).

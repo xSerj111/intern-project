@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start --port ${CLIENT_PORT:-3000}",
     "lint": "eslint \"src/**/*.{ts,tsx}\" --fix",
+    "lint:check": "eslint \"src/**/*.{ts,tsx}\"",
     "type-check": "tsc --noEmit",
     "test": "jest --passWithNoTests",
     "test:e2e": "playwright test"
@@ -39,7 +40,12 @@
     "typescript-eslint": "^8.20.0"
   },
   "jest": {
-    "testPathIgnorePatterns": ["/node_modules/", "<rootDir>/e2e/"],
-    "modulePathIgnorePatterns": ["<rootDir>/e2e/"]
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "<rootDir>/e2e/"
+    ],
+    "modulePathIgnorePatterns": [
+      "<rootDir>/e2e/"
+    ]
   }
 }

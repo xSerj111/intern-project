@@ -20,7 +20,6 @@ npm run build -w core_microservice                             # nest build
 
 ## Gotchas
 
-- **`prisma` and `@prisma/*` are in the root `package.json` but unused.** Persistence is TypeORM everywhere.
 - **`auth_microservice` imports `src/...` paths in some files** (e.g. `infrastructure/events/http-event-publisher.ts`), so keep the path resolution in mind when moving files.
 
 ## Big picture: how the services fit together

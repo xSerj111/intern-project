@@ -1,7 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { HttpStatus } from '@nestjs/common';
-import { HTTP_CODE_METADATA } from '@nestjs/common/constants';
+import { GUARDS_METADATA, HTTP_CODE_METADATA } from '@nestjs/common/constants';
 import type { UserCreatedEvent } from '@repo/shared';
+import { InternalTokenGuard } from '../../common/observability/internal-token.guard';
+import { AppConfigService } from '../../config/app-config.service';
 import { ProfilesService } from '../profiles/profiles.service';
 import { InternalEventsController } from './internal-events.controller';
 
@@ -18,7 +20,10 @@ describe('InternalEventsController', () => {
     jest.resetAllMocks();
     const module: TestingModule = await Test.createTestingModule({
       controllers: [InternalEventsController],
-      providers: [{ provide: ProfilesService, useValue: profiles }],
+      providers: [
+        { provide: ProfilesService, useValue: profiles },
+        { provide: AppConfigService, useValue: { internalApiToken: 'x' } },
+      ],
     }).compile();
 
     controller = module.get(InternalEventsController);
@@ -54,5 +59,18 @@ describe('InternalEventsController', () => {
     ) as number;
 
     expect(code).toBe(HttpStatus.OK);
+  });
+
+  it('is protected by the internal token guard', () => {
+    const proto = InternalEventsController.prototype as unknown as Record<
+      string,
+      object
+    >;
+    const guards = Reflect.getMetadata(
+      GUARDS_METADATA,
+      proto.handleUserCreated,
+    ) as unknown[];
+
+    expect(guards).toContain(InternalTokenGuard);
   });
 });

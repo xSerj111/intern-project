@@ -10,7 +10,7 @@ import { INTERNAL_TOKEN_HEADER } from '@repo/shared';
 import type { WinstonLogger } from '@repo/shared';
 import { createInternalRouter } from './internal.routes';
 import { createInternalApp } from '../app';
-import { errorHandler } from '../middleware/error-handler.middleware';
+import { createErrorHandler } from '../middleware/error-handler.middleware';
 import { IAuthUserRepository } from '../domain/interfaces/auth-user-repository.interface';
 
 const USER_ID = '7c9e6679-7425-40de-944b-e07fc1f90ae7';
@@ -26,7 +26,7 @@ describe('internal routes', () => {
       '/internal',
       createInternalRouter(repository as unknown as IAuthUserRepository),
     );
-    app.use(errorHandler);
+    app.use(createErrorHandler({ error: jest.fn() } as unknown as WinstonLogger));
   });
 
   it('returns only userId and email for a known user', async () => {

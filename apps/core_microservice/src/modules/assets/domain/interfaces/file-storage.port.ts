@@ -2,15 +2,15 @@ export const FileStoragePortKey = Symbol.for('IFileStoragePort');
 
 export interface IFileStoragePort {
   /**
-   * Zwraca krótkotrwały podpisany URL GET do obiektu z prywatnego bucketu.
-   * Z `downloadName` ustawia `Content-Disposition: attachment`.
+   * Returns a short-lived signed GET URL for an object in the private bucket.
+   * With `downloadName` it sets `Content-Disposition: attachment`.
    */
   presignGet(
     key: string,
     options: { ttlSeconds: number; downloadName?: string },
   ): Promise<string>;
 
-  /** Usuwa obiekt z prywatnego bucketu. */
+  /** Deletes an object from the private bucket. */
   delete(key: string): Promise<void>;
 
   /**

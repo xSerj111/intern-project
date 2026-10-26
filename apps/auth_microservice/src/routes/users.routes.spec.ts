@@ -9,7 +9,7 @@ import { UniqueConstraintViolationError } from '@repo/shared';
 import type { WinstonLogger } from '@repo/shared';
 import { createUsersRouter } from './users.routes';
 import { UsersService } from '../services/users.service';
-import { errorHandler } from '../middleware/error-handler.middleware';
+import { createErrorHandler } from '../middleware/error-handler.middleware';
 import { AuthUser } from '../domain/entities/auth-user.entity';
 import { IAuthUserRepository } from '../domain/interfaces/auth-user-repository.interface';
 
@@ -45,7 +45,7 @@ describe('users routes', () => {
     app = express();
     app.use(express.json());
     app.use('/users', createUsersRouter(usersService));
-    app.use(errorHandler);
+    app.use(createErrorHandler({ error: jest.fn() } as unknown as WinstonLogger));
   });
 
   it('registers a user with 201 and never returns the password hash', async () => {
