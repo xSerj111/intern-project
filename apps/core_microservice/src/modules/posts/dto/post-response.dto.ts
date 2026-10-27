@@ -1,10 +1,10 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import type { IPostResponse } from '@repo/contracts';
+import type { IPostAssetResponse, IPostResponse } from '@repo/contracts';
 import { UserSummaryDto } from '../../../common/dto/user-summary.dto';
 import { Post, PostStatus } from '../domain/entities/post.entity';
 
 /** Response DTO for a post, built from the entity in its constructor. */
-export class PostAssetResponseDto {
+export class PostAssetResponseDto implements IPostAssetResponse {
   @ApiProperty()
   assetId!: string;
 
@@ -29,7 +29,7 @@ export type PostStats = Pick<
   'likeCount' | 'likedByMe' | 'commentCount'
 >;
 
-export class PostResponseDto {
+export class PostResponseDto implements IPostResponse {
   @ApiProperty()
   id: string;
 

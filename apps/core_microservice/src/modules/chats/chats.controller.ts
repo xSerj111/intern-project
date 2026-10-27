@@ -33,11 +33,15 @@ import { RenameGroupDto } from './dto/rename-group.dto';
 import { CreateDirectChatDto } from './dto/create-direct-chat.dto';
 import { ListChatsQueryDto } from './dto/list-chats-query.dto';
 import { MarkReadDto } from './dto/mark-read.dto';
-import { ConversationDetailDto } from './dto/message-response.dto';
+import {
+  ConversationDetailDto,
+  ConversationSummaryPageDto,
+  ReadStateDto,
+} from './dto/message-response.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
-@ApiTags('chats')
+@ApiTags('Chats')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller('chats')
@@ -92,6 +96,7 @@ export class ChatsController {
   @ApiResponse({
     status: HttpStatus.OK,
     description: 'Cursor page of conversation summaries',
+    type: ConversationSummaryPageDto,
   })
   list(
     @CurrentUser('sub') userId: string,
@@ -120,6 +125,7 @@ export class ChatsController {
   @ApiResponse({
     status: HttpStatus.OK,
     description: 'Updated read state',
+    type: ReadStateDto,
   })
   markRead(
     @CurrentUser('sub') userId: string,

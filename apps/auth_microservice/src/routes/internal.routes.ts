@@ -3,7 +3,7 @@ import { isUUID } from 'class-validator';
 import { EntityNotFoundError } from '@repo/shared';
 import { IAuthUserRepository } from '../domain/interfaces/auth-user-repository.interface';
 
-// Not documented with @openapi on purpose: these routes are internal only.
+// Left out of the OpenAPI document (config/openapi.ts) on purpose: internal only.
 export function createInternalRouter(userRepository: IAuthUserRepository): Router {
   const router = Router();
 

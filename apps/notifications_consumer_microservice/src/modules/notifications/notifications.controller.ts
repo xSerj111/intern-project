@@ -25,7 +25,7 @@ import {
 import { NotificationsService } from './notifications.service';
 
 /** Every route is scoped to the caller (`user.sub`); no recipient id is accepted from the request. */
-@ApiTags('notifications')
+@ApiTags('Notifications')
 @ApiBearerAuth()
 @Controller('notifications')
 @UseGuards(JwtAuthGuard)

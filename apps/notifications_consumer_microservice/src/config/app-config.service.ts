@@ -24,6 +24,16 @@ export class AppConfigService implements OnModuleInit {
     return Number(this.config.get<string | number>('NOTIFICATIONS_PORT', 3003));
   }
 
+  /**
+   * Whether to serve Swagger UI. `SWAGGER_ENABLED` ('true'/'false') wins;
+   * unset means on, except when NODE_ENV is production.
+   */
+  get swaggerEnabled(): boolean {
+    const raw = this.config.get<string>('SWAGGER_ENABLED');
+    if (raw !== undefined && raw !== '') return raw.toLowerCase() === 'true';
+    return this.config.get<string>('NODE_ENV') !== 'production';
+  }
+
   /** Postgres connection settings for the Notifications database. */
   get postgres() {
     return {

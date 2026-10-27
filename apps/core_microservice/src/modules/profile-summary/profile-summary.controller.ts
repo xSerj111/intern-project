@@ -5,7 +5,14 @@ import {
   ParseUUIDPipe,
   UseGuards,
 } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBadRequestResponse,
+  ApiNotFoundResponse,
+  ApiOkResponse,
+  ApiOperation,
+  ApiBearerAuth,
+  ApiTags,
+} from '@nestjs/swagger';
 import { OptionalJwtAuthGuard } from '../../common/auth/optional-jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { ProfileSummaryResponseDto } from './dto/profile-summary-response.dto';
@@ -23,7 +30,11 @@ export class ProfileSummaryController {
   @ApiOperation({
     summary: 'Profile with follower, following and post counts by auth user id',
   })
+  @ApiOkResponse({ type: ProfileSummaryResponseDto })
+  @ApiBadRequestResponse({ description: 'userId is not a UUID' })
+  @ApiNotFoundResponse({ description: 'User has no profile' })
   @UseGuards(OptionalJwtAuthGuard)
+  @ApiBearerAuth()
   @Get('by-user/:userId')
   async getByUser(
     @CurrentUser('sub') viewerId: string | undefined,

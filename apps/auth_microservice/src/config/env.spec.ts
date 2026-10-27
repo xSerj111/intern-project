@@ -32,6 +32,8 @@ const MANAGED_KEYS = [
   'BCRYPT_SALT_ROUNDS',
   'NODE_ENV',
   'AUTH_COOKIE_SAMESITE',
+  'AUTH_SERVICE_URL',
+  'SWAGGER_ENABLED',
 ];
 
 describe('config/env', () => {
@@ -81,6 +83,12 @@ describe('config/env', () => {
       );
     });
 
+    it('rejects a SWAGGER_ENABLED other than true or false', () => {
+      expect(() => loadEnv({ SWAGGER_ENABLED: 'yes' })).toThrow(
+        'SWAGGER_ENABLED must be one of: true, false',
+      );
+    });
+
     it('rejects an unknown AUTH_COOKIE_SAMESITE', () => {
       expect(() => loadEnv({ AUTH_COOKIE_SAMESITE: 'bogus' })).toThrow(
         'AUTH_COOKIE_SAMESITE must be one of: strict, lax, none',
@@ -111,6 +119,18 @@ describe('config/env', () => {
       expect(env.jwt.refreshTokenExpiry).toBe('7d');
       expect(env.crypto.saltRounds).toBe(10);
       expect(env.cookie).toEqual({ secure: false, sameSite: 'strict' });
+      expect(env.app.publicUrl).toBe('http://localhost:3002');
+      expect(env.swagger.enabled).toBe(true);
+    });
+
+    it('turns Swagger off by default in production', () => {
+      expect(loadEnv({ NODE_ENV: 'production', ...PROD_SECRETS }).swagger.enabled).toBe(
+        false,
+      );
+    });
+
+    it('treats an empty SWAGGER_ENABLED as unset', () => {
+      expect(loadEnv({ SWAGGER_ENABLED: '' }).swagger.enabled).toBe(true);
     });
   });
 
@@ -149,6 +169,26 @@ describe('config/env', () => {
       });
       expect(env.google.clientId).toBe('gid');
       expect(env.crypto.saltRounds).toBe(12);
+    });
+
+    it('reads the public URL and the Swagger switch', () => {
+      const env = loadEnv({
+        AUTH_SERVICE_URL: 'https://auth.example.com',
+        SWAGGER_ENABLED: 'false',
+      });
+
+      expect(env.app.publicUrl).toBe('https://auth.example.com');
+      expect(env.swagger.enabled).toBe(false);
+    });
+
+    it('lets SWAGGER_ENABLED=true override the production default', () => {
+      const env = loadEnv({
+        NODE_ENV: 'production',
+        SWAGGER_ENABLED: 'true',
+        ...PROD_SECRETS,
+      });
+
+      expect(env.swagger.enabled).toBe(true);
     });
 
     it.each(['strict', 'lax', 'none'] as const)('accepts sameSite %s', (value) => {

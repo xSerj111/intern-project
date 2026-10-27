@@ -117,6 +117,31 @@ describe('AppConfigService', () => {
     });
   });
 
+  describe('swaggerEnabled', () => {
+    it('is on by default and when NODE_ENV is not production', () => {
+      expect(build().swaggerEnabled).toBe(true);
+      expect(build({ NODE_ENV: 'development' }).swaggerEnabled).toBe(true);
+    });
+
+    it('is off by default in production, empty counts as unset', () => {
+      expect(build({ NODE_ENV: 'production' }).swaggerEnabled).toBe(false);
+      expect(
+        build({ NODE_ENV: 'production', SWAGGER_ENABLED: '' }).swaggerEnabled,
+      ).toBe(false);
+    });
+
+    it('lets SWAGGER_ENABLED override the default either way', () => {
+      expect(
+        build({ NODE_ENV: 'production', SWAGGER_ENABLED: 'true' })
+          .swaggerEnabled,
+      ).toBe(true);
+      expect(
+        build({ NODE_ENV: 'development', SWAGGER_ENABLED: 'false' })
+          .swaggerEnabled,
+      ).toBe(false);
+    });
+  });
+
   describe('port', () => {
     it('defaults to 3001', () => {
       expect(build().port).toBe(3001);

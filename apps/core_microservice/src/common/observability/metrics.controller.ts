@@ -1,8 +1,10 @@
 import { Controller, Get, Header, Inject, UseGuards } from '@nestjs/common';
+import { ApiExcludeController } from '@nestjs/swagger';
 import type { Registry } from 'prom-client';
 import { InternalTokenGuard } from './internal-token.guard';
 import { METRICS_REGISTRY } from './metrics.tokens';
 
+@ApiExcludeController()
 @Controller('metrics')
 export class MetricsController {
   constructor(@Inject(METRICS_REGISTRY) private readonly registry: Registry) {}

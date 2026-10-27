@@ -19,7 +19,7 @@ import { UpdatePreferencesDto } from './dto/update-preferences.dto';
 import { PreferencesService } from './preferences.service';
 
 /** Scoped to the caller (`user.sub`). */
-@ApiTags('notifications')
+@ApiTags('Notifications')
 @ApiBearerAuth()
 @Controller('notifications/preferences')
 @UseGuards(JwtAuthGuard)

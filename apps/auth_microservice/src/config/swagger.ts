@@ -1,28 +1,23 @@
-import swaggerJSDoc from 'swagger-jsdoc';
+import { Router, type Application } from 'express';
 import swaggerUi from 'swagger-ui-express';
-import type { Application } from 'express';
+import { env } from './env';
+import { buildOpenApiDocument } from './openapi';
 
-export function setupSwagger(app: Application): void {
-  const options: swaggerJSDoc.Options = {
-    definition: {
-      openapi: '3.0.0',
-      info: {
-        title: 'Auth Microservice API',
-        version: '1.0.0',
-        description: 'Authentication system endpoints (Express.js)',
-      },
-      servers: [
-        {
-          url: 'http://localhost:3001',
-          description: 'Local development server',
-        },
-      ],
-    },
+export const SWAGGER_UI_PATH = '/api';
+export const OPENAPI_JSON_PATH = '/api-json';
 
-    apis: ['./src/routes/*.ts'],
-  };
+/** Serves Swagger UI at `/api` and the raw document at `/api-json` when enabled. */
+export function setupSwagger(
+  app: Application,
+  enabled: boolean = env.swagger.enabled,
+): void {
+  if (!enabled) return;
 
-  const swaggerSpec = swaggerJSDoc(options);
-
-  app.use('/api', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+  const document = buildOpenApiDocument(env.app.publicUrl);
+  const router = Router();
+  router.get(OPENAPI_JSON_PATH, (_req, res) => {
+    res.json(document);
+  });
+  router.use(SWAGGER_UI_PATH, swaggerUi.serve, swaggerUi.setup(document));
+  app.use(router);
 }

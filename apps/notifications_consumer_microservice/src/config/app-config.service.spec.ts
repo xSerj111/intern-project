@@ -23,3 +23,26 @@ describe('AppConfigService INTERNAL_API_TOKEN', () => {
     expect(config.internalApiToken).toBe('a'.repeat(32));
   });
 });
+
+describe('AppConfigService swaggerEnabled', () => {
+  const build = (env: Record<string, string | undefined>) =>
+    new AppConfigService({
+      get: (key: string) => env[key],
+    } as unknown as ConfigService);
+
+  it.each([
+    [undefined, undefined, true],
+    ['development', undefined, true],
+    ['test', undefined, true],
+    ['production', undefined, false],
+    ['production', '', false],
+    ['production', 'true', true],
+    ['production', 'TRUE', true],
+    ['development', 'false', false],
+    [undefined, 'false', false],
+  ])('NODE_ENV=%s SWAGGER_ENABLED=%s -> %s', (nodeEnv, flag, expected) => {
+    expect(
+      build({ NODE_ENV: nodeEnv, SWAGGER_ENABLED: flag }).swaggerEnabled,
+    ).toBe(expected);
+  });
+});

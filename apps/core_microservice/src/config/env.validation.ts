@@ -144,6 +144,10 @@ export class EnvironmentVariables {
   PERF_INSTRUMENTATION?: string;
 
   @IsOptional()
+  @IsIn(['true', 'false'])
+  SWAGGER_ENABLED?: string;
+
+  @IsOptional()
   @IsInt()
   @Min(1)
   SLOW_QUERY_MS?: number;

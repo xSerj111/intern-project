@@ -176,30 +176,30 @@ description: "Task list for the final feature: docs, deployment, observability, 
 
 ## Phase 6: API documentation (Swagger) — Batch B6
 
-- [ ] T052 [P] [sonnet] Core Swagger setup.
+- [X] T052 [P] [sonnet] Core Swagger setup.
   - `apps/core_microservice/src/main.ts`: `addBearerAuth()`, one tag per controller with consistent capitalisation (`Profiles`, `Posts`, `Comments`, `Follows`, `Likes`, `Chats`, `Uploads`), fix the "3002" comment, and serve Swagger only when `SWAGGER_ENABLED` is true. The default is true unless `NODE_ENV=production`; add the var to `app-config.service.ts` and `env.validation.ts`.
   - Rename `@ApiTags('chats')` → `'Chats'` in `apps/core_microservice/src/modules/chats/*.controller.ts` (only the tag line).
   - Add `@ApiExcludeController()` to `apps/core_microservice/src/common/observability/health.controller.ts` and `metrics.controller.ts`.
-- [ ] T053 [P] [sonnet] Core posts and comments docs. `apps/core_microservice/src/modules/posts/posts.controller.ts` (9 routes) and `apps/core_microservice/src/modules/comments/comments.controller.ts` (4 routes) get `@ApiTags`, `@ApiBearerAuth` where guarded, `@ApiOperation({ summary })`, a typed 2xx response, and 400/401/403/404 where they apply. Follow `apps/core_microservice/src/modules/chats/chats.controller.ts`. Create response DTO classes with `@ApiProperty` where none exist (`modules/posts/dto/*-response.dto.ts`, `modules/comments/dto/*-response.dto.ts`), implementing the matching `@repo/contracts` interface. No runtime behaviour change: the DTO classes are for documentation unless the controller already maps to them
-- [ ] T054 [P] [sonnet] Core profiles, profile-summary and follows docs: response types for every route in `apps/core_microservice/src/modules/profiles/profiles.controller.ts`, `apps/core_microservice/src/modules/profile-summary/profile-summary.controller.ts` and `apps/core_microservice/src/modules/follows/follows.controller.ts`; `@ApiBearerAuth` on follows' guarded routes; error responses as in T053
-- [ ] T055 [P] [sonnet] Notifications docs: `@ApiProperty`/`@ApiPropertyOptional` on every DTO under `apps/notifications_consumer_microservice/src/modules/*/dto/` (list-notifications-query, mark-seen, update-preferences, notification-response page and unseen-count, preferences-response, notification-cursor), and the `SWAGGER_ENABLED` gate in its `main.ts` + config + `env.validation.ts`
-- [ ] T056 [P] [opus] Auth OpenAPI. `tsconfig` has `removeComments: true`, so the `@openapi` JSDoc never reaches `dist/`.
+- [X] T053 [P] [sonnet] Core posts and comments docs. `apps/core_microservice/src/modules/posts/posts.controller.ts` (9 routes) and `apps/core_microservice/src/modules/comments/comments.controller.ts` (4 routes) get `@ApiTags`, `@ApiBearerAuth` where guarded, `@ApiOperation({ summary })`, a typed 2xx response, and 400/401/403/404 where they apply. Follow `apps/core_microservice/src/modules/chats/chats.controller.ts`. Create response DTO classes with `@ApiProperty` where none exist (`modules/posts/dto/*-response.dto.ts`, `modules/comments/dto/*-response.dto.ts`), implementing the matching `@repo/contracts` interface. No runtime behaviour change: the DTO classes are for documentation unless the controller already maps to them
+- [X] T054 [P] [sonnet] Core profiles, profile-summary and follows docs: response types for every route in `apps/core_microservice/src/modules/profiles/profiles.controller.ts`, `apps/core_microservice/src/modules/profile-summary/profile-summary.controller.ts` and `apps/core_microservice/src/modules/follows/follows.controller.ts`; `@ApiBearerAuth` on follows' guarded routes; error responses as in T053
+- [X] T055 [P] [sonnet] Notifications docs: `@ApiProperty`/`@ApiPropertyOptional` on every DTO under `apps/notifications_consumer_microservice/src/modules/*/dto/` (list-notifications-query, mark-seen, update-preferences, notification-response page and unseen-count, preferences-response, notification-cursor), and the `SWAGGER_ENABLED` gate in its `main.ts` + config + `env.validation.ts`
+- [X] T056 [P] [opus] Auth OpenAPI. `tsconfig` has `removeComments: true`, so the `@openapi` JSDoc never reaches `dist/`.
   - Replace swagger-jsdoc with a typed OpenAPI 3 object in `apps/auth_microservice/src/config/openapi.ts`, covering every public route in `src/routes/*.ts` plus `GET /health`.
   - Give it component schemas for request/response bodies (login, register, google, me, refresh, logout, error), `bearerAuth`, and a `refreshCookie` (`apiKey` in cookie `refresh_token`) security scheme.
   - Take `servers` from the auth public URL/port in `config/env.ts`.
   - Serve it from `apps/auth_microservice/src/config/swagger.ts` behind `SWAGGER_ENABLED` (same default rule), and remove the JSDoc blocks from the route files.
   - Drop `swagger-jsdoc` from `package.json` if unused (orchestrator installs).
   - Unit spec: every route registered on the public router has a path in the document.
-- [ ] T057 [P] [haiku] Fix the `password` `@ApiProperty` description in `packages/shared/src/dtos/auth/create-user.dto.ts`; check the other shared DTOs for copy-paste descriptions
-- [ ] T058 [P] [haiku] `docs/realtime.md`: the `/realtime` Socket.IO contract (connect + auth, rooms, every client→server and server→client event with payload fields, ordering/ack rules), with `packages/contracts/src/realtime/events.ts` as the source of truth. Start from `specs/003-realtime-chat/contracts/realtime-socket.md`; include `deletedAt` on `message:deleted`; list notification events relayed from notifications
-- [ ] T059 [orch] `npm install` if T056 changed deps; build `@repo/shared`; `.env.example`: `SWAGGER_ENABLED` (commented, "default true unless NODE_ENV=production")
-- [ ] T060 [sonnet] OpenAPI coverage tests (wave 2):
+- [X] T057 [P] [haiku] Fix the `password` `@ApiProperty` description in `packages/shared/src/dtos/auth/create-user.dto.ts`; check the other shared DTOs for copy-paste descriptions
+- [X] T058 [P] [haiku] `docs/realtime.md`: the `/realtime` Socket.IO contract (connect + auth, rooms, every client→server and server→client event with payload fields, ordering/ack rules), with `packages/contracts/src/realtime/events.ts` as the source of truth. Start from `specs/003-realtime-chat/contracts/realtime-socket.md`; include `deletedAt` on `message:deleted`; list notification events relayed from notifications
+- [X] T059 [orch] `npm install` if T056 changed deps; build `@repo/shared`; `.env.example`: `SWAGGER_ENABLED` (commented, "default true unless NODE_ENV=production")
+- [X] T060 [sonnet] OpenAPI coverage tests (wave 2):
   - `apps/core_microservice/test/openapi.e2e-spec.ts` (boot via `createE2eApp`, build the document with the same `DocumentBuilder` config. Extract that config into a small exported function in `main.ts`'s neighbour `src/swagger.ts` so both use it. The core main.ts part goes to this lane in wave 2).
   - `apps/notifications_consumer_microservice/test/openapi.e2e-spec.ts` (same approach).
   - Assert every operation has a `summary`, at least one 2xx response, a response schema unless it is 204, and `security` when the route is guarded.
   - Also assert that `/health`, `/metrics` and `/internal/*` are absent.
-- [ ] T061 [gate] Builds, type-check, lint:check, unit tests with coverage, core and notifications e2e (including the openapi specs)
-- [ ] T062 [evidence] With the 3 services running: `GET /api-json` (core, notifications) and auth's JSON endpoint; record the path counts, and confirm zero operations without a summary and zero empty schemas
+- [X] T061 [gate] Builds, type-check, lint:check, unit tests with coverage, core and notifications e2e (including the openapi specs)
+- [X] T062 [evidence] With the 3 services running: `GET /api-json` (core, notifications) and auth's JSON endpoint; record the path counts, and confirm zero operations without a summary and zero empty schemas
 - [ ] T063 [human] Open the 3 Swagger UIs, use Authorize with a real access token, and run one guarded endpoint per service
 
 **Checkpoint**: Every public HTTP endpoint is documented with schemas and auth; a test fails if a new one isn't.

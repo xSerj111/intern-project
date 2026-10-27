@@ -1,7 +1,6 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { DataSource } from 'typeorm';
 import {
   DomainExceptionFilter,
@@ -15,6 +14,7 @@ import {
 import type { Registry } from 'prom-client';
 import { METRICS_REGISTRY } from './common/observability/metrics.tokens';
 import { AppConfigService } from './config/app-config.service';
+import { setupSwagger } from './swagger';
 import 'reflect-metadata';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
@@ -81,18 +81,8 @@ async function bootstrap() {
     new DomainExceptionFilter(createErrorsCounter(registry)),
   );
 
-  const config = new DocumentBuilder()
-    .setTitle('Innogram Core API')
-    .setDescription('The social graph, content, and interactions layer')
-    .setVersion('1.0')
-    .addTag('Profiles')
-    .addTag('Posts')
-    .addTag('Comments')
-    .build();
-
-  const document = SwaggerModule.createDocument(app, config);
-  // This hosts the UI at http://localhost:3002/api
-  SwaggerModule.setup('api', app, document);
+  // Swagger UI at /api (http://localhost:3001/api); off by default in production.
+  if (appConfig.swaggerEnabled) setupSwagger(app);
 
   app.enableShutdownHooks();
   await app.listen(appConfig.port);

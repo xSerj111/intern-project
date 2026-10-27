@@ -27,9 +27,22 @@ describe('env validation', () => {
         S3_PUBLIC_ENDPOINT: '',
         S3_USE_SSL: 'false',
         PERF_INSTRUMENTATION: 'false',
+        SWAGGER_ENABLED: '',
         UPLOAD_SWEEP_GRACE_SEC: '0',
       }),
     ).not.toThrow();
+  });
+
+  it('accepts true/false for SWAGGER_ENABLED and rejects anything else', () => {
+    expect(() =>
+      validate({ ...valid(), SWAGGER_ENABLED: 'true' }),
+    ).not.toThrow();
+    expect(() =>
+      validate({ ...valid(), SWAGGER_ENABLED: 'false' }),
+    ).not.toThrow();
+    expect(() => validate({ ...valid(), SWAGGER_ENABLED: 'yes' })).toThrow(
+      'SWAGGER_ENABLED',
+    );
   });
 
   it.each([

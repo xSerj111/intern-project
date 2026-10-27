@@ -11,15 +11,20 @@ import {
 import { ProfilesService } from './profiles.service';
 import { UpdateProfileDto } from '@repo/shared';
 import {
+  ApiBadRequestResponse,
   ApiBearerAuth,
+  ApiForbiddenResponse,
+  ApiNotFoundResponse,
+  ApiOkResponse,
   ApiOperation,
   ApiProperty,
   ApiTags,
+  ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { ArrayMaxSize, ArrayMinSize, IsArray, IsUUID } from 'class-validator';
 import { ProfileResponseDto } from './dto/profile-response.dto';
-import type { IChatUser } from '@repo/contracts';
+import { ProfileUserResponseDto } from './dto/profile-user-response.dto';
 import { SearchProfilesQueryDto } from './dto/search-profiles-query.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
@@ -60,6 +65,8 @@ export class ProfilesController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Fetch the authenticated user profile' })
+  @ApiOkResponse({ type: ProfileResponseDto })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
   @Get('me')
   async getMyProfile(
     @CurrentUser() user: { sub: string; email: string },
@@ -75,11 +82,14 @@ export class ProfilesController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Search users by username prefix' })
+  @ApiOkResponse({ type: [ProfileUserResponseDto] })
+  @ApiBadRequestResponse({ description: 'Invalid query parameters' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
   @Get('search')
   async searchProfiles(
     @Query() query: SearchProfilesQueryDto,
     @CurrentUser('sub') authUserId: string,
-  ): Promise<IChatUser[]> {
+  ): Promise<ProfileUserResponseDto[]> {
     return this.profilesService.searchProfiles(
       query.q,
       query.limit,
@@ -90,14 +100,20 @@ export class ProfilesController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Batch-resolve users by auth user id' })
+  @ApiOkResponse({ type: [ProfileUserResponseDto] })
+  @ApiBadRequestResponse({ description: 'Missing, malformed or too many ids' })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
   @Get('by-users')
   async getUsersByIds(
     @Query() query: UsersByIdsQueryDto,
-  ): Promise<IChatUser[]> {
+  ): Promise<ProfileUserResponseDto[]> {
     return this.profilesService.getUsersByIds(query.ids);
   }
 
   @ApiOperation({ summary: 'Fetch a profile by ID' })
+  @ApiOkResponse({ type: ProfileResponseDto })
+  @ApiBadRequestResponse({ description: 'id is not a UUID' })
+  @ApiNotFoundResponse({ description: 'Profile not found' })
   @Get(':id')
   async getProfile(
     @Param('id', ParseUUIDPipe) id: string,
@@ -108,6 +124,15 @@ export class ProfilesController {
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
   @ApiOperation({ summary: 'Update profile' })
+  @ApiOkResponse({ type: ProfileResponseDto })
+  @ApiBadRequestResponse({
+    description: 'Invalid body, display name, bio or avatar asset',
+  })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })
+  @ApiForbiddenResponse({
+    description: 'Not the profile owner, or avatar asset not owned by caller',
+  })
+  @ApiNotFoundResponse({ description: 'Profile or avatar asset not found' })
   @Patch(':id')
   async updateProfile(
     @Param('id', ParseUUIDPipe) id: string,

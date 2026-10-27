@@ -72,12 +72,26 @@ const parseSameSite = (value: string | undefined): SameSite => {
   return value as SameSite;
 };
 
+// Unset or empty = on outside production; otherwise exactly 'true' or 'false'.
+const parseSwaggerEnabled = (value: string | undefined): boolean => {
+  if (!value) return process.env.NODE_ENV !== 'production';
+  if (value !== 'true' && value !== 'false') {
+    throw new Error('SWAGGER_ENABLED must be one of: true, false');
+  }
+  return value === 'true';
+};
+
+const port = parseInt(process.env.AUTH_PORT || '3002', 10);
+
 export const env = {
   app: {
     // Auth service listens on 3002 by default (matches AUTH_SERVICE_URL in .env)
     // Own variable, not the shared PORT: every service reads the same root
     // config file, so a single PORT makes two services fight over one socket.
-    port: parseInt(process.env.AUTH_PORT || '3002', 10),
+    port,
+    // The URL browsers use to reach auth (same variable the client reads); the
+    // OpenAPI `servers` entry. Falls back to localhost on the public port.
+    publicUrl: process.env.AUTH_SERVICE_URL || `http://localhost:${port}`,
     coreMicroserviceUrl: requireEnv('CORE_SERVICE_URL'),
     allowedOrigins: requireEnv('AUTH_ALLOWED_ORIGINS'),
     // Separate listener for service-to-service endpoints; never published or proxied.
@@ -119,5 +133,8 @@ export const env = {
     // 'strict' works while client and auth share a site (localhost:3000 -> :3002);
     // a cross-site deployment needs 'none' (which browsers only accept with secure).
     sameSite: parseSameSite(process.env.AUTH_COOKIE_SAMESITE),
+  },
+  swagger: {
+    enabled: parseSwaggerEnabled(process.env.SWAGGER_ENABLED),
   },
 } as const;

@@ -82,6 +82,18 @@ describe('notifications env validation', () => {
     );
   });
 
+  it('accepts SWAGGER_ENABLED true/false and rejects anything else', () => {
+    expect(() =>
+      validate({ ...valid(), SWAGGER_ENABLED: 'true' }),
+    ).not.toThrow();
+    expect(() =>
+      validate({ ...valid(), SWAGGER_ENABLED: 'false' }),
+    ).not.toThrow();
+    expect(() => validate({ ...valid(), SWAGGER_ENABLED: 'yes' })).toThrow(
+      /SWAGGER_ENABLED/,
+    );
+  });
+
   it('rejects an INTERNAL_API_TOKEN shorter than 32 characters', () => {
     expect(() =>
       validate({ ...valid(), INTERNAL_API_TOKEN: 'y'.repeat(31) }),

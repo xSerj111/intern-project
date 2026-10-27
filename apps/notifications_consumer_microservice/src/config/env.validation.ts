@@ -33,6 +33,13 @@ export class EnvironmentVariables {
   @Max(PORT.max)
   NOTIFICATIONS_PORT?: number;
 
+  /** Serve Swagger UI; default true unless NODE_ENV=production. */
+  @IsOptional()
+  @Matches(/^(true|false)$/i, {
+    message: 'SWAGGER_ENABLED must be "true" or "false"',
+  })
+  SWAGGER_ENABLED?: string;
+
   @IsOptional()
   @IsString()
   @IsNotEmpty()

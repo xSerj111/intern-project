@@ -1,4 +1,5 @@
 import { Controller, Get, Inject, Res, UseGuards } from '@nestjs/common';
+import { ApiExcludeController } from '@nestjs/swagger';
 import type { IHealthReport, IHealthStatus } from '@repo/contracts';
 import { HealthCheck, httpStatusFor, runHealthChecks } from '@repo/shared';
 import type { Response } from 'express';
@@ -6,6 +7,7 @@ import { InternalTokenGuard } from './internal-token.guard';
 
 export const HEALTH_CHECKS = Symbol.for('HEALTH_CHECKS');
 
+@ApiExcludeController()
 @Controller('health')
 export class HealthController {
   constructor(@Inject(HEALTH_CHECKS) private readonly checks: HealthCheck[]) {}

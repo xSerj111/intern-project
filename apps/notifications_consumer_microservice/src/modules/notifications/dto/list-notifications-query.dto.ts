@@ -1,3 +1,4 @@
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import {
   IsInt,
@@ -35,10 +36,22 @@ export class ListNotificationsQueryDto {
    * Opaque `nextCursor` from the previous page; only older notifications are
    * returned. A bare ISO `occurredAt` is still accepted (no tie-breaker).
    */
+  @ApiPropertyOptional({
+    description:
+      'Opaque nextCursor from the previous page; only older notifications are returned. A bare ISO 8601 occurredAt is also accepted.',
+    example:
+      'WyIyMDI2LTAxLTAxVDEwOjAwOjAwLjEyM1oiLCIyMjIyMjIyMi0yMjIyLTQyMjItODIyMi0yMjIyMjIyMjIyMjIiXQ',
+  })
   @IsOptional()
   @IsNotificationCursor()
   before?: string;
 
+  @ApiPropertyOptional({
+    description: 'Page size.',
+    minimum: 1,
+    maximum: NOTIFICATIONS_MAX_LIMIT,
+    default: NOTIFICATIONS_DEFAULT_LIMIT,
+  })
   @IsOptional()
   @Type(() => Number)
   @IsInt()

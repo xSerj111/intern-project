@@ -100,6 +100,15 @@ export class AppConfigService {
     return this.config.get<string>('PERF_INSTRUMENTATION') === 'true';
   }
 
+  /** Serves Swagger UI at `/api`; on unless `NODE_ENV=production`, `SWAGGER_ENABLED` overrides. */
+  get swaggerEnabled(): boolean {
+    const raw = this.config.get<string>('SWAGGER_ENABLED');
+    if (raw === undefined || raw === '') {
+      return this.config.get<string>('NODE_ENV') !== 'production';
+    }
+    return raw.toLowerCase() === 'true';
+  }
+
   /** Queries slower than this many milliseconds are logged as slow. */
   get slowQueryMs(): number {
     return this.positiveInt('SLOW_QUERY_MS', 200);

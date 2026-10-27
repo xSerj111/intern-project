@@ -1,6 +1,5 @@
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import {
   accessLogMiddleware,
   createErrorsCounter,
@@ -17,6 +16,7 @@ import { DataSource } from 'typeorm';
 import { AppModule } from './app.module';
 import { METRICS_REGISTRY } from './common/observability/metrics.tokens';
 import { AppConfigService } from './config/app-config.service';
+import { setupSwagger } from './swagger';
 
 async function bootstrap() {
   const logger = new WinstonLogger('NotificationsSystem');
@@ -49,13 +49,8 @@ async function bootstrap() {
     new DomainExceptionFilter(createErrorsCounter(registry)),
   );
 
-  const config = new DocumentBuilder()
-    .setTitle('Innogram Notifications API')
-    .setDescription('Notification feed and email preferences')
-    .setVersion('1.0')
-    .addBearerAuth()
-    .build();
-  SwaggerModule.setup('api', app, SwaggerModule.createDocument(app, config));
+  // On by default; off in production unless SWAGGER_ENABLED=true.
+  if (appConfig.swaggerEnabled) setupSwagger(app);
 
   // Consumers drain, then channels, Redis and SMTP close on SIGTERM.
   app.enableShutdownHooks();

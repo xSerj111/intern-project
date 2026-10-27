@@ -18,6 +18,7 @@ import type { ILikeState } from '@repo/contracts';
 
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { LikeStateDto } from './dto/like-state-response.dto';
 import { LikesService } from './likes.service';
 
 @ApiTags('Likes')
@@ -33,6 +34,7 @@ export class LikesController {
   @ApiResponse({
     status: HttpStatus.OK,
     description: 'Like state for the post after the call',
+    type: LikeStateDto,
   })
   likePost(
     @CurrentUser('sub') userId: string,
@@ -46,6 +48,7 @@ export class LikesController {
   @ApiResponse({
     status: HttpStatus.OK,
     description: 'Like state for the post after the call',
+    type: LikeStateDto,
   })
   unlikePost(
     @CurrentUser('sub') userId: string,
@@ -60,6 +63,7 @@ export class LikesController {
   @ApiResponse({
     status: HttpStatus.OK,
     description: 'Like state for the comment after the call',
+    type: LikeStateDto,
   })
   likeComment(
     @CurrentUser('sub') userId: string,
@@ -73,6 +77,7 @@ export class LikesController {
   @ApiResponse({
     status: HttpStatus.OK,
     description: 'Like state for the comment after the call',
+    type: LikeStateDto,
   })
   unlikeComment(
     @CurrentUser('sub') userId: string,

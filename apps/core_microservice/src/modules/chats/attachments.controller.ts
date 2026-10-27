@@ -17,7 +17,7 @@ import { AttachmentUrlDto } from './dto/message-response.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
-@ApiTags('chats')
+@ApiTags('Chats')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller('chats')
