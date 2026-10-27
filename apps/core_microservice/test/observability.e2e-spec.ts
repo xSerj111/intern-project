@@ -123,6 +123,20 @@ describe('Observability endpoints (e2e)', () => {
     });
   });
 
+  describe('X-Request-Id', () => {
+    it('echoes an incoming id', async () => {
+      const res = await http.get('/health').set('X-Request-Id', 'e2e-123');
+      expect(res.headers['x-request-id']).toBe('e2e-123');
+    });
+
+    it('generates a UUID when none is sent', async () => {
+      const res = await http.get('/health');
+      expect(res.headers['x-request-id']).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+      );
+    });
+  });
+
   describe('a hanging dependency check', () => {
     let hanging: E2eApp;
 

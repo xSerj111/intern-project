@@ -3,8 +3,12 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, type TestingModuleBuilder } from '@nestjs/testing';
 import {
   DomainExceptionFilter,
+  WinstonLogger,
+  accessLogMiddleware,
+  createErrorsCounter,
   httpMetricsMiddleware,
   registerDbPoolGauge,
+  requestIdMiddleware,
 } from '@repo/shared';
 import type { Registry } from 'prom-client';
 import request from 'supertest';
@@ -70,6 +74,8 @@ export async function createE2eApp(
     // main.ts wiring: the registry is created per app (MetricsModule factory),
     // so the non-idempotent pool gauge is registered exactly once here.
     const registry = app.get<Registry>(METRICS_REGISTRY);
+    app.use(requestIdMiddleware());
+    app.use(accessLogMiddleware(new WinstonLogger('Http')));
     app.use(httpMetricsMiddleware(registry));
     const db = app.get(DataSource);
     registerDbPoolGauge(registry, () => {
@@ -85,7 +91,9 @@ export async function createE2eApp(
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, transform: true }),
     );
-    app.useGlobalFilters(new DomainExceptionFilter());
+    app.useGlobalFilters(
+      new DomainExceptionFilter(createErrorsCounter(registry)),
+    );
     await app.listen(0);
     return {
       app,

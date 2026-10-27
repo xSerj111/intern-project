@@ -76,7 +76,11 @@ describe('internal app', () => {
     const dataSource = {
       getRepository: () => ({ metadata: { tableName: 'auth_users' }, findOne }),
     } as unknown as DataSource;
-    const logger = { warn: jest.fn() } as unknown as WinstonLogger;
+    const logger = {
+      warn: jest.fn(),
+      info: jest.fn(),
+      error: jest.fn(),
+    } as unknown as WinstonLogger;
     app = createInternalApp(dataSource, logger);
   });
 

@@ -5,12 +5,16 @@ import cookieParser from 'cookie-parser';
 import { DataSource } from 'typeorm';
 import type { Redis } from 'ioredis';
 import {
+  accessLogMiddleware,
+  createErrorsCounter,
   createMetricsRegistry,
   httpMetricsMiddleware,
   httpStatusFor,
   registerDbPoolGauge,
+  requestIdMiddleware,
   requireInternalToken,
   runHealthChecks,
+  type ErrorsCounterLike,
   type HealthCheck,
   type WinstonLogger,
 } from '@repo/shared';
@@ -89,14 +93,20 @@ export function createApp(
 
   const registry = observability.metricsRegistry ?? createMetricsRegistry('auth');
   registerDbPoolGauge(registry, () => getPgPool(dataSource));
+  const errorsCounter = createErrorsCounter(registry);
+  // Shared with the internal listener (see `createInternalApp`), which has no registry of its own.
+  app.locals.errorsCounter = errorsCounter;
   const healthChecks = observability.healthChecks ?? [
     createDatabaseCheck(dataSource),
     // Same Redis server as the session store; this connection is never in subscriber mode.
     createRedisCheck(sessionRedisClient),
   ];
 
+  // First, so every later middleware and log line runs inside the request context.
+  app.use(requestIdMiddleware());
   // Before every router, so all routes are timed (it skips /health and /metrics itself).
   app.use(httpMetricsMiddleware(registry));
+  app.use(accessLogMiddleware(logger));
 
   app.use(express.json());
   app.use(cookieParser());
@@ -141,7 +151,7 @@ export function createApp(
   app.use('/users', createUsersRouter(usersService));
   app.use('/auth', createAuthRouter(authService));
 
-  app.use(createErrorHandler(logger));
+  app.use(createErrorHandler(logger, errorsCounter));
 
   return app;
 }
@@ -154,9 +164,13 @@ export function createApp(
 export function createInternalApp(
   dataSource: DataSource,
   logger: WinstonLogger,
+  /** The public app's `errors_total` counter (`publicApp.locals.errorsCounter`); no-op when omitted. */
+  errorsCounter?: ErrorsCounterLike,
 ): Application {
   const app = express();
 
+  app.use(requestIdMiddleware());
+  app.use(accessLogMiddleware(logger));
   app.use(express.json());
   app.use(helmet());
 
@@ -166,7 +180,7 @@ export function createInternalApp(
     createInternalRouter(new AuthUserRepository(dataSource)),
   );
 
-  app.use(createErrorHandler(logger));
+  app.use(createErrorHandler(logger, errorsCounter));
 
   return app;
 }

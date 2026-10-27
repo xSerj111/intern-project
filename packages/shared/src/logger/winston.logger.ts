@@ -1,8 +1,12 @@
 import * as winston from "winston";
+import { currentRequestId } from "../observability/request-context";
 import { LogData, LogLevel, Logger } from "./logger.port";
 
 export interface WinstonLoggerOptions {
-  /** Minimum level to emit (winston threshold). Defaults to `debug`. */
+  /**
+   * Minimum level to emit (winston threshold). Defaults to `LOG_LEVEL`, else
+   * `info` when `NODE_ENV=production` and `debug` otherwise.
+   */
   level?: LogLevel;
   /** Colorized human-readable output (dev) vs JSON (prod). */
   pretty?: boolean;
@@ -49,21 +53,90 @@ const stringify = (value: unknown): string => {
 };
 
 /**
- * Process-wide uncaughtException / unhandledRejection handlers. winston adds
- * one process listener per logger that sets them, so they are registered once
- * on a dedicated logger instead of on every WinstonLogger instance.
+ * Level from `LOG_LEVEL` when it names a {@link LogLevel}; otherwise `info` in
+ * production and `debug` elsewhere. `invalid` carries a rejected value.
  */
-let processHandlersLogger: winston.Logger | undefined;
+export function resolveLogLevel(env: NodeJS.ProcessEnv = process.env): {
+  level: LogLevel;
+  invalid?: string;
+} {
+  const fallback = env.NODE_ENV === "production" ? LogLevel.Info : LogLevel.Debug;
+  const raw = env.LOG_LEVEL?.trim().toLowerCase();
+  if (!raw) return { level: fallback };
+  if (isLogLevel(raw)) return { level: raw };
+  return { level: fallback, invalid: env.LOG_LEVEL };
+}
 
-function ensureProcessHandlers(createTransport: () => winston.transport): void {
-  if (processHandlersLogger) return;
-  const transport = createTransport();
-  processHandlersLogger = winston.createLogger({
-    levels: LEVELS,
-    transports: [transport],
-    exceptionHandlers: [transport],
-    rejectionHandlers: [transport],
-  });
+/** An invalid `LOG_LEVEL` is reported once per process, not per logger. */
+let invalidLevelWarned = false;
+
+/** Adds the current request id unless the caller passed a correlation id. */
+function withCorrelationId<T extends { correlationId?: string }>(meta: T): T {
+  if (meta.correlationId) return meta;
+  const correlationId = currentRequestId();
+  return correlationId ? { ...meta, correlationId } : meta;
+}
+
+type FatalProcessEvent = "uncaughtException" | "unhandledRejection";
+
+/** Set by `createErrorsCounter` so process errors count as `source="process"`. */
+let processErrorRecorder: ((error: unknown) => void) | undefined;
+
+export function setProcessErrorRecorder(
+  recorder: ((error: unknown) => void) | undefined,
+): void {
+  processErrorRecorder = recorder;
+}
+
+/**
+ * The single process-error path: one JSON line on stderr (with stack and the
+ * current request id), one `errors_total{source="process"}` increment, then
+ * exit 1. Written synchronously so nothing is lost before the exit.
+ */
+export function handleFatalProcessError(
+  event: FatalProcessEvent,
+  reason: unknown,
+  exit: (code: number) => void = (code) => process.exit(code),
+): void {
+  try {
+    const error = reason instanceof Error ? reason : undefined;
+    const correlationId = currentRequestId();
+    process.stderr.write(
+      `${JSON.stringify({
+        timestamp: new Date().toISOString(),
+        level: LogLevel.Error,
+        message: error ? error.message : stringify(reason),
+        context: "Process",
+        event,
+        errorType: error?.name ?? "NonError",
+        ...(correlationId ? { correlationId } : {}),
+        ...(error?.stack ? { stack: error.stack } : {}),
+      })}\n`,
+    );
+    processErrorRecorder?.(reason);
+  } catch {
+    // Never let reporting prevent the exit.
+  } finally {
+    exit(1);
+  }
+}
+
+/**
+ * Registers the process-wide uncaughtException / unhandledRejection handlers
+ * once (not per WinstonLogger instance). winston's own exception/rejection
+ * handlers are not used, so each fatal error is logged exactly once.
+ */
+let processHandlersInstalled = false;
+
+function ensureProcessHandlers(): void {
+  if (processHandlersInstalled) return;
+  processHandlersInstalled = true;
+  process.on("uncaughtException", (error) =>
+    handleFatalProcessError("uncaughtException", error),
+  );
+  process.on("unhandledRejection", (reason) =>
+    handleFatalProcessError("unhandledRejection", reason),
+  );
 }
 
 /**
@@ -83,12 +156,21 @@ export class WinstonLogger implements Logger {
   ) {
     const pretty = options.pretty ?? process.env.NODE_ENV !== "production";
 
+    const resolved = resolveLogLevel();
+
     this.logger = winston.createLogger({
-      level: options.level ?? LogLevel.Debug,
+      level: options.level ?? resolved.level,
       levels: LEVELS,
       transports: [this.createConsoleTransport(pretty)],
     });
-    ensureProcessHandlers(() => this.createConsoleTransport(pretty));
+    if (resolved.invalid !== undefined && !invalidLevelWarned) {
+      invalidLevelWarned = true;
+      this.logger.warn(
+        `Invalid LOG_LEVEL "${resolved.invalid}"; using "${resolved.level}"`,
+        { context: "WinstonLogger" },
+      );
+    }
+    ensureProcessHandlers();
   }
 
   log(level: LogLevel, message: string, data?: LogData): void;
@@ -143,7 +225,11 @@ export class WinstonLogger implements Logger {
   }
 
   private write(level: LogLevel, message: string, data?: LogData): void {
-    this.logger.log(level, message, { context: this.context, ...data });
+    this.logger.log(
+      level,
+      message,
+      withCorrelationId({ context: this.context, ...data }),
+    );
   }
 
   /**
@@ -173,11 +259,15 @@ export class WinstonLogger implements Logger {
     if (err instanceof Error) stack ??= err.stack;
 
     const { error: _error, ...data } = obj ?? {};
-    this.logger.log(level, stringify(message), {
-      ...(context ? { context } : {}),
-      ...data,
-      ...(stack ? { stack } : {}),
-    });
+    this.logger.log(
+      level,
+      stringify(message),
+      withCorrelationId({
+        ...(context ? { context } : {}),
+        ...data,
+        ...(stack ? { stack } : {}),
+      }),
+    );
   }
 
   private createConsoleTransport(pretty: boolean): winston.transport {

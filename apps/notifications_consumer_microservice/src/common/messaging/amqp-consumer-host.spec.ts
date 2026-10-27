@@ -1,7 +1,12 @@
 import { Logger } from '@nestjs/common';
 import type { AmqpConnectionManager } from 'amqp-connection-manager';
 import type { ConfirmChannel, ConsumeMessage } from 'amqplib';
-import { PostLikedPayload, RoutingKeys } from '@repo/shared';
+import {
+  createMetricsRegistry,
+  currentRequestId,
+  PostLikedPayload,
+  RoutingKeys,
+} from '@repo/shared';
 import { AmqpConsumerHost } from './amqp-consumer-host';
 import { PoisonMessageError } from './consumer.types';
 import { ATTEMPTS_HEADER, ORIGINAL_ROUTING_KEY_HEADER } from './retry-policy';
@@ -191,6 +196,66 @@ describe('AmqpConsumerHost', () => {
     });
     expect(channel.ack).toHaveBeenCalledWith(msg);
     expect(channel.sendToQueue).not.toHaveBeenCalled();
+  });
+
+  describe('observability', () => {
+    it('runs the handler in the request context of x-correlation-id', async () => {
+      await boot();
+      let seen: string | undefined;
+      eventHandler.handle.mockImplementationOnce(async () => {
+        await Promise.resolve();
+        seen = currentRequestId();
+      });
+
+      await receive(
+        'notifications.events',
+        message(likedEnvelope, { 'x-correlation-id': 'req-abc-1' }),
+      );
+
+      expect(seen).toBe('req-abc-1');
+    });
+
+    it('generates an id when the header is missing or invalid', async () => {
+      await boot();
+      const seen: (string | undefined)[] = [];
+      eventHandler.handle.mockImplementation(() => {
+        seen.push(currentRequestId());
+        return Promise.resolve();
+      });
+
+      await receive('notifications.events', message(likedEnvelope));
+      await receive(
+        'notifications.events',
+        message(likedEnvelope, { 'x-correlation-id': 'bad id\n' }),
+      );
+
+      expect(seen[0]).toMatch(/^[0-9a-f-]{36}$/);
+      expect(seen[1]).toMatch(/^[0-9a-f-]{36}$/);
+      expect(currentRequestId()).toBeUndefined();
+    });
+
+    it('counts handler failures in errors_total{source="amqp"}', async () => {
+      const registry = createMetricsRegistry('test');
+      host = new AmqpConsumerHost(
+        connection as unknown as AmqpConnectionManager,
+        registry,
+      );
+      host.registerEventHandler(
+        [RoutingKeys.POST_LIKED],
+        PostLikedPayload,
+        eventHandler,
+      );
+      await boot();
+      eventHandler.handle.mockRejectedValueOnce(new TypeError('boom'));
+
+      await receive('notifications.events', message(likedEnvelope));
+
+      const text = await registry.metrics();
+      expect(text).toContain(
+        'errors_total{source="amqp",type="TypeError",service="test"} 1',
+      );
+      expect(text).not.toContain('boom');
+    });
   });
 
   it('re-publishes a failed event to the retry queue with x-attempts + 1, then acks', async () => {

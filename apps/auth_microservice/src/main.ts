@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { env } from './config/env';
 
-import { WinstonLogger } from '@repo/shared';
+import { WinstonLogger, type ErrorsCounterLike } from '@repo/shared';
 import { initDatabase } from './config/database';
 import { createApp, createInternalApp } from './app';
 import { createRedisClient } from './config/redis';
@@ -22,7 +22,11 @@ async function bootstrap() {
     // Dedicated connection for session-revocation pub/sub (publishing needs no subscriber mode)
     const sessionRedisClient = createRedisClient();
     const app = createApp(dataSource, logger, redisService, sessionRedisClient);
-    const internalApp = createInternalApp(dataSource, logger);
+    const internalApp = createInternalApp(
+      dataSource,
+      logger,
+      app.locals.errorsCounter as ErrorsCounterLike,
+    );
     const port = env.app.port;
 
     // 3. Uruchomienie serwera

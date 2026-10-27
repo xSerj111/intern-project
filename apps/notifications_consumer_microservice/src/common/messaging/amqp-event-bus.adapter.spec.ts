@@ -1,7 +1,11 @@
 import { Logger } from '@nestjs/common';
 import type { AmqpConnectionManager } from 'amqp-connection-manager';
 import type { ConfirmChannel } from 'amqplib';
-import { EXCHANGE_NAME, RoutingKeys } from '@repo/shared';
+import {
+  EXCHANGE_NAME,
+  RoutingKeys,
+  runWithRequestContext,
+} from '@repo/shared';
 import type { EmailJob, EventEnvelope } from '@repo/shared';
 import { AmqpEventBusAdapter } from './amqp-event-bus.adapter';
 
@@ -73,6 +77,32 @@ describe('AmqpEventBusAdapter', () => {
       messageId: envelope.eventId,
       contentType: 'application/json',
     });
+  });
+
+  it('forwards the current request id as x-correlation-id', async () => {
+    await runWithRequestContext('req-42', () =>
+      bus.publish(RoutingKeys.NOTIFICATION_SEEN, envelope),
+    );
+
+    const [, , , options] = channel.publish.mock.calls[0] as [
+      string,
+      string,
+      Buffer,
+      { headers?: Record<string, string> },
+    ];
+    expect(options.headers).toEqual({ 'x-correlation-id': 'req-42' });
+  });
+
+  it('sends no correlation header outside a request context', async () => {
+    await bus.publish(RoutingKeys.NOTIFICATION_SEEN, envelope);
+
+    const [, , , options] = channel.publish.mock.calls[0] as [
+      string,
+      string,
+      Buffer,
+      { headers?: unknown },
+    ];
+    expect(options.headers).toBeUndefined();
   });
 
   it('rejects when the broker does not confirm', async () => {

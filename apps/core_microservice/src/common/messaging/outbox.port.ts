@@ -6,7 +6,8 @@ export interface IOutboxPort {
    * Inserts a pending event through the CALLER's transaction manager, so the
    * row commits or rolls back together with the business action. After the
    * insert the port signals `onPending` listeners (post-commit when `tx` is a
-   * transaction manager).
+   * transaction manager). The row's `correlationId` is the current request
+   * id (`currentRequestId()`), if any.
    */
   add(
     routingKey: string,

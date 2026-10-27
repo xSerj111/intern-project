@@ -2,10 +2,19 @@
 import { randomUUID } from 'node:crypto';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
-import { DomainExceptionFilter } from '@repo/shared';
+import type { AmqpConnectionManager } from 'amqp-connection-manager';
+import type { Channel, ConsumeMessage } from 'amqplib';
+import {
+  CORRELATION_ID_HEADER,
+  DomainExceptionFilter,
+  EXCHANGE_NAME,
+  REQUEST_ID_HEADER,
+  requestIdMiddleware,
+} from '@repo/shared';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { AppModule } from './../src/app.module';
+import { AMQP_CONNECTION } from './../src/common/messaging/amqp-connection.provider';
 import { OUTBOX_PORT } from './../src/common/messaging/outbox.port';
 import type { IOutboxPort } from './../src/common/messaging/outbox.port';
 import {
@@ -107,6 +116,8 @@ describe('Social: likes, events, outbox (e2e)', () => {
       imports: [AppModule],
     }).compile();
     app = moduleRef.createNestApplication();
+    // main.ts wiring: requests run inside a request context (X-Request-Id).
+    app.use(requestIdMiddleware());
     app.useGlobalPipes(
       new ValidationPipe({ whitelist: true, transform: true }),
     );
@@ -585,6 +596,13 @@ describe('Social: likes, events, outbox (e2e)', () => {
         const claimed = await outbox.claimPending(100, tx);
         expect(claimed.map((r) => r.id)).toContain(id);
 
+        // Written outside any request context: no correlation id.
+        const [stored] = await tx.query(
+          'SELECT correlation_id FROM outbox_events WHERE id = $1',
+          [id],
+        );
+        expect(stored.correlation_id).toBeNull();
+
         await outbox.markFailed(id, 'boom', tx);
         const failed = await tx.query(
           'SELECT attempts, "lastError", "publishedAt" FROM outbox_events WHERE id = $1',
@@ -611,6 +629,59 @@ describe('Social: likes, events, outbox (e2e)', () => {
       ]);
       expect(final).toHaveLength(1);
       expect(final[0].publishedAt).not.toBeNull();
+    });
+
+    it('stores X-Request-Id as correlation_id and publishes it as x-correlation-id', async () => {
+      const received: ConsumeMessage[] = [];
+      const connection = app.get<AmqpConnectionManager>(AMQP_CONNECTION);
+      const channel = connection.createChannel({
+        name: 'social-e2e-correlation',
+        setup: async (ch: Channel) => {
+          const { queue } = await ch.assertQueue('', {
+            exclusive: true,
+            autoDelete: true,
+          });
+          await ch.bindQueue(queue, EXCHANGE_NAME, 'social.post.liked');
+          await ch.consume(
+            queue,
+            (msg) => {
+              if (msg) received.push(msg);
+            },
+            { noAck: true },
+          );
+        },
+      });
+      try {
+        await channel.waitForConnect();
+        const postId = (await createPublishedPost(a)).id;
+        const requestId = `social-e2e-${randomUUID()}`;
+
+        const res = await http
+          .put(`/posts/${postId}/like`)
+          .set(authed(b))
+          .set(REQUEST_ID_HEADER, requestId)
+          .expect(200);
+        expect(res.headers[REQUEST_ID_HEADER]).toBe(requestId);
+
+        const [event] = await outboxRows('social.post.liked', 'postId', postId);
+        const [stored] = await rows<{ correlation_id: string | null }>(
+          'SELECT correlation_id FROM outbox_events WHERE id = $1',
+          [event.id],
+        );
+        expect(stored.correlation_id).toBe(requestId);
+
+        const deadline = Date.now() + 10000;
+        const find = () =>
+          received.find((m) => m.properties.messageId === event.id);
+        while (!find() && Date.now() < deadline) await sleep(100);
+        const message = find();
+        expect(message).toBeDefined();
+        expect((message!.properties.headers ?? {})[CORRELATION_ID_HEADER]).toBe(
+          requestId,
+        );
+      } finally {
+        await channel.close();
+      }
     });
 
     it('an outbox row rolls back with its transaction', async () => {

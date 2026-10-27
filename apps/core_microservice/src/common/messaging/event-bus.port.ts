@@ -9,8 +9,18 @@ export const EVENT_BUS = Symbol.for('EVENT_BUS');
  * callers (the outbox relay) can retry and keep at-least-once delivery.
  */
 export interface EventBusPort {
-  /** Routed by `envelope.type`, which equals the routing key. */
-  publish<T>(envelope: EventEnvelope<T>): Promise<void>;
+  /**
+   * Routed by `envelope.type`, which equals the routing key. A `correlationId`
+   * is sent as the `x-correlation-id` message header.
+   */
+  publish<T>(
+    envelope: EventEnvelope<T>,
+    options?: PublishOptions,
+  ): Promise<void>;
+}
+
+export interface PublishOptions {
+  correlationId?: string;
 }
 
 /**

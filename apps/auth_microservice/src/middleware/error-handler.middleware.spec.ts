@@ -13,15 +13,17 @@ import { createErrorHandler } from './error-handler.middleware';
 
 describe('createErrorHandler', () => {
   let logger: { error: jest.Mock };
+  let counter: { inc: jest.Mock };
 
   beforeEach(() => {
     logger = { error: jest.fn() };
+    counter = { inc: jest.fn() };
   });
 
   const run = (err: Error, req: Partial<Request> = {}) => {
     const json = jest.fn();
     const status = jest.fn().mockReturnValue({ json });
-    createErrorHandler(logger as unknown as WinstonLogger)(
+    createErrorHandler(logger as unknown as WinstonLogger, counter)(
       err,
       req as Request,
       { status } as unknown as Response,
@@ -91,5 +93,30 @@ describe('createErrorHandler', () => {
   it('does not log domain errors', () => {
     run(new AccessDeniedError());
     expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it('counts unknown errors as source=http with the class name as type', () => {
+    class BoomError extends Error {}
+    run(new BoomError('boom'));
+    expect(counter.inc).toHaveBeenCalledTimes(1);
+    expect(counter.inc).toHaveBeenCalledWith({ source: 'http', type: 'BoomError' });
+  });
+
+  it('does not count domain errors', () => {
+    run(new AccessDeniedError());
+    expect(counter.inc).not.toHaveBeenCalled();
+  });
+
+  it('maps malformed JSON to 400 without echoing the body, logging or counting', () => {
+    const err = Object.assign(new SyntaxError('Unexpected token s in JSON'), {
+      type: 'entity.parse.failed',
+      body: '{"password":"secret-pass"',
+    });
+    const { status, json } = run(err);
+    expect(status).toHaveBeenCalledWith(400);
+    expect(json).toHaveBeenCalledWith({ message: 'Malformed JSON body' });
+    expect(JSON.stringify(json.mock.calls)).not.toContain('secret-pass');
+    expect(logger.error).not.toHaveBeenCalled();
+    expect(counter.inc).not.toHaveBeenCalled();
   });
 });

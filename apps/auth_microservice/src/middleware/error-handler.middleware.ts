@@ -6,11 +6,16 @@ import {
   UniqueConstraintViolationError,
   DatabaseQueryError,
   UnauthorizedError,
-  WinstonLogger,
+  recordError,
+  type ErrorsCounterLike,
+  type WinstonLogger,
 } from '@repo/shared';
 import { ErrorRequestHandler, NextFunction, Request, Response } from 'express';
 
-export function createErrorHandler(logger: WinstonLogger): ErrorRequestHandler {
+export function createErrorHandler(
+  logger: WinstonLogger,
+  errorsCounter?: ErrorsCounterLike,
+): ErrorRequestHandler {
   return (
     err: Error,
     req: Request,
@@ -19,7 +24,14 @@ export function createErrorHandler(logger: WinstonLogger): ErrorRequestHandler {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars -- required for Express arity
     next: NextFunction,
   ): void => {
+    if (isMalformedJson(err)) {
+      // Client error: neither logged nor counted, and the body is never echoed.
+      res.status(400).json({ message: 'Malformed JSON body' });
+      return;
+    }
+
     if (!(err instanceof DomainError)) {
+      recordError(errorsCounter, 'http', err);
       // Message + stack only: never the raw error object or the request body.
       // Nest-style (message, stack, context) puts the stack in its own field.
       logger.error(`Unhandled Server Error: ${err?.message}`, err?.stack, 'ErrorHandler');
@@ -29,6 +41,11 @@ export function createErrorHandler(logger: WinstonLogger): ErrorRequestHandler {
 
     sendDomainError(err, res);
   };
+}
+
+/** body-parser (`express.json()`) tags unparseable bodies with this type. */
+function isMalformedJson(err: unknown): boolean {
+  return (err as { type?: unknown } | null)?.type === 'entity.parse.failed';
 }
 
 function sendDomainError(err: DomainError, res: Response): void {

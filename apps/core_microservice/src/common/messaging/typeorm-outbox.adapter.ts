@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, LessThan, Repository } from 'typeorm';
+import { currentRequestId } from '@repo/shared';
 import { OutboxEvent } from './outbox-event.entity';
 import type { IOutboxPort } from './outbox.port';
 
@@ -29,7 +30,12 @@ export class TypeOrmOutboxAdapter implements IOutboxPort {
     tx: EntityManager,
   ): Promise<OutboxEvent> {
     const event = await tx.save(
-      tx.create(OutboxEvent, { routingKey, payload, occurredAt: new Date() }),
+      tx.create(OutboxEvent, {
+        routingKey,
+        payload,
+        occurredAt: new Date(),
+        correlationId: currentRequestId() ?? null,
+      }),
     );
     this.scheduleWake(tx);
     return event;

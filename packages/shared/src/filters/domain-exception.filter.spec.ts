@@ -11,8 +11,8 @@ import {
 import type { DomainError } from "../errors/domain.error";
 import { DomainExceptionFilter } from "./domain-exception.filter";
 
-const setup = () => {
-  const filter = new DomainExceptionFilter();
+const setup = (counter?: { inc: jest.Mock }) => {
+  const filter = new DomainExceptionFilter(counter as never);
   const logger = { error: jest.fn(), warn: jest.fn() };
   (filter as unknown as { logger: typeof logger }).logger = logger;
 
@@ -64,5 +64,24 @@ describe("DomainExceptionFilter", () => {
       { props: { message: "no", status: 403 } },
     );
     expect(logger.error).toHaveBeenCalledTimes(1);
+  });
+
+  it("counts every caught error as source=http with its class name", () => {
+    const counter = { inc: jest.fn() };
+    const { filter, host } = setup(counter);
+
+    filter.catch(new AccessDeniedError(), host);
+    filter.catch(new DatabaseQueryError(), host);
+
+    expect(counter.inc.mock.calls).toEqual([
+      [{ source: "http", type: "AccessDeniedError" }],
+      [{ source: "http", type: "DatabaseQueryError" }],
+    ]);
+  });
+
+  it("works without a counter", () => {
+    const { filter, response, host } = setup();
+    filter.catch(new AccessDeniedError(), host);
+    expect(response.status).toHaveBeenCalledWith(403);
   });
 });

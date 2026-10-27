@@ -43,4 +43,17 @@ export class OutboxEvent {
 
   @Column({ type: 'text', nullable: true })
   lastError!: string | null;
+
+  /**
+   * Request id of the HTTP request (or AMQP message) that wrote the row; the
+   * relay publishes it as the `x-correlation-id` header. null when the row was
+   * written outside any request context.
+   */
+  @Column({
+    name: 'correlation_id',
+    type: 'varchar',
+    length: 128,
+    nullable: true,
+  })
+  correlationId!: string | null;
 }

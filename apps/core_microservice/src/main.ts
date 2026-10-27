@@ -6,8 +6,11 @@ import { DataSource } from 'typeorm';
 import {
   DomainExceptionFilter,
   WinstonLogger,
+  accessLogMiddleware,
+  createErrorsCounter,
   httpMetricsMiddleware,
   registerDbPoolGauge,
+  requestIdMiddleware,
 } from '@repo/shared';
 import type { Registry } from 'prom-client';
 import { METRICS_REGISTRY } from './common/observability/metrics.tokens';
@@ -25,6 +28,10 @@ interface PgPoolStats {
 async function bootstrap() {
   const logger = new WinstonLogger('CoreSystem');
   const app = await NestFactory.create(AppModule, { logger });
+
+  // 0. REQUEST ID + ACCESS LOG - first, so every later log line carries the id
+  app.use(requestIdMiddleware());
+  app.use(accessLogMiddleware(new WinstonLogger('Http')));
 
   // 1. HELMET - sets secure HTTP headers (e.g. hides X-Powered-By)
   app.use(helmet());
@@ -70,7 +77,9 @@ async function bootstrap() {
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 
   // Map framework-agnostic domain errors (entities/repositories) to HTTP responses.
-  app.useGlobalFilters(new DomainExceptionFilter());
+  app.useGlobalFilters(
+    new DomainExceptionFilter(createErrorsCounter(registry)),
+  );
 
   const config = new DocumentBuilder()
     .setTitle('Innogram Core API')

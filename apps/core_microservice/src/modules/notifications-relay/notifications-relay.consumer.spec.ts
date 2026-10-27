@@ -1,5 +1,6 @@
 import type { ConsumeMessage } from 'amqplib';
-import { RoutingKeys } from '@repo/shared';
+import { Registry } from 'prom-client';
+import { RoutingKeys, currentRequestId } from '@repo/shared';
 import {
   NotificationsRelayConsumer,
   resolveQueue,
@@ -22,12 +23,13 @@ function message(
   payload: unknown,
   redelivered = false,
   raw?: string,
+  headers?: Record<string, unknown>,
 ): ConsumeMessage {
   const body = raw ?? JSON.stringify({ type: routingKey, payload });
   return {
     content: Buffer.from(body),
     fields: { routingKey, redelivered },
-    properties: {},
+    properties: { headers },
   } as unknown as ConsumeMessage;
 }
 
@@ -35,10 +37,26 @@ describe('NotificationsRelayConsumer', () => {
   let realtime: { emitToUser: jest.Mock };
   let consumer: NotificationsRelayConsumer;
   let warn: jest.SpyInstance;
+  let registry: Registry;
+
+  /** Current `errors_total{source="amqp",type}` value. */
+  const amqpErrors = async (type: string): Promise<number> => {
+    const metric = await registry.getSingleMetric('errors_total')?.get();
+    return (
+      metric?.values.find(
+        (v) => v.labels.source === 'amqp' && v.labels.type === type,
+      )?.value ?? 0
+    );
+  };
 
   beforeEach(() => {
     realtime = { emitToUser: jest.fn() };
-    consumer = new NotificationsRelayConsumer({} as never, realtime as never);
+    registry = new Registry();
+    consumer = new NotificationsRelayConsumer(
+      {} as never,
+      realtime as never,
+      registry,
+    );
     warn = jest
       .spyOn(
         (consumer as unknown as { logger: { warn: () => void } }).logger,
@@ -129,6 +147,14 @@ describe('NotificationsRelayConsumer', () => {
       ).toBe('requeue');
     });
 
+    it('increments errors_total{source="amqp"} with the error class', async () => {
+      await consumer.process(message(RoutingKeys.NOTIFICATION_SEEN, payload));
+      await consumer.process(
+        message(RoutingKeys.NOTIFICATION_SEEN, payload, true),
+      );
+      expect(await amqpErrors('Error')).toBe(2);
+    });
+
     it('drops a redelivery with a warning', async () => {
       expect(
         await consumer.process(
@@ -136,6 +162,48 @@ describe('NotificationsRelayConsumer', () => {
         ),
       ).toBe('ack');
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('Dropping'));
+    });
+  });
+
+  it('does not count dropped invalid payloads as errors', async () => {
+    await consumer.process(
+      message(RoutingKeys.NOTIFICATION_SEEN, null, false, '{not json'),
+    );
+    expect(await amqpErrors('Error')).toBe(0);
+  });
+
+  describe('request context', () => {
+    const payload = { userId: USER_ID, unseenCount: 0 };
+    let seenId: string | undefined;
+
+    beforeEach(() => {
+      seenId = undefined;
+      realtime.emitToUser.mockImplementation(() => {
+        seenId = currentRequestId();
+      });
+    });
+
+    it('runs the handler with the x-correlation-id header as the request id', async () => {
+      await consumer.onMessage(
+        message(RoutingKeys.NOTIFICATION_SEEN, payload, false, undefined, {
+          'x-correlation-id': 'req-abc',
+        }),
+      );
+      expect(seenId).toBe('req-abc');
+    });
+
+    it('falls back to a fresh UUID without a valid header', async () => {
+      await consumer.onMessage(
+        message(RoutingKeys.NOTIFICATION_SEEN, payload, false, undefined, {
+          'x-correlation-id': 'bad id!',
+        }),
+      );
+      expect(seenId).toMatch(/^[0-9a-f-]{36}$/);
+
+      seenId = undefined;
+      await consumer.onMessage(message(RoutingKeys.NOTIFICATION_SEEN, payload));
+      expect(seenId).toMatch(/^[0-9a-f-]{36}$/);
+      expect(currentRequestId()).toBeUndefined();
     });
   });
 

@@ -2,10 +2,13 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import {
+  accessLogMiddleware,
+  createErrorsCounter,
   type DbPoolStats,
   DomainExceptionFilter,
   httpMetricsMiddleware,
   registerDbPoolGauge,
+  requestIdMiddleware,
   WinstonLogger,
   type createMetricsRegistry,
 } from '@repo/shared';
@@ -16,13 +19,15 @@ import { METRICS_REGISTRY } from './common/observability/metrics.tokens';
 import { AppConfigService } from './config/app-config.service';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
-    logger: new WinstonLogger('NotificationsSystem'),
-  });
+  const logger = new WinstonLogger('NotificationsSystem');
+  const app = await NestFactory.create(AppModule, { logger });
   const appConfig = app.get(AppConfigService);
 
   const registry =
     app.get<ReturnType<typeof createMetricsRegistry>>(METRICS_REGISTRY);
+  // Request id first, so every later middleware and handler sees it.
+  app.use(requestIdMiddleware());
+  app.use(accessLogMiddleware(logger));
   app.use(httpMetricsMiddleware(registry));
   const dataSource = app.get(DataSource);
   registerDbPoolGauge(
@@ -40,7 +45,9 @@ async function bootstrap() {
 
   // Validate & sanitize incoming DTOs; map domain errors -> HTTP (shared infra).
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-  app.useGlobalFilters(new DomainExceptionFilter());
+  app.useGlobalFilters(
+    new DomainExceptionFilter(createErrorsCounter(registry)),
+  );
 
   const config = new DocumentBuilder()
     .setTitle('Innogram Notifications API')

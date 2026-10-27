@@ -12,13 +12,21 @@ import type {
 import type { Channel, ConsumeMessage, Options } from 'amqplib';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
+import type { Registry } from 'prom-client';
 import {
+  CORRELATION_ID_HEADER,
   EXCHANGE_NAME,
   NotificationCreatedPayload,
   NotificationSeenPayload,
   RoutingKeys,
+  createErrorsCounter,
+  recordError,
+  resolveRequestId,
+  runWithRequestContext,
+  type ErrorsCounter,
 } from '@repo/shared';
 import { AMQP_CONNECTION } from '../../common/messaging/amqp-connection.provider';
+import { METRICS_REGISTRY } from '../../common/observability/metrics.tokens';
 import {
   CHAT_REALTIME_PORT,
   type IChatRealtimePort,
@@ -66,11 +74,15 @@ export class NotificationsRelayConsumer
   private readonly logger = new Logger(NotificationsRelayConsumer.name);
   private channel?: ChannelWrapper;
   private closing = false;
+  private readonly errors: ErrorsCounter;
 
   constructor(
     @Inject(AMQP_CONNECTION) private readonly connection: AmqpConnectionManager,
     @Inject(CHAT_REALTIME_PORT) private readonly realtime: IChatRealtimePort,
-  ) {}
+    @Inject(METRICS_REGISTRY) registry: Registry,
+  ) {
+    this.errors = createErrorsCounter(registry);
+  }
 
   onModuleInit(): void {
     const queue = resolveQueue();
@@ -102,9 +114,18 @@ export class NotificationsRelayConsumer
     this.channel = channel;
   }
 
+  /**
+   * Handles one delivery inside a request context whose id is the message's
+   * `x-correlation-id` header (or a fresh UUID), so its logs correlate.
+   */
   async onMessage(msg: ConsumeMessage): Promise<void> {
-    const outcome = await this.process(msg);
-    this.settle(msg, outcome);
+    const correlationId = resolveRequestId(
+      msg.properties.headers?.[CORRELATION_ID_HEADER],
+    );
+    await runWithRequestContext(correlationId, async () => {
+      const outcome = await this.process(msg);
+      this.settle(msg, outcome);
+    });
   }
 
   /** Acks or nacks unless the channel is going away; never throws. */
@@ -123,8 +144,9 @@ export class NotificationsRelayConsumer
 
   /**
    * Decides the fate of one delivery. Invalid payloads are dropped (ack) with
-   * a warning. A handler failure is requeued once; if the message is already
-   * a redelivery it is dropped with a warning instead.
+   * a warning. A handler failure counts in `errors_total{source="amqp"}` and
+   * is requeued once; if the message is already a redelivery it is dropped
+   * with a warning instead.
    */
   async process(msg: ConsumeMessage): Promise<RelayOutcome> {
     const routingKey = msg.fields.routingKey;
@@ -158,6 +180,7 @@ export class NotificationsRelayConsumer
           return 'ack';
       }
     } catch (err) {
+      recordError(this.errors, 'amqp', err);
       const reason = (err as Error).message;
       if (msg.fields.redelivered) {
         this.logger.warn(

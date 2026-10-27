@@ -3,6 +3,7 @@ import {
   Injectable,
   Logger,
   OnApplicationBootstrap,
+  Optional,
   OnModuleDestroy,
 } from '@nestjs/common';
 import type {
@@ -10,7 +11,17 @@ import type {
   ChannelWrapper,
 } from 'amqp-connection-manager';
 import type { ConfirmChannel, ConsumeMessage } from 'amqplib';
-import type { RoutingKey } from '@repo/shared';
+import {
+  CORRELATION_ID_HEADER,
+  createErrorsCounter,
+  type ErrorsCounterLike,
+  recordError,
+  resolveRequestId,
+  runWithRequestContext,
+  type RoutingKey,
+  type createMetricsRegistry,
+} from '@repo/shared';
+import { METRICS_REGISTRY } from '../observability/metrics.tokens';
 import { AMQP_CONNECTION } from './amqp-connection.provider';
 import {
   assertNotificationsTopology,
@@ -82,10 +93,16 @@ export class AmqpConsumerHost
   /** Consumers on the current raw channel (replaced on every reconnect). */
   private active: { channel: ConfirmChannel; tags: string[] } | null = null;
   private readonly inFlight = new Set<Promise<void>>();
+  private readonly errors?: ErrorsCounterLike;
 
   constructor(
     @Inject(AMQP_CONNECTION) private readonly connection: AmqpConnectionManager,
-  ) {}
+    @Optional()
+    @Inject(METRICS_REGISTRY)
+    registry?: ReturnType<typeof createMetricsRegistry>,
+  ) {
+    this.errors = registry ? createErrorsCounter(registry) : undefined;
+  }
 
   registerEventHandler<T extends object>(
     routingKeys: readonly RoutingKey[],
@@ -203,7 +220,16 @@ export class AmqpConsumerHost
             this.logger.warn(`Consumer of ${queue.queue} cancelled by broker`);
             return;
           }
-          this.track(this.process(channel, queue, msg));
+          // The originating request id travels in a header (a fresh id otherwise),
+          // so logs of the handler share the id of the request that caused it.
+          const correlationId = resolveRequestId(
+            msg.properties.headers?.[CORRELATION_ID_HEADER],
+          );
+          this.track(
+            runWithRequestContext(correlationId, () =>
+              this.process(channel, queue, msg),
+            ),
+          );
         },
         { noAck: false },
       );
@@ -238,6 +264,7 @@ export class AmqpConsumerHost
       prepared = await this.prepare(queue, msg.content, ctx);
       await prepared.handle();
     } catch (error) {
+      recordError(this.errors, 'amqp', error);
       await this.onFailure(channel, queue, msg, ctx, error, prepared);
       return;
     }

@@ -18,6 +18,7 @@ function row(
   occurredAt: string,
   payload: object = {},
   attempts = 0,
+  correlationId: string | null = null,
 ) {
   return {
     id,
@@ -28,6 +29,7 @@ function row(
     deadLetteredAt: null,
     attempts,
     lastError: null,
+    correlationId,
   } as OutboxEvent;
 }
 
@@ -133,16 +135,21 @@ describe('OutboxRelay', () => {
 
     expect(dataSource.transaction).toHaveBeenCalledTimes(1);
     expect(outbox.claimPending).toHaveBeenCalledWith(OUTBOX_BATCH_SIZE, tx);
-    expect(eventBus.publish).toHaveBeenNthCalledWith(1, {
-      eventId: 'a',
-      type: 'social.post.liked',
-      version: 1,
-      occurredAt: '2026-01-01T00:00:00.000Z',
-      payload: { postId: 'p1' },
-    });
+    expect(eventBus.publish).toHaveBeenNthCalledWith(
+      1,
+      {
+        eventId: 'a',
+        type: 'social.post.liked',
+        version: 1,
+        occurredAt: '2026-01-01T00:00:00.000Z',
+        payload: { postId: 'p1' },
+      },
+      { correlationId: undefined },
+    );
     expect(eventBus.publish).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({ eventId: 'b', payload: { postId: 'p2' } }),
+      { correlationId: undefined },
     );
     expect(calls).toEqual([
       'publish:a',
@@ -151,6 +158,17 @@ describe('OutboxRelay', () => {
       'published:b',
     ]);
     expect(outbox.markPublished).toHaveBeenCalledWith('a', tx);
+  });
+
+  it('publishes the row correlationId so the bus can set x-correlation-id', async () => {
+    pending = [row('a', '2026-01-01T00:00:00.000Z', {}, 0, 'req-7')];
+
+    await relay.drain();
+
+    expect(eventBus.publish).toHaveBeenCalledWith(
+      expect.objectContaining({ eventId: 'a' }),
+      { correlationId: 'req-7' },
+    );
   });
 
   it('sets publishedAt only after the broker confirms', async () => {

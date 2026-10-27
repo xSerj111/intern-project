@@ -131,7 +131,9 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
       for (const row of rows) {
         if (this.stopped) break;
         try {
-          await this.eventBus.publish(toEnvelope(row));
+          await this.eventBus.publish(toEnvelope(row), {
+            correlationId: row.correlationId ?? undefined,
+          });
         } catch (err) {
           const message = errorMessage(err).slice(0, LAST_ERROR_MAX_LENGTH);
           if (!(err instanceof EventRejectedError)) {

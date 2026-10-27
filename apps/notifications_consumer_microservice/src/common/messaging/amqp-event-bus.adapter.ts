@@ -9,7 +9,11 @@ import type {
   ChannelWrapper,
 } from 'amqp-connection-manager';
 import type { ConfirmChannel } from 'amqplib';
-import { EXCHANGE_NAME } from '@repo/shared';
+import {
+  CORRELATION_ID_HEADER,
+  currentRequestId,
+  EXCHANGE_NAME,
+} from '@repo/shared';
 import type { EmailJob, EventEnvelope, RoutingKey } from '@repo/shared';
 import type { IEventBus } from '../../modules/notifications/domain/interfaces/event-bus.port';
 import { AMQP_CONNECTION } from './amqp-connection.provider';
@@ -22,6 +26,12 @@ const PUBLISH_TIMEOUT_MS = 10_000;
 
 /** Upper bound on closing the channel, so shutdown never hangs on it. */
 const CLOSE_TIMEOUT_MS = 2_000;
+
+/** `x-correlation-id` of the message being handled, if there is one. */
+function correlationHeaders(): Record<string, string> | undefined {
+  const id = currentRequestId();
+  return id ? { [CORRELATION_ID_HEADER]: id } : undefined;
+}
 
 /**
  * `EVENT_BUS` adapter. Every publish goes through a confirm channel: it
@@ -61,6 +71,7 @@ export class AmqpEventBusAdapter
         contentType: 'application/json',
         type: envelope.type,
         timestamp: Date.parse(envelope.occurredAt),
+        headers: correlationHeaders(),
       },
     );
   }
