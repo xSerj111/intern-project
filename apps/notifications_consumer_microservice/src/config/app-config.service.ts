@@ -4,8 +4,9 @@ import { assertInternalApiToken } from '@repo/shared';
 
 /**
  * Typed application configuration, backed by `@nestjs/config`'s ConfigService.
- * The single place the running app reads environment-derived settings. Required
- * settings use `getOrThrow`, so a missing variable fails fast at first read.
+ * The single place the running app reads environment-derived settings. Startup
+ * validation (`env.validation.ts`) guarantees required variables exist; required
+ * settings use `getOrThrow`, optional ones `get` with their default.
  */
 @Injectable()
 export class AppConfigService implements OnModuleInit {
@@ -20,21 +21,18 @@ export class AppConfigService implements OnModuleInit {
   get port(): number {
     // Own variable, not the shared PORT: every service reads the same root
     // config file, so a single PORT makes two services fight over one socket.
-    return parseInt(this.config.get<string>('NOTIFICATIONS_PORT', '3003'), 10);
+    return Number(this.config.get<string | number>('NOTIFICATIONS_PORT', 3003));
   }
 
   /** Postgres connection settings for the Notifications database. */
   get postgres() {
     return {
       type: 'postgres' as const,
-      host: this.config.getOrThrow<string>('POSTGRES_HOST', 'localhost'),
-      port: parseInt(
-        this.config.getOrThrow<string>('POSTGRES_PORT', '5432'),
-        10,
-      ),
-      username: this.config.getOrThrow<string>('POSTGRES_USER', 'postgres'),
-      password: this.config.getOrThrow<string>('POSTGRES_PASSWORD', 'postgres'),
-      database: this.config.getOrThrow<string>(
+      host: this.config.get<string>('POSTGRES_HOST', 'localhost'),
+      port: Number(this.config.get<string | number>('POSTGRES_PORT', 5432)),
+      username: this.config.get<string>('POSTGRES_USER', 'postgres'),
+      password: this.config.get<string>('POSTGRES_PASSWORD', 'postgres'),
+      database: this.config.get<string>(
         'DB_NAME_NOTIFICATIONS',
         'innogram_notifications',
       ),
@@ -53,7 +51,7 @@ export class AppConfigService implements OnModuleInit {
   get redis() {
     return {
       host: this.config.get<string>('REDIS_HOST', 'localhost'),
-      port: parseInt(this.config.get<string>('REDIS_PORT', '6379'), 10),
+      port: Number(this.config.get<string | number>('REDIS_PORT', 6379)),
       password: this.config.get<string>('REDIS_PASSWORD') || undefined,
     };
   }
@@ -83,15 +81,9 @@ export class AppConfigService implements OnModuleInit {
 
   /** SMTP transport settings for email delivery. */
   get smtp() {
-    const port = Number(this.config.getOrThrow<string>('SMTP_PORT'));
-
-    if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-      throw new Error('SMTP_PORT must be a valid port number');
-    }
-
     return {
       host: this.config.getOrThrow<string>('SMTP_HOST'),
-      port,
+      port: Number(this.config.getOrThrow<string | number>('SMTP_PORT')),
       secure:
         this.config.getOrThrow<string>('SMTP_SECURE').toLowerCase() === 'true',
       from: this.config.getOrThrow<string>('SMTP_FROM'),

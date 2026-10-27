@@ -107,6 +107,9 @@
         "branches": 60
       }
     },
+    "setupFiles": [
+      "<rootDir>/../test/setup-env.ts"
+    ],
     "testEnvironment": "node"
   }
 }

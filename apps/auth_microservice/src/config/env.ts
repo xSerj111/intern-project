@@ -25,6 +25,32 @@ const requireInternalApiToken = (): string => {
   return token;
 };
 
+const JWT_SECRET_MIN_LENGTH = 32;
+
+// Must stay identical to the JWT_* values in the root .env.example.
+export const JWT_PLACEHOLDER_SECRETS: readonly string[] = [
+  'your-super-secret-jwt-key-here',
+  'your-super-secret-jwt-refresh-key-here',
+];
+
+// Production has no fallback and refuses short or copied-from-example secrets.
+// Outside production the dev default is kept. Errors name the variable only.
+const requireJwtSecret = (key: string, devDefault: string): string => {
+  if (process.env.NODE_ENV !== 'production') return requireEnv(key, devDefault);
+  const secret = requireEnv(key);
+  if (JWT_PLACEHOLDER_SECRETS.includes(secret)) {
+    throw new Error(
+      `${key} must not be the .env.example placeholder value in production`,
+    );
+  }
+  if (secret.length < JWT_SECRET_MIN_LENGTH) {
+    throw new Error(
+      `${key} must be at least ${JWT_SECRET_MIN_LENGTH} characters long in production`,
+    );
+  }
+  return secret;
+};
+
 const SAME_SITE_VALUES = ['strict', 'lax', 'none'] as const;
 type SameSite = (typeof SAME_SITE_VALUES)[number];
 
@@ -66,8 +92,8 @@ export const env = {
     password: process.env.REDIS_PASSWORD || undefined, // Password may be empty
   },
   jwt: {
-    accessTokenSecret: requireEnv('JWT_SECRET', 'your-super-secret-jwt-key-here'),
-    refreshTokenSecret: requireEnv(
+    accessTokenSecret: requireJwtSecret('JWT_SECRET', 'your-super-secret-jwt-key-here'),
+    refreshTokenSecret: requireJwtSecret(
       'JWT_REFRESH_SECRET',
       'your-super-secret-jwt-refresh-key-here',
     ),

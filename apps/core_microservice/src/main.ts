@@ -36,9 +36,11 @@ async function bootstrap() {
   // 2. COOKIE PARSER - makes the refresh_token cookie readable
   app.use(cookieParser());
 
+  const appConfig = app.get(AppConfigService);
+
   // 3. CORS - lets the frontend access the API
   app.enableCors({
-    origin: process.env.CLIENT_URL || 'http://localhost:3000',
+    origin: appConfig.clientUrl,
 
     // Allows cookies to be sent across origins
     credentials: true,
@@ -48,7 +50,6 @@ async function bootstrap() {
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
   });
 
-  const appConfig = app.get(AppConfigService);
   appConfig.assertSafeForEnvironment();
   appConfig.assertInternalApiToken();
 

@@ -35,6 +35,19 @@ describe('AppConfigService', () => {
       });
     });
 
+    it('defaults the client origin and treats an empty CLIENT_URL as unset', () => {
+      expect(service.clientUrl).toBe('http://localhost:3000');
+      expect(build({ CLIENT_URL: '' }).clientUrl).toBe('http://localhost:3000');
+      expect(build({ CLIENT_URL: 'https://app.test' }).clientUrl).toBe(
+        'https://app.test',
+      );
+    });
+
+    it('requires JWT_SECRET', () => {
+      expect(() => service.jwtSecret).toThrow('JWT_SECRET');
+      expect(build({ JWT_SECRET: 's' }).jwtSecret).toBe('s');
+    });
+
     it('leaves internalApiToken undefined', () => {
       expect(service.internalApiToken).toBeUndefined();
     });

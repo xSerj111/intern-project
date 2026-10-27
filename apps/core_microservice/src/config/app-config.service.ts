@@ -18,18 +18,25 @@ export class AppConfigService {
     return parseInt(this.config.get<string>('CORE_PORT', '3001'), 10);
   }
 
+  /** Browser origin allowed by CORS (HTTP and `/realtime`); empty counts as unset. */
+  get clientUrl(): string {
+    return this.config.get<string>('CLIENT_URL') || 'http://localhost:3000';
+  }
+
+  /** Secret auth_microservice signs access tokens with (`JWT_SECRET`). */
+  get jwtSecret(): string {
+    return this.config.getOrThrow<string>('JWT_SECRET');
+  }
+
   /** Postgres connection settings for the Core database. */
   get postgres() {
     return {
       type: 'postgres' as const,
-      host: this.config.getOrThrow<string>('POSTGRES_HOST', 'localhost'),
-      port: parseInt(
-        this.config.getOrThrow<string>('POSTGRES_PORT', '5432'),
-        10,
-      ),
-      username: this.config.getOrThrow<string>('POSTGRES_USER', 'postgres'),
-      password: this.config.getOrThrow<string>('POSTGRES_PASSWORD', 'postgres'),
-      database: this.config.getOrThrow<string>('DB_NAME_CORE', 'innogram_core'),
+      host: this.config.get<string>('POSTGRES_HOST', 'localhost'),
+      port: parseInt(this.config.get<string>('POSTGRES_PORT', '5432'), 10),
+      username: this.config.get<string>('POSTGRES_USER', 'postgres'),
+      password: this.config.get<string>('POSTGRES_PASSWORD', 'postgres'),
+      database: this.config.get<string>('DB_NAME_CORE', 'innogram_core'),
       synchronize: false, // Strict migrations mode
     };
   }

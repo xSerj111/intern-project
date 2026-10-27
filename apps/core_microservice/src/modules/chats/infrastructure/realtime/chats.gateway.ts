@@ -30,6 +30,7 @@ import {
 } from '../../../profiles/domain/interfaces/user-directory.port';
 import { ACCESS_TOKEN_VERIFIER } from '../../../../common/auth/access-token-verifier.provider';
 import { REDIS_CLIENT } from '../../../../common/redis/redis.module';
+import { AppConfigService } from '../../../../config/app-config.service';
 import type {
   ChatRealtimeEvent,
   ChatRealtimePayload,
@@ -72,9 +73,12 @@ const MAX_TIMER_MS = 2_147_483_647;
 export const userRoom = (userId: string): string => `user:${userId}`;
 export const chatRoom = (chatId: string): string => `chat:${chatId}`;
 
-/** Read lazily: decorator options are evaluated before config is loaded. */
-const clientUrl = (): string =>
-  process.env.CLIENT_URL || 'http://localhost:3000';
+/**
+ * Decorator options are evaluated at import time, before config is loaded, so
+ * the CORS origin is resolved per handshake from the value the gateway takes
+ * from `AppConfigService` on construction.
+ */
+let allowedOrigin = 'http://localhost:3000';
 
 @UseFilters(WsDomainExceptionFilter)
 @WebSocketGateway({
@@ -83,7 +87,7 @@ const clientUrl = (): string =>
     origin: (
       _origin: string | undefined,
       cb: (err: Error | null, origin?: string) => void,
-    ) => cb(null, clientUrl()),
+    ) => cb(null, allowedOrigin),
     credentials: true,
   },
 })
@@ -108,7 +112,10 @@ export class ChatsGateway
     @Inject(CHAT_REPOSITORY) private readonly chats: IChatRepository,
     @Inject(USER_DIRECTORY_PORT)
     private readonly directory: IUserDirectoryPort,
-  ) {}
+    config: AppConfigService,
+  ) {
+    allowedOrigin = config.clientUrl;
+  }
 
   afterInit(server: RealtimeNamespace): void {
     server.use(createSocketAuthMiddleware(this.verifier));

@@ -33,6 +33,11 @@ jobs:
       - name: Build (via Turborepo)
         # Turborepo builds all applications and packages, ensuring they compile
         run: npx turbo run build
+        env:
+          # client_app's production build refuses to run without these (next.config.ts)
+          AUTH_SERVICE_URL: http://localhost:3002
+          CORE_SERVICE_URL: http://localhost:3001
+          NOTIFICATIONS_SERVICE_URL: http://localhost:3003
 
       - name: Type-Check (via Turborepo)
         # "type-check" runs tsc --noEmit in every workspace that defines it

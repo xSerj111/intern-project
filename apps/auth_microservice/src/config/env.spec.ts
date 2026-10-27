@@ -6,6 +6,11 @@ const REQUIRED = {
   INTERNAL_API_TOKEN: 'a'.repeat(40),
 };
 
+const PROD_SECRETS = {
+  JWT_SECRET: 'p'.repeat(40),
+  JWT_REFRESH_SECRET: 'r'.repeat(40),
+};
+
 const MANAGED_KEYS = [
   ...Object.keys(REQUIRED),
   'AUTH_PORT',
@@ -151,7 +156,77 @@ describe('config/env', () => {
     });
 
     it('marks the cookie secure in production', () => {
-      expect(loadEnv({ NODE_ENV: 'production' }).cookie.secure).toBe(true);
+      expect(loadEnv({ NODE_ENV: 'production', ...PROD_SECRETS }).cookie.secure).toBe(
+        true,
+      );
+    });
+  });
+
+  describe('production JWT secret guard', () => {
+    const PLACEHOLDERS = {
+      JWT_SECRET: 'your-super-secret-jwt-key-here',
+      JWT_REFRESH_SECRET: 'your-super-secret-jwt-refresh-key-here',
+    };
+
+    it('accepts strong secrets', () => {
+      const env = loadEnv({ NODE_ENV: 'production', ...PROD_SECRETS });
+      expect(env.jwt.accessTokenSecret).toBe(PROD_SECRETS.JWT_SECRET);
+      expect(env.jwt.refreshTokenSecret).toBe(PROD_SECRETS.JWT_REFRESH_SECRET);
+    });
+
+    it.each(['JWT_SECRET', 'JWT_REFRESH_SECRET'] as const)(
+      'requires %s with no fallback',
+      (key) => {
+        expect(() =>
+          loadEnv({ NODE_ENV: 'production', ...PROD_SECRETS, [key]: undefined }),
+        ).toThrow(`Missing required enviroment variable: ${key}`);
+      },
+    );
+
+    it.each(['JWT_SECRET', 'JWT_REFRESH_SECRET'] as const)(
+      'rejects a %s shorter than 32 characters without leaking it',
+      (key) => {
+        const short = 'q'.repeat(31);
+        let message = '';
+        try {
+          loadEnv({ NODE_ENV: 'production', ...PROD_SECRETS, [key]: short });
+        } catch (e) {
+          message = (e as Error).message;
+        }
+        expect(message).toContain(`${key} must be at least 32 characters long`);
+        expect(message).not.toContain(short);
+      },
+    );
+
+    it('accepts a secret of exactly 32 characters', () => {
+      expect(
+        loadEnv({ NODE_ENV: 'production', ...PROD_SECRETS, JWT_SECRET: 'x'.repeat(32) })
+          .jwt.accessTokenSecret,
+      ).toBe('x'.repeat(32));
+    });
+
+    it.each(['JWT_SECRET', 'JWT_REFRESH_SECRET'] as const)(
+      'rejects the .env.example placeholder for %s without leaking it',
+      (key) => {
+        let message = '';
+        try {
+          loadEnv({ NODE_ENV: 'production', ...PROD_SECRETS, [key]: PLACEHOLDERS[key] });
+        } catch (e) {
+          message = (e as Error).message;
+        }
+        expect(message).toContain(`${key} must not be the .env.example placeholder`);
+        expect(message).not.toContain(PLACEHOLDERS[key]);
+      },
+    );
+
+    it('keeps the dev defaults outside production', () => {
+      const env = loadEnv({ NODE_ENV: 'development' });
+      expect(env.jwt.accessTokenSecret).toBe(PLACEHOLDERS.JWT_SECRET);
+      expect(env.jwt.refreshTokenSecret).toBe(PLACEHOLDERS.JWT_REFRESH_SECRET);
+    });
+
+    it('does not apply the length rule outside production', () => {
+      expect(loadEnv({ JWT_SECRET: 'short' }).jwt.accessTokenSecret).toBe('short');
     });
   });
 });

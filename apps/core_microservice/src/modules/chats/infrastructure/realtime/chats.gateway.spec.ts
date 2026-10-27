@@ -8,6 +8,11 @@ import {
   type RealtimeSocket,
 } from './socket-auth.middleware';
 import { WsDomainExceptionFilter } from './ws-domain-exception.filter';
+import type { AppConfigService } from '../../../../config/app-config.service';
+
+const config = {
+  clientUrl: 'http://localhost:3000',
+} as AppConfigService;
 
 const USER = '11111111-1111-4111-8111-111111111111';
 const future = () => Math.floor(Date.now() / 1000) + 600;
@@ -111,6 +116,7 @@ describe('ChatsGateway auth:renew', () => {
       redis as never,
       { findActiveChatIdsForUser: jest.fn().mockResolvedValue([]) } as never,
       {} as never,
+      config,
     );
   });
 
@@ -257,6 +263,7 @@ describe('ChatsGateway handleConnection', () => {
         findActiveChatIdsForUser: find,
       } as never,
       {} as never,
+      config,
     );
   const socket = () => {
     const join = jest.fn().mockResolvedValue(undefined);
@@ -317,6 +324,7 @@ describe('ChatsGateway typing and chat:view', () => {
       redis as never,
       {} as never,
       { getUsers } as never,
+      config,
     );
     gateway.server = { to } as never;
   });

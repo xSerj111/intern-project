@@ -19,10 +19,11 @@ export interface ClientConfig {
 }
 
 export const config: ClientConfig = {
+  // `||` (not `??`) so an empty string from next.config.ts falls back to localhost.
   authServiceUrl:
-    process.env.NEXT_PUBLIC_AUTH_SERVICE_URL ?? 'http://localhost:3002',
+    process.env.NEXT_PUBLIC_AUTH_SERVICE_URL || 'http://localhost:3002',
   coreServiceUrl:
-    process.env.NEXT_PUBLIC_CORE_SERVICE_URL ?? 'http://localhost:3001',
+    process.env.NEXT_PUBLIC_CORE_SERVICE_URL || 'http://localhost:3001',
   notificationsServiceUrl:
     process.env.NEXT_PUBLIC_NOTIFICATIONS_SERVICE_URL ||
     'http://localhost:3003',
