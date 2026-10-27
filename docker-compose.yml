@@ -117,14 +117,19 @@ services:
     environment:
       # Written to /run/secrets/internal_token by entrypoint.sh; never logged.
       INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-}
+      # Comma-separated host:port or name=host:port; format in entrypoint.sh.
+      PROMETHEUS_TARGETS: ${PROMETHEUS_TARGETS:-host.docker.internal:3001,host.docker.internal:3002,host.docker.internal:3003}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     tmpfs:
       # 65534 = the nobody user Prometheus runs as.
       - /run/secrets:uid=65534,gid=65534,mode=0700
+      # file_sd targets written by entrypoint.sh.
+      - /run/sd:uid=65534,gid=65534,mode=0700
     volumes:
       - ./docker/monitoring/entrypoint.sh:/entrypoint.sh:ro
       - ./docker/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docker/monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus_data:/prometheus
     networks:
       - innogram-network
@@ -133,7 +138,14 @@ services:
     image: grafana/grafana:12.2.0
     container_name: innogram-grafana
     profiles: ["monitoring"]
+    entrypoint:
+      - /bin/sh
+      - -c
+      - ': "$${GF_SECURITY_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in the root .env}"; exec /run.sh'
     environment:
+      # Required, but checked by the entrypoint below: `${VAR:?}` here would make
+      # `docker compose config/up` fail for the default (non-monitoring) services.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
       GF_USERS_ALLOW_SIGN_UP: "false"

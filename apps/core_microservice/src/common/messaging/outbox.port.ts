@@ -1,6 +1,13 @@
 import type { EntityManager } from 'typeorm';
 import type { OutboxEvent } from './outbox-event.entity';
 
+/** Backlog snapshot of rows that are neither published nor dead-lettered. */
+export interface OutboxPendingStats {
+  count: number;
+  /** Age of the oldest pending row in seconds; 0 when nothing is pending. */
+  oldestSeconds: number;
+}
+
 export interface IOutboxPort {
   /**
    * Inserts a pending event through the CALLER's transaction manager, so the
@@ -48,6 +55,12 @@ export interface IOutboxPort {
    * `deadLetteredAt = now()`, so `claimPending` no longer returns it.
    */
   markDead(id: string, error: string, tx: EntityManager): Promise<void>;
+
+  /**
+   * Relay metrics: one aggregate query (count + oldest age) over the pending
+   * rows. Takes no locks. `manager` is optional (defaults to the pool).
+   */
+  pendingStats(manager?: EntityManager): Promise<OutboxPendingStats>;
 
   /** Relay: deletes published rows older than `olderThan`; returns the count. */
   purgePublished(olderThan: Date): Promise<number>;

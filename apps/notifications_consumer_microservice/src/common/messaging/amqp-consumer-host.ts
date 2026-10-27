@@ -12,9 +12,15 @@ import type {
 } from 'amqp-connection-manager';
 import type { ConfirmChannel, ConsumeMessage } from 'amqplib';
 import {
+  type AmqpMetricsLike,
+  type AmqpOutcome,
   CORRELATION_ID_HEADER,
+  createAmqpMetrics,
   createErrorsCounter,
+  currentRequestId,
   type ErrorsCounterLike,
+  observeAmqpHandler,
+  recordAmqpOutcome,
   recordError,
   resolveRequestId,
   runWithRequestContext,
@@ -94,6 +100,7 @@ export class AmqpConsumerHost
   private active: { channel: ConfirmChannel; tags: string[] } | null = null;
   private readonly inFlight = new Set<Promise<void>>();
   private readonly errors?: ErrorsCounterLike;
+  private readonly metrics?: AmqpMetricsLike;
 
   constructor(
     @Inject(AMQP_CONNECTION) private readonly connection: AmqpConnectionManager,
@@ -102,6 +109,7 @@ export class AmqpConsumerHost
     registry?: ReturnType<typeof createMetricsRegistry>,
   ) {
     this.errors = registry ? createErrorsCounter(registry) : undefined;
+    this.metrics = registry ? createAmqpMetrics(registry) : undefined;
   }
 
   registerEventHandler<T extends object>(
@@ -262,13 +270,35 @@ export class AmqpConsumerHost
     let prepared: Prepared | undefined;
     try {
       prepared = await this.prepare(queue, msg.content, ctx);
-      await prepared.handle();
+      await this.timed(queue, prepared);
     } catch (error) {
       recordError(this.errors, 'amqp', error);
       await this.onFailure(channel, queue, msg, ctx, error, prepared);
       return;
     }
+    recordAmqpOutcome(this.metrics, queue.queue, 'ack');
+    this.logger.debug(
+      `Handled ${queue.queue} message ${this.routingKeyOf(msg)} (correlationId=${currentRequestId()})`,
+    );
     this.ack(channel, msg);
+  }
+
+  /** Runs the handler; `amqp_handler_duration_seconds` covers this call only. */
+  private async timed(queue: ConsumedQueue, prepared: Prepared): Promise<void> {
+    const start = process.hrtime.bigint();
+    try {
+      await prepared.handle();
+    } finally {
+      const seconds = Number(process.hrtime.bigint() - start) / 1e9;
+      observeAmqpHandler(this.metrics, queue.queue, seconds);
+    }
+  }
+
+  /** Original routing key (retry/DLQ copies travel via the default exchange). */
+  private routingKeyOf(msg: ConsumeMessage): string {
+    const original: unknown =
+      msg.properties.headers?.[ORIGINAL_ROUTING_KEY_HEADER];
+    return typeof original === 'string' ? original : msg.fields.routingKey;
   }
 
   private async prepare(
@@ -319,6 +349,7 @@ export class AmqpConsumerHost
     });
     const label = `${queue.queue} message ${msg.properties.messageId ?? '?'} (attempt ${ctx.attempt}/${queue.maxAttempts})`;
 
+    let outcome: AmqpOutcome;
     try {
       if (decision.action === 'retry') {
         this.logger.warn(`${label} failed, retrying: ${describeError(error)}`);
@@ -329,6 +360,7 @@ export class AmqpConsumerHost
           decision.nextAttempt,
           error,
         );
+        outcome = 'retry';
       } else {
         if (prepared?.onExhausted) {
           await prepared
@@ -350,8 +382,10 @@ export class AmqpConsumerHost
           this.logger.error(
             `${label} sent to ${queue.deadLetterQueue}: ${describeError(error)}`,
           );
+          outcome = 'dlq';
         } else {
           this.logger.error(`${label} dropped: ${describeError(error)}`);
+          outcome = 'drop';
         }
       }
     } catch (moveErr) {
@@ -362,6 +396,7 @@ export class AmqpConsumerHost
       this.nack(channel, msg);
       return;
     }
+    recordAmqpOutcome(this.metrics, queue.queue, outcome);
     this.ack(channel, msg);
   }
 

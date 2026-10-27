@@ -108,20 +108,20 @@ description: "Task list for the final feature: docs, deployment, observability, 
 
 ## Phase 4: Monitoring — Batch B4
 
-- [ ] T031 [P] [sonnet] Shared AMQP metrics (wave 1). `packages/shared/src/observability/amqp-metrics.ts`: `createAmqpMetrics(registry)` → `amqp_messages_total{queue,outcome}` (`ack` | `retry` | `dlq` | `drop`) and `amqp_handler_duration_seconds{queue}` histogram; get-or-create. Export + spec
-- [ ] T032 [P] [sonnet] Outbox metrics (wave 1). `apps/core_microservice/src/common/messaging/outbox-relay.ts` via `METRICS_REGISTRY`: `outbox_published_total`, `outbox_failed_total`, `outbox_dead_total` (attempts reached `OUTBOX_MAX_ATTEMPTS`) counters; `outbox_pending` and `outbox_oldest_pending_seconds` gauges updated by the relay's poll loop (one cheap aggregate query per poll; no `collect()` callback that hits the DB on every scrape). Spec
-- [ ] T033 [orch] Build `@repo/shared` after wave 1
-- [ ] T034 [P] [sonnet] Consumer metrics (wave 2) using T031 in `apps/notifications_consumer_microservice/src/common/messaging/amqp-consumer-host.ts` and `apps/core_microservice/src/modules/notifications-relay/notifications-relay.consumer.ts`: outcome per message, handler duration. Specs
-- [ ] T035 [P] [sonnet] Monitoring stack (wave 1). In `docker/monitoring/`:
+- [X] T031 [P] [sonnet] Shared AMQP metrics (wave 1). `packages/shared/src/observability/amqp-metrics.ts`: `createAmqpMetrics(registry)` → `amqp_messages_total{queue,outcome}` (`ack` | `retry` | `dlq` | `drop`) and `amqp_handler_duration_seconds{queue}` histogram; get-or-create. Export + spec
+- [X] T032 [P] [sonnet] Outbox metrics (wave 1). `apps/core_microservice/src/common/messaging/outbox-relay.ts` via `METRICS_REGISTRY`: `outbox_published_total`, `outbox_failed_total`, `outbox_dead_total` (attempts reached `OUTBOX_MAX_ATTEMPTS`) counters; `outbox_pending` and `outbox_oldest_pending_seconds` gauges updated by the relay's poll loop (one cheap aggregate query per poll; no `collect()` callback that hits the DB on every scrape). Spec
+- [X] T033 [orch] Build `@repo/shared` after wave 1
+- [X] T034 [P] [sonnet] Consumer metrics (wave 2) using T031 in `apps/notifications_consumer_microservice/src/common/messaging/amqp-consumer-host.ts` and `apps/core_microservice/src/modules/notifications-relay/notifications-relay.consumer.ts`: outcome per message, handler duration. Specs
+- [X] T035 [P] [sonnet] Monitoring stack (wave 1). In `docker/monitoring/`:
   - `alerts.yml` with groups for `ServiceDown` (`up == 0` for 1m), `High5xxRate` (5xx share > 5% for 5m, using `status_class="5xx"`), `HighP95Latency` (p95 > 500 ms for 10m), `OutboxBacklog` (`outbox_oldest_pending_seconds > 300`), `OutboxDead` (increase of `outbox_dead_total` > 0), `AmqpDlqGrowth` (increase of `amqp_messages_total{outcome="dlq"}` > 0 over 15m), `DbPoolSaturated` (`db_pool_connections{state="waiting"} > 0` for 5m). Each has `severity` and `summary`.
   - Wire it through `rule_files` in `prometheus.yml`, and mount it in `docker-compose.yml`.
   - Make the scrape targets configurable: `entrypoint.sh` writes a `file_sd` JSON from `PROMETHEUS_TARGETS` (default `host.docker.internal:3001,host.docker.internal:3002,host.docker.internal:3003`, with a `service` label per target).
   - `grafana/dashboards/innogram-overview.json`: fix the 5xx panel to filter on `status_class="5xx"`, and add panels for outbox pending/age, AMQP outcomes, handler p95, and `errors_total` by source/type.
   - Compose: `GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD}`.
   - Validate with `docker run --rm --entrypoint promtool -v $PWD/docker/monitoring:/m prom/prometheus:<pinned tag> check rules /m/alerts.yml` and `check config` (the config check needs the file_sd path to exist; use a temp file).
-- [ ] T036 [orch] `.env.example`: `GRAFANA_ADMIN_PASSWORD`, `PROMETHEUS_TARGETS` (commented default)
-- [ ] T037 [gate] Builds, type-check, lint:check, unit tests with coverage, core and notifications e2e
-- [ ] T038 [evidence] `docker compose --profile monitoring up -d prometheus grafana` (no `down` of other services) with core/auth/notifications running: `/api/v1/targets` all UP, `/api/v1/rules` lists the alert groups, `/metrics` on core shows the `outbox_*` and `amqp_*` series. Stop only the core process the script started → `ServiceDown` goes pending; restart it. Record the JSON excerpts
+- [X] T036 [orch] `.env.example`: `GRAFANA_ADMIN_PASSWORD`, `PROMETHEUS_TARGETS` (commented default)
+- [X] T037 [gate] Builds, type-check, lint:check, unit tests with coverage, core and notifications e2e
+- [X] T038 [evidence] `docker compose --profile monitoring up -d prometheus grafana` (no `down` of other services) with core/auth/notifications running: `/api/v1/targets` all UP, `/api/v1/rules` lists the alert groups, `/metrics` on core shows the `outbox_*` and `amqp_*` series. Stop only the core process the script started → `ServiceDown` goes pending; restart it. Record the JSON excerpts
 
 **Checkpoint**: Outbox and consumer health are measurable and alerting rules are loaded.
 

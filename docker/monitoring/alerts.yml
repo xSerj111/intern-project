@@ -1,0 +1,64 @@
+groups:
+  - name: innogram-availability
+    rules:
+      - alert: ServiceDown
+        expr: up{job="innogram"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.service }} is down ({{ $labels.instance }} not scrapeable for 1m)"
+
+  - name: innogram-http
+    rules:
+      - alert: High5xxRate
+        expr: |
+          sum by (service) (rate(http_request_duration_seconds_count{status_class="5xx"}[5m]))
+            / sum by (service) (rate(http_request_duration_seconds_count[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.service }}: more than 5% of requests return 5xx ({{ $value | humanizePercentage }})"
+
+      - alert: HighP95Latency
+        expr: |
+          histogram_quantile(0.95, sum by (le, service) (rate(http_request_duration_seconds_bucket[5m]))) > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.service }}: p95 latency above 500 ms ({{ $value | humanizeDuration }})"
+
+  - name: innogram-messaging
+    rules:
+      - alert: OutboxBacklog
+        expr: outbox_oldest_pending_seconds > 300
+        labels:
+          severity: warning
+        annotations:
+          summary: "Oldest pending outbox event is {{ $value | humanizeDuration }} old (limit 5m)"
+
+      - alert: OutboxDead
+        expr: increase(outbox_dead_total[15m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Outbox events were dead-lettered in the last 15m ({{ $value }})"
+
+      - alert: AmqpDlqGrowth
+        expr: sum by (service, queue) (increase(amqp_messages_total{outcome="dlq"}[15m])) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.service }}: messages on queue {{ $labels.queue }} went to the DLQ in the last 15m"
+
+  - name: innogram-database
+    rules:
+      - alert: DbPoolSaturated
+        expr: db_pool_connections{state="waiting"} > 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.service }}: requests have waited for a DB connection for 5m"

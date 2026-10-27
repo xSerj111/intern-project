@@ -221,6 +221,32 @@ describe('B14 repositories against real Postgres (e2e)', () => {
       expect(result.row.publishedAt).toBeNull();
       expect(result.claimed).toContain(result.id);
     });
+
+    it('pendingStats counts only pending rows and reports the age of the oldest', async () => {
+      const result = await inRolledBackTx(async (tx) => {
+        const before = await outbox.pendingStats(tx);
+        await insertRow(tx);
+        await insertRow(tx, { occurredAt: new Date(Date.now() - 5_000) });
+        await insertRow(tx, { publishedAt: new Date() });
+        await insertRow(tx, { deadLetteredAt: new Date() });
+        return { before, after: await outbox.pendingStats(tx) };
+      });
+
+      expect(result.after.count - result.before.count).toBe(2);
+      // The 1990 fixture row is the oldest pending row, so the age is decades.
+      expect(result.after.oldestSeconds).toBeGreaterThan(10 * 365 * 86_400);
+    });
+
+    it('pendingStats returns 0 oldest seconds when nothing is pending', async () => {
+      const stats = await inRolledBackTx(async (tx) => {
+        await tx.query(
+          'UPDATE outbox_events SET "deadLetteredAt" = now() WHERE "publishedAt" IS NULL AND "deadLetteredAt" IS NULL',
+        );
+        return outbox.pendingStats(tx);
+      });
+
+      expect(stats).toEqual({ count: 0, oldestSeconds: 0 });
+    });
   });
 
   describe('ChatRepository attachments for chat-list previews', () => {

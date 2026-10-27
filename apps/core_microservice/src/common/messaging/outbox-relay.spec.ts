@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import type { DataSource, EntityManager } from 'typeorm';
+import { Registry } from 'prom-client';
 import type { EventEnvelope } from '@repo/shared';
 import type { AppConfigService } from '../../config/app-config.service';
 import { EventRejectedError } from './event-bus.port';
@@ -55,6 +56,7 @@ describe('OutboxRelay', () => {
   let eventBus: { publish: jest.Mock };
   let dataSource: { transaction: jest.Mock };
   let relay: OutboxRelay;
+  let registry: Registry;
   const calls: string[] = [];
 
   beforeEach(() => {
@@ -97,6 +99,9 @@ describe('OutboxRelay', () => {
         calls.push(`dead:${id}`);
         return Promise.resolve();
       }),
+      pendingStats: jest.fn(() =>
+        Promise.resolve({ count: 0, oldestSeconds: 0 }),
+      ),
       purgePublished: jest.fn(() => Promise.resolve(0)),
     };
     eventBus = {
@@ -110,11 +115,13 @@ describe('OutboxRelay', () => {
         work(tx),
       ),
     };
+    registry = new Registry();
     relay = new OutboxRelay(
       dataSource as unknown as DataSource,
       outbox,
       eventBus,
       { outbox: { maxAttempts: 3 } } as AppConfigService,
+      registry,
     );
   });
 
@@ -377,5 +384,81 @@ describe('OutboxRelay', () => {
     listener!();
     await jest.advanceTimersByTimeAsync(OUTBOX_POLL_INTERVAL_MS);
     expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+  });
+
+  describe('metrics', () => {
+    const value = async (name: string): Promise<number | undefined> =>
+      (await registry.getSingleMetric(name)?.get())?.values[0]?.value;
+
+    it('counts published, failed and dead-lettered rows', async () => {
+      pending = [
+        row('a', '2026-01-01T00:00:00.000Z'),
+        row('b', '2026-01-01T00:00:01.000Z', {}, 2),
+        row('c', '2026-01-01T00:00:02.000Z'),
+      ];
+      eventBus.publish
+        .mockResolvedValueOnce(undefined)
+        .mockRejectedValueOnce(new EventRejectedError('bad'));
+
+      await relay.drain();
+
+      expect(await value('outbox_published_total')).toBe(2);
+      expect(await value('outbox_failed_total')).toBe(1);
+      expect(await value('outbox_dead_total')).toBe(1);
+    });
+
+    it('counts a broker-side failure as failed but not dead', async () => {
+      pending = [row('a', '2026-01-01T00:00:00.000Z', {}, 2)];
+      eventBus.publish.mockRejectedValueOnce(new Error('nack'));
+
+      await relay.drain();
+
+      expect(await value('outbox_failed_total')).toBe(1);
+      expect(await value('outbox_dead_total')).toBe(0);
+      expect(await value('outbox_published_total')).toBe(0);
+    });
+
+    it('sets the backlog gauges from one aggregate query per poll', async () => {
+      outbox.pendingStats.mockResolvedValue({ count: 4, oldestSeconds: 12.5 });
+      relay.onModuleInit();
+      await jest.advanceTimersByTimeAsync(OUTBOX_POLL_INTERVAL_MS);
+
+      expect(outbox.pendingStats).toHaveBeenCalledTimes(1);
+      expect(await value('outbox_pending')).toBe(4);
+      expect(await value('outbox_oldest_pending_seconds')).toBe(12.5);
+    });
+
+    it('reports an oldest age of 0 when nothing is pending', async () => {
+      outbox.pendingStats.mockResolvedValue({ count: 0, oldestSeconds: 7 });
+      relay.onModuleInit();
+      await jest.advanceTimersByTimeAsync(OUTBOX_POLL_INTERVAL_MS);
+
+      expect(await value('outbox_pending')).toBe(0);
+      expect(await value('outbox_oldest_pending_seconds')).toBe(0);
+    });
+
+    it('keeps polling and the last gauge values when the stats query fails', async () => {
+      outbox.pendingStats
+        .mockResolvedValueOnce({ count: 3, oldestSeconds: 1 })
+        .mockRejectedValueOnce(new Error('db down'));
+      relay.onModuleInit();
+      await jest.advanceTimersByTimeAsync(OUTBOX_POLL_INTERVAL_MS * 2);
+
+      expect(outbox.pendingStats).toHaveBeenCalledTimes(2);
+      expect(await value('outbox_pending')).toBe(3);
+    });
+
+    it('reuses metrics already registered on the registry', () => {
+      expect(
+        () =>
+          new OutboxRelay(
+            dataSource as unknown as DataSource,
+            outbox,
+            eventBus,
+            { outbox: { maxAttempts: 3 } } as AppConfigService,
+            registry,
+          ),
+      ).not.toThrow();
+    });
   });
 });
