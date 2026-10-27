@@ -210,36 +210,36 @@ description: "Task list for the final feature: docs, deployment, observability, 
 
 All doc lanes read `specs/005-final-polish/impl/progress.md` Global decisions (exact var names, deploy commands, image names) and verify every command and var they write against `package.json` files, compose files and code.
 
-- [ ] T064 [human] Decide the LICENSE holder and year (the root README claims MIT). The orchestrator asks at batch start; T077 depends on the answer
-- [ ] T065 [P] [sonnet] Root `README.md` rewrite:
+- [X] T064 [human] Decide the LICENSE holder and year (the root README claims MIT). The orchestrator asks at batch start; T077 depends on the answer
+- [X] T065 [P] [sonnet] Root `README.md` rewrite:
   - What Innogram is, and a mermaid architecture diagram (client, auth, core, notifications, Postgres ×3 DBs, Redis ×2, RabbitMQ, SeaweedFS, Mailpit).
   - Prerequisites (Node 20, Docker), a local quick start (`cp .env.example .env`, `npm ci`, `npm run docker:up`, `npm run db:migrate`, `npm run db:seed`, `npm run dev`).
   - A ports & URLs table (apps, Swagger, Mailpit UI, RabbitMQ UI, Grafana, Prometheus).
   - A scripts table covering every root script, including `lint` mutating vs `lint:check`.
   - Links to `docs/*`, `DDD_ARCHITECTURE_GUIDE.md`, `CONTRIBUTING.md` and the per-service READMEs.
   - Remove the stale claims (`packages/types`, NestJS auth, API gateway, Node 18).
-- [ ] T066 [P] [sonnet] `docs/DEPLOYMENT.md`, from the B5 Global decisions:
+- [X] T066 [P] [sonnet] `docs/DEPLOYMENT.md`, from the B5 Global decisions:
   - Images and where CI publishes them; building locally. The client image bakes `NEXT_PUBLIC_*` in at build time, so the published client image only works for the compose default URLs; other environments rebuild it with their own build args.
   - `.env.production` from `.env.production.example` and how to generate secrets.
   - `docker:apps:up` and what starts in which order (migrate jobs first); upgrading; rollback (image tag pinning; migrations are forward-only unless reverted with `migration:revert`).
   - Reverse proxy/TLS notes and cookie `SameSite` across sites; port 3012 never public.
   - Scaling limits (single core instance for realtime), backups (Postgres volumes), and a troubleshooting section (unhealthy service → `docker compose logs`, failed migration job, env validation errors).
-- [ ] T067 [P] [sonnet] `docs/ENVIRONMENT.md`: a table of every env var with service(s), required/optional, default, and description, plus sections for dev vs production vs test and secret handling. Generated from the code sweep in T016 plus later batches; consistent with `.env.example` and `.env.production.example`
-- [ ] T068 [P] [sonnet] `docs/OBSERVABILITY.md`:
+- [X] T067 [P] [sonnet] `docs/ENVIRONMENT.md`: a table of every env var with service(s), required/optional, default, and description, plus sections for dev vs production vs test and secret handling. Generated from the code sweep in T016 plus later batches; consistent with `.env.example` and `.env.production.example`
+- [X] T068 [P] [sonnet] `docs/OBSERVABILITY.md`:
   - Health endpoints and the status semantics (`unhealthy` 503 vs `degraded` 200), `/health/details` and `/metrics` with `X-Internal-Token`.
   - The metrics catalogue: HTTP, DB pool, cache, outbox, AMQP, errors, process.
   - Logging: JSON format, `LOG_LEVEL`, request ids over HTTP and RabbitMQ, and how to follow one request across services.
   - The monitoring profile (start, Grafana login, dashboard panels) and the alert catalogue, with a runbook entry per alert. Note that there is no Alertmanager: alerts are visible in the Prometheus UI.
-- [ ] T069 [P] [sonnet] `docs/API.md`: per-service Swagger URLs and the `SWAGGER_ENABLED` rule; the auth flow (register/login → access token + httpOnly refresh cookie, `credentials: 'include'`, refresh/logout); conventions (paging and `PAGE_SIZE_MAX`, cursor feed, errors from `DomainExceptionFilter`, two-step uploads); a link to `docs/realtime.md`
-- [ ] T070 [P] [sonnet] `apps/core_microservice/README.md` (replace the NestJS boilerplate): purpose, modules table, layering (link the guide), endpoints overview (link Swagger), the env vars it reads (link ENVIRONMENT.md), run/test/e2e/perf/migrations/seed commands, realtime and outbox notes
-- [ ] T071 [P] [sonnet] `apps/auth_microservice/README.md` (replace the NestJS boilerplate): Express + manual DI in `createApp()`, routes, the internal listener on 3012, sessions/blacklist in Redis, `auth:session-revoked`, Google OAuth, env, commands
-- [ ] T072 [P] [haiku] `apps/notifications_consumer_microservice/README.md`: fix the env note (port vars now in `.env.example`), say `/health` is public, and add the request-id/AMQP correlation and metrics notes
-- [ ] T073 [P] [haiku] `apps/client_app/README.md`: dev/build/start, env vars (build-time `NEXT_PUBLIC_*` mapping), Docker image build args, and keep the existing Playwright section
-- [ ] T074 [P] [haiku] `packages/shared/README.md` and `packages/contracts/README.md`: purpose, what goes where (the AGENTS.md rule), the import boundary (client never imports shared), build-before-use
-- [ ] T075 [P] [sonnet] `CONTRIBUTING.md`: branch naming, commit style (`feat(INO-n): …`), local gates (`build`, `type-check`, `lint:check`, `test:cov`, e2e), DDD conventions (link the guide), adding a migration, adding an env var (config + validation + `.env.example` + ENVIRONMENT.md), PR checklist
-- [ ] T076 [sonnet] Agent and architecture docs: update `AGENTS.md`, `CLAUDE.md` and the observability/deployment sections of `DDD_ARCHITECTURE_GUIDE.md` for the new scripts, CI file name, env validation, request ids, new metrics and alerts, the Docker flow, and `db:migrate` now working. Add `profile-summary` to the AGENTS.md module list
-- [ ] T077 [haiku] `LICENSE` (MIT) with the holder from T064
-- [ ] T078 [evidence] [sonnet] Docs verifier:
+- [X] T069 [P] [sonnet] `docs/API.md`: per-service Swagger URLs and the `SWAGGER_ENABLED` rule; the auth flow (register/login → access token + httpOnly refresh cookie, `credentials: 'include'`, refresh/logout); conventions (paging and `PAGE_SIZE_MAX`, cursor feed, errors from `DomainExceptionFilter`, two-step uploads); a link to `docs/realtime.md`
+- [X] T070 [P] [sonnet] `apps/core_microservice/README.md` (replace the NestJS boilerplate): purpose, modules table, layering (link the guide), endpoints overview (link Swagger), the env vars it reads (link ENVIRONMENT.md), run/test/e2e/perf/migrations/seed commands, realtime and outbox notes
+- [X] T071 [P] [sonnet] `apps/auth_microservice/README.md` (replace the NestJS boilerplate): Express + manual DI in `createApp()`, routes, the internal listener on 3012, sessions/blacklist in Redis, `auth:session-revoked`, Google OAuth, env, commands
+- [X] T072 [P] [haiku] `apps/notifications_consumer_microservice/README.md`: fix the env note (port vars now in `.env.example`), say `/health` is public, and add the request-id/AMQP correlation and metrics notes
+- [X] T073 [P] [haiku] `apps/client_app/README.md`: dev/build/start, env vars (build-time `NEXT_PUBLIC_*` mapping), Docker image build args, and keep the existing Playwright section
+- [X] T074 [P] [haiku] `packages/shared/README.md` and `packages/contracts/README.md`: purpose, what goes where (the AGENTS.md rule), the import boundary (client never imports shared), build-before-use
+- [X] T075 [P] [sonnet] `CONTRIBUTING.md`: branch naming, commit style (`feat(INO-n): …`), local gates (`build`, `type-check`, `lint:check`, `test:cov`, e2e), DDD conventions (link the guide), adding a migration, adding an env var (config + validation + `.env.example` + ENVIRONMENT.md), PR checklist
+- [X] T076 [sonnet] Agent and architecture docs: update `AGENTS.md`, `CLAUDE.md` and the observability/deployment sections of `DDD_ARCHITECTURE_GUIDE.md` for the new scripts, CI file name, env validation, request ids, new metrics and alerts, the Docker flow, and `db:migrate` now working. Add `profile-summary` to the AGENTS.md module list
+- [X] T077 [haiku] `LICENSE` (MIT) with the holder from T064
+- [X] T078 [evidence] [sonnet] Docs verifier:
   - Follow the root README local quick start on the dev stack (no `down -v`).
   - Check that every command in README, DEPLOYMENT and the service READMEs exists, that every var in ENVIRONMENT.md matches the code sweep and both `.env` examples, and that every relative link resolves (`grep -oE '\]\([^)]+\)'`).
   - Write the findings and fix list to `specs/005-final-polish/impl/run/B7-docs-check.md`. The orchestrator routes the fixes to the owning lanes.

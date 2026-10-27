@@ -1,98 +1,79 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# auth_microservice
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Authentication service for Innogram: credentials, JWT access and refresh tokens, Redis-backed sessions and blacklists, and Google OAuth sign-in. It is bare Express (no NestJS) with manual dependency injection. Own database: `innogram_auth`. Default public port `3002` (`AUTH_PORT`).
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## Architecture
 
-## Description
+Ports & Adapters, wired by hand in `createApp()` (`src/app.ts`). A second function, `createInternalApp()`, builds the service-to-service app. `src/main.ts` creates the DB connection and two Redis clients (cache/sessions, and a dedicated one for pub/sub), builds both apps and starts both listeners.
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
-
-## Project setup
-
-```bash
-$ npm install
+```
+src/
+  config/          env.ts (fail-fast validation), database, redis, google, swagger, openapi
+  domain/          entities and interfaces (ports)
+  infrastructure/  cache (Redis), crypto (bcrypt), events, health, jwt, oauth, repositories
+  middleware/      auth, error handler, internal token, request validation
+  routes/          auth, users, internal
+  services/        AuthService, UsersService
+  migrations/
 ```
 
-## Compile and run the project
+Domain code throws `DomainError` subclasses (`@repo/shared`); `createErrorHandler` maps them to HTTP. The layering rules are the same as in [DDD_ARCHITECTURE_GUIDE.md](../../DDD_ARCHITECTURE_GUIDE.md).
 
-```bash
-# development
-$ npm run start
+## Routes
 
-# watch mode
-$ npm run start:dev
+Public listener (`AUTH_PORT`, 3002):
 
-# production mode
-$ npm run start:prod
-```
+| Route                                 | Purpose                                                                                       |
+| ------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `POST /users/register`                | Create a user. Publishes `UserCreatedEvent` to core (fire-and-forget, see below)              |
+| `POST /auth/login`                    | Email and password login. Returns `{ accessToken, user }` and sets the `refresh_token` cookie |
+| `POST /auth/google`                   | Google sign-in with an ID token (`GoogleLoginDto`); creates the user on first login           |
+| `GET /auth/me`                        | Current user, requires a Bearer access token                                                  |
+| `POST /auth/refresh`                  | Rotates the refresh token from the cookie and returns a new access token                      |
+| `POST /auth/logout`                   | Revokes the session and clears the cookie                                                     |
+| `GET /health`                         | Public, overall status only (200 or 503)                                                      |
+| `GET /health/details`, `GET /metrics` | Internal-only, need `X-Internal-Token`                                                        |
+| `GET /api`, `GET /api-json`           | Swagger UI and OpenAPI document (on outside production, controlled by `SWAGGER_ENABLED`)      |
 
-## Run tests
+Internal listener (`AUTH_INTERNAL_HOST`:`AUTH_INTERNAL_PORT`, default `127.0.0.1:3012`):
 
-```bash
-# unit tests
-$ npm run test
+| Route                             | Purpose                                                                                               |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `GET /internal/users/:id/contact` | Recipient address for the notifications service; guarded by `X-Internal-Token` (`INTERNAL_API_TOKEN`) |
 
-# e2e tests
-$ npm run test:e2e
+The public port never serves `/internal`. In containers set `AUTH_INTERNAL_HOST=0.0.0.0` and never publish port 3012; notifications reaches it through `AUTH_INTERNAL_URL`. Full API reference: [docs/API.md](../../docs/API.md).
 
-# test coverage
-$ npm run test:cov
-```
+## Sessions, tokens and revocation
 
-## Deployment
+- The refresh token is an httpOnly cookie named `refresh_token` (path `/auth`). JSON responses carry only `{ accessToken, user }`, so the client calls auth with `credentials: 'include'` and `AUTH_ALLOWED_ORIGINS` must list the client origin. `AUTH_COOKIE_SAMESITE` defaults to `strict`; use `none` (with `NODE_ENV=production` for `Secure`) only when client and auth are on different sites.
+- Redis holds refresh sessions (`refresh_tokens:<id>`) and token blacklists (`blacklist:refresh:<jti>`, `blacklist:access:<jti>`), each with a TTL equal to the time the token has left. Used refresh tokens are rotated and blacklisted.
+- On logout, after the blacklists are written, auth publishes to the Redis channel `auth:session-revoked`. Core's `session-revocation.listener.ts` consumes it (for example to drop live sockets). A publish failure never fails the logout.
+- Access tokens are signed with `JWT_SECRET`; core verifies them with the same secret and checks the access blacklist (failing closed with 503 when Redis is down).
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+## Auth to core
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+When a user is created, `UsersService` calls `HttpEventPublisher`, which POSTs `UserCreatedEvent` to core at `/internal/events/user-created` with `X-Internal-Token`, without awaiting. Failures are logged, not retried; core creates a missing profile lazily on first use.
 
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
-```
+## Google OAuth
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+`POST /auth/google` receives a Google ID token from the client and verifies it with `google-auth-library` against `GOOGLE_CLIENT_ID` (`infrastructure/oauth/google-oauth.service.ts`). The client id must match the one the web client uses.
 
-## Resources
+## Environment
 
-Check out a few resources that may come in handy when working with NestJS:
+`config/env.ts` validates at startup and throws on a missing required variable. Required: `CORE_SERVICE_URL`, `AUTH_ALLOWED_ORIGINS`, `INTERNAL_API_TOKEN` (32+ characters). With `NODE_ENV=production`, `JWT_SECRET` and `JWT_REFRESH_SECRET` are also required, at least 32 characters, and must not be the `.env.example` or `.env.production.example` placeholders. Also read: `AUTH_PORT`, `AUTH_SERVICE_URL`, `AUTH_INTERNAL_PORT`, `AUTH_INTERNAL_HOST`, `AUTH_COOKIE_SAMESITE`, `JWT_EXPIRES_IN`, `JWT_REFRESH_EXPIRES_IN`, `GOOGLE_CLIENT_ID`, `BCRYPT_SALT_ROUNDS`, `SWAGGER_ENABLED`, `POSTGRES_*`, `DB_NAME_AUTH`, `REDIS_*`. Copy `.env.example` to the root `.env`; the full table is in [docs/ENVIRONMENT.md](../../docs/ENVIRONMENT.md).
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+## Commands
 
-## Support
+Run from `apps/auth_microservice`. Start infrastructure first with `npm run docker:up` from the repo root.
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+| Task                                   | Command                                                                                                          |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Dev server (ts-node-dev, respawn)      | `npm run dev`                                                                                                    |
+| Build / run built app                  | `npm run build`, then `npm start` (`node dist/main.js`)                                                          |
+| Unit tests                             | `npm test` (one spec: `npx jest auth.service`)                                                                   |
+| Coverage (70 lines / 60 branches gate) | `npm run test:cov`                                                                                               |
+| Lint / type-check                      | `npm run lint:check`, `npm run type-check`                                                                       |
+| Migrations                             | `npm run migration:run` (also `migration:generate`, `migration:revert`); in a built image `npm run migrate:prod` |
+| Seed dev data                          | `npm run db:seed` (perf dataset: `npm run db:seed -- --profile perf --reset`)                                    |
 
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+Observability: [docs/OBSERVABILITY.md](../../docs/OBSERVABILITY.md). Deployment: [docs/DEPLOYMENT.md](../../docs/DEPLOYMENT.md).

@@ -16,11 +16,16 @@ cd apps/core_microservice && npm run test:e2e                  # uses test/jest-
 npm run e2e                                                    # Playwright; stack + client must be running
 npm run perf                                                   # k6 gate; core :3001 and auth :3002 from dist
 npm run build -w core_microservice                             # nest build
+npm run lint:check && npm run type-check                       # read-only lint (never `npm run lint`, it runs --fix) and tsc
+npm run db:migrate                                             # all three backends (turbo); each app also has migration:run
+npm run docker:apps:up                                         # full containerised stack; needs .env.production (see docs/DEPLOYMENT.md)
 ```
 
 ## Gotchas
 
-- **`auth_microservice` imports `src/...` paths in some files** (e.g. `infrastructure/events/http-event-publisher.ts`), so keep the path resolution in mind when moving files.
+- **Required env vars fail fast at startup** in every backend (core/notifications `src/config/env.validation.ts`, auth `config/env.ts`); a test or script that boots an app needs them set (core/notifications e2e load the root `.env` via `test/setup-env.ts`). `docs/ENVIRONMENT.md` lists them all.
+- **Request ids**: `@repo/shared` `requestIdMiddleware` / `accessLogMiddleware` run first in each backend. Use `currentRequestId()` instead of threading ids by hand; the outbox stores it as `correlation_id`.
+- **Metrics labels stay bounded** (route templates, class names, queue names). New error paths count into `errors_total` via `recordError`; alerts are in `docker/monitoring/alerts.yml`. See `docs/OBSERVABILITY.md`.
 
 ## Big picture: how the services fit together
 

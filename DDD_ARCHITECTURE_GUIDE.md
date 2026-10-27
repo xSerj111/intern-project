@@ -25,24 +25,26 @@ intern-project/
 ├── docker/
 │   ├── postgres/init-databases.sh            # creates innogram_auth / innogram_core / innogram_notifications
 │   ├── seaweedfs/                            # S3 entrypoint (CORS from CLIENT_URL)
-│   └── monitoring/                           # Prometheus config + token entrypoint, Grafana provisioning (§8.5)
+│   └── monitoring/                           # Prometheus config, alerts.yml, token entrypoint, Grafana provisioning (§8.5)
 ├── seed/                                     # fixtures.ts (dev users), perf.ts (deterministic perf profile helpers)
-├── docker-compose.yml                        # infrastructure only (below)
-├── .github/workflows/ci.yml                  # lint → build → unit tests + coverage matrix (§9)
+├── docker-compose.yml                        # infrastructure (below)
+├── docker-compose.apps.yml                   # overlay: *-migrate jobs + auth, core, notifications, client images (each app has a Dockerfile)
+├── .github/workflows/                        # ci.yml (lint:check → build → type-check, unit-test matrix, §9); docker-images.yml (build, GHCR push on main/tags)
+├── docs/                                     # DEPLOYMENT, ENVIRONMENT, OBSERVABILITY, API, realtime
 ├── turbo.json
 └── package.json                              # npm workspaces: apps/*, packages/*
 ```
 
-`docker-compose.yml` runs Postgres, Redis (auth sessions and blacklists), `redis-cache` (core's response cache, host port 6380, no persistence, `allkeys-lru`, §3.14), SeaweedFS (S3 API on 9000), RabbitMQ and Mailpit. The opt-in `monitoring` profile adds Prometheus and Grafana (host port 3030).
+`docker-compose.yml` runs Postgres, Redis (auth sessions and blacklists), `redis-cache` (core's response cache, host port 6380, no persistence, `allkeys-lru`, §3.14), SeaweedFS (S3 API on 9000), RabbitMQ and Mailpit. The opt-in `monitoring` profile adds Prometheus and Grafana (host port 3030). `npm run docker:apps:up` adds the containerised apps from `docker-compose.apps.yml` using `.env.production` (`docs/DEPLOYMENT.md`).
 
 ### 1.2 Architectural Styles
 
-| Service | Framework | DI | Database | Layout |
-|---|---|---|---|---|
-| `auth_microservice` | Express | Manual, in `createApp()` / `createInternalApp()` | `innogram_auth` | `src/{config,domain,infrastructure,middleware,migrations,routes,services,types}`, `seed/` at the app root |
-| `core_microservice` | NestJS | Nest IoC, ports bound to `Symbol` tokens | `innogram_core` | `src/modules/<module>/{domain,dto,infrastructure}` (§3), `src/common/`, `test/` (e2e, load), `seed/` |
-| `notifications_consumer_microservice` | NestJS | Nest IoC, ports bound to `Symbol` tokens | `innogram_notifications` | `src/modules/<module>/{domain,application,dto,infrastructure}` (§5), `src/common/` |
-| `client_app` | Next.js | — | — | `src/app/{(app),(auth)}` route groups, `src/{components,lib,types}`, Playwright in `e2e/` |
+| Service                               | Framework | DI                                               | Database                 | Layout                                                                                                    |
+| ------------------------------------- | --------- | ------------------------------------------------ | ------------------------ | --------------------------------------------------------------------------------------------------------- |
+| `auth_microservice`                   | Express   | Manual, in `createApp()` / `createInternalApp()` | `innogram_auth`          | `src/{config,domain,infrastructure,middleware,migrations,routes,services,types}`, `seed/` at the app root |
+| `core_microservice`                   | NestJS    | Nest IoC, ports bound to `Symbol` tokens         | `innogram_core`          | `src/modules/<module>/{domain,dto,infrastructure}` (§3), `src/common/`, `test/` (e2e, load), `seed/`      |
+| `notifications_consumer_microservice` | NestJS    | Nest IoC, ports bound to `Symbol` tokens         | `innogram_notifications` | `src/modules/<module>/{domain,application,dto,infrastructure}` (§5), `src/common/`                        |
+| `client_app`                          | Next.js   | —                                                | —                        | `src/app/{(app),(auth)}` route groups, `src/{components,lib,types}`, Playwright in `e2e/`                 |
 
 All three backends follow Ports & Adapters: domain entities and port interfaces in `domain/`, adapters in `infrastructure/`, application services that depend on ports only. Each service owns its database and its port variable (`AUTH_PORT` 3002, `CORE_PORT` 3001, `NOTIFICATIONS_PORT` 3003, `CLIENT_PORT` 3000); no service reads another service's database.
 
@@ -63,14 +65,14 @@ All three backends follow Ports & Adapters: domain entities and port interfaces 
  Prometheus ── GET /metrics (X-Internal-Token) ──▶ core :3001, auth :3002, notifications :3003   (§8)
 ```
 
-| Channel | Producer → consumer | Delivery | Details |
-|---|---|---|---|
-| `POST /internal/events/user-created` | auth → core | HTTP, fire-and-forget, no retry | §7 |
-| `auth:session-revoked` | auth → core | Redis pub/sub, not durable | §3.10 |
-| `innogram.events` (`social.*`, `chat.message.alerted`) | core → notifications | transactional outbox, at-least-once | §3.11 |
-| `innogram.events` (`notification.created`, `notification.seen`) | notifications → core | AMQP, relayed to sockets | §3.11 |
-| `GET /internal/users/:id/contact` | notifications → auth | HTTP on an internal-only listener | §4.7 |
-| `GET /health/details`, `GET /metrics` | Prometheus, operators → every backend | HTTP on each service's main port, `X-Internal-Token` | §8 |
+| Channel                                                         | Producer → consumer                   | Delivery                                             | Details |
+| --------------------------------------------------------------- | ------------------------------------- | ---------------------------------------------------- | ------- |
+| `POST /internal/events/user-created`                            | auth → core                           | HTTP, fire-and-forget, no retry                      | §7      |
+| `auth:session-revoked`                                          | auth → core                           | Redis pub/sub, not durable                           | §3.10   |
+| `innogram.events` (`social.*`, `chat.message.alerted`)          | core → notifications                  | transactional outbox, at-least-once                  | §3.11   |
+| `innogram.events` (`notification.created`, `notification.seen`) | notifications → core                  | AMQP, relayed to sockets                             | §3.11   |
+| `GET /internal/users/:id/contact`                               | notifications → auth                  | HTTP on an internal-only listener                    | §4.7    |
+| `GET /health/details`, `GET /metrics`                           | Prometheus, operators → every backend | HTTP on each service's main port, `X-Internal-Token` | §8      |
 
 `INTERNAL_API_TOKEN` is one value shared by all three backends; each refuses to start without it (32+ characters).
 
@@ -82,20 +84,22 @@ All three backends follow Ports & Adapters: domain entities and port interfaces 
 {
   "pipeline": {
     "build": { "dependsOn": ["^build"], "outputs": ["dist/**", "build/**"] },
-    "dev":   { "dependsOn": ["^build"], "cache": false, "persistent": true },
-    "test":  { "dependsOn": ["^build"] },
-    "lint":  {},
+    "dev": { "dependsOn": ["^build"], "cache": false, "persistent": true },
+    "test": { "dependsOn": ["^build"] },
+    "lint": { "dependsOn": ["^build"] },
+    "lint:check": { "dependsOn": ["^build"] },
     "type-check": { "dependsOn": ["^build"] },
+    "client_app#type-check": { "dependsOn": ["^build", "build"] },
     "clean": { "cache": false },
     "db:migrate": { "cache": false },
-    "db:seed": { "cache": false }
-  }
+    "db:seed": { "cache": false },
+  },
 }
 ```
 
-`^build` builds a workspace's dependencies first. The graph is `@repo/contracts` → `@repo/shared` (shared imports contracts, §2.2) → apps. The apps consume both packages through `dist/` (`main`/`types` point at `dist/index.js`), so running one app standalone needs `npm run build -w @repo/contracts -w @repo/shared` first, contracts before shared; a stale `dist/` shows up as confusing type errors. That includes `npx tsc --noEmit -p apps/core_microservice/tsconfig.json`: the `@repo/shared` entry in core's tsconfig `paths` resolves against `baseUrl: "./"` to a folder that doesn't exist, so type-checking falls back to the built `dist/` too.
+`^build` builds a workspace's dependencies first. The graph is `@repo/contracts` → `@repo/shared` (shared imports contracts, §2.2) → apps. The apps consume both packages through `dist/` (`main`/`types` point at `dist/index.js`), so running one app standalone needs `npm run build -w @repo/contracts -w @repo/shared` first, contracts before shared; a stale `dist/` shows up as confusing type errors.
 
-`db:seed` runs the auth and core seeds (`seed/` in each app, §9); `db:migrate` has no workspace script and does nothing.
+`db:seed` runs the auth and core seeds (`seed/` in each app, §9); `db:migrate` runs `migration:run` in each of the three backends (each against its own database; the Docker `*-migrate` jobs run the compiled `node dist/migrate.js`, i.e. `migrate:prod`). `lint:check` and `type-check` are the read-only CI checks; `lint` runs `--fix`.
 
 ---
 
@@ -103,11 +107,11 @@ All three backends follow Ports & Adapters: domain entities and port interfaces 
 
 ### 2.1 `@repo/contracts`: the wire format
 
-| Property | Value |
-|---|---|
-| Dependencies | none |
-| Consumed by | `client_app` and every backend |
-| Purpose | Request/response interfaces, realtime event maps, shared limits and constants |
+| Property     | Value                                                                         |
+| ------------ | ----------------------------------------------------------------------------- |
+| Dependencies | none                                                                          |
+| Consumed by  | `client_app` and every backend                                                |
+| Purpose      | Request/response interfaces, realtime event maps, shared limits and constants |
 
 One folder per area under `packages/contracts/src/` (`assets`, `auth`, `chats`, `comments`, `common`, `follows`, `likes`, `notifications`, `observability`, `posts`, `profiles`, `realtime`, `uploads`), each with an `index.ts` re-exported from `packages/contracts/src/index.ts`. Most areas have `requests.ts` / `responses.ts`; the exceptions are `common/pagination.ts`, `constants.ts` in `chats` and `uploads`, `observability/health.ts` and `realtime/events.ts` (`assets` and `likes` have only `responses.ts`). Interfaces are plain TypeScript: no decorators, no runtime libraries, dates as ISO strings. The runtime constants are limits both sides must agree on: `PAGE_SIZE_MAX`, `CHANGES_PAGE_SIZE_MAX` (§3.12), `MESSAGE_MAX_ATTACHMENTS`, `ATTACHMENT_MAX_BYTES`, `UPLOAD_MAX_BYTES`, `UPLOAD_ALLOWLIST` (§3.13).
 
@@ -129,10 +133,10 @@ The Socket.IO protocol is typed here too: `REALTIME_NAMESPACE`, `ServerToClientE
 
 ### 2.2 `@repo/shared`: backend infrastructure
 
-| Property | Value |
-|---|---|
+| Property     | Value                                                                                                                                               |
+| ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Dependencies | `@repo/contracts`, `@nestjs/common`, `@nestjs/swagger`, `class-validator`, `class-transformer`, `typeorm`, `winston`, `jsonwebtoken`, `prom-client` |
-| Consumed by | backends only, **never** `client_app` |
+| Consumed by  | backends only, **never** `client_app`                                                                                                               |
 
 ```
 packages/shared/src/
@@ -153,18 +157,18 @@ packages/shared/src/
 
 ### 2.3 The Decisive Rule: Where Do New Types Go?
 
-| If the type... | It goes in... | Because... |
-|---|---|---|
-| describes an HTTP request/response or a realtime event payload | `@repo/contracts` | the frontend needs it without backend dependencies |
-| is a `class-validator` DTO used by both Express and Nest (auth DTOs, `UpdateProfileDto`) | `packages/shared/src/dtos/` | it depends on `class-validator` |
-| is a request/response DTO used by one core module | the module's `dto/` folder | module-specific |
-| is an entity, props interface, port or domain error | the module's `domain/` folder | module-specific |
-| is a cross-service event class (validated) | `packages/shared/src/events/` | both producer and consumer validate it |
-| is a Redis key or channel shared by auth and core | `packages/shared/src/redis/redis-keys.ts` | both services must agree on the string |
-| is a page-size limit or a list envelope (`PAGE_SIZE_MAX`, `IOffsetPage`) | `packages/contracts/src/common/pagination.ts` | DTO limits and the client must match (§3.12) |
-| is a core cache key, TTL or cache metric label | `apps/core_microservice/src/common/cache/cache-keys.ts` | core-only, separate Redis instance (§3.14) |
-| is a health or metrics helper used by more than one service | `packages/shared/src/observability/` | one implementation for all three (§8) |
-| is a health wire type (`IHealthReport`) | `packages/contracts/src/observability/health.ts` | returned by every `/health` route |
+| If the type...                                                                           | It goes in...                                           | Because...                                         |
+| ---------------------------------------------------------------------------------------- | ------------------------------------------------------- | -------------------------------------------------- |
+| describes an HTTP request/response or a realtime event payload                           | `@repo/contracts`                                       | the frontend needs it without backend dependencies |
+| is a `class-validator` DTO used by both Express and Nest (auth DTOs, `UpdateProfileDto`) | `packages/shared/src/dtos/`                             | it depends on `class-validator`                    |
+| is a request/response DTO used by one core module                                        | the module's `dto/` folder                              | module-specific                                    |
+| is an entity, props interface, port or domain error                                      | the module's `domain/` folder                           | module-specific                                    |
+| is a cross-service event class (validated)                                               | `packages/shared/src/events/`                           | both producer and consumer validate it             |
+| is a Redis key or channel shared by auth and core                                        | `packages/shared/src/redis/redis-keys.ts`               | both services must agree on the string             |
+| is a page-size limit or a list envelope (`PAGE_SIZE_MAX`, `IOffsetPage`)                 | `packages/contracts/src/common/pagination.ts`           | DTO limits and the client must match (§3.12)       |
+| is a core cache key, TTL or cache metric label                                           | `apps/core_microservice/src/common/cache/cache-keys.ts` | core-only, separate Redis instance (§3.14)         |
+| is a health or metrics helper used by more than one service                              | `packages/shared/src/observability/`                    | one implementation for all three (§8)              |
+| is a health wire type (`IHealthReport`)                                                  | `packages/contracts/src/observability/health.ts`        | returned by every `/health` route                  |
 
 Request DTOs `implements` the matching contracts interface, so the wire type and the validated class can't drift: `export class SendMessageDto implements ISendMessageRequest`.
 
@@ -212,10 +216,10 @@ Entities are both domain objects and TypeORM entities: they extend `TypeormEntit
 
 ```typescript
 // apps/core_microservice/src/modules/profiles/domain/entities/user-profile.entity.ts
-@Entity('user_profiles')
+@Entity("user_profiles")
 export class UserProfile extends TypeormEntityBase implements UserProfileProps {
   @Index()
-  @Column({ type: 'uuid', unique: true })
+  @Column({ type: "uuid", unique: true })
   authUserId!: string;
   // ... username, displayName, bio, avatarUrl ...
 
@@ -254,6 +258,7 @@ private assertMutableBy(actorId: string): void {
 Other examples: `Post.publish()` / `archive()` / `assertLikeableBy()`, `Comment.edit()` / `notifiesPostAuthor()`, `Chat.assertCanRead()` / `addMembers()` / `leave()`, `Follow.notifiesFollowed()`, and the upload lifecycle on `Asset` (`createPending()`, `assertConfirmableBy()`, `assertStoredSizeAcceptable()`, `confirm()`, `reject()`, `assertAttachableTo()`, `isSweepable()`, §3.13). A factory may assign the `id` itself when something outside the row needs it before the insert: `Asset.createPending` sets `id = randomUUID()` so the storage key `pending/{uploaderId}/{id}` exists before the save.
 
 Conventions:
+
 - Never call `new Entity()` outside its factory or a test faker. Two places still do: `ProfileSummaryService` rebuilds a `UserProfile` from a cache entry with `Object.assign(new UserProfile(), …)`, and `PostsService` builds `PostAsset` rows with `new PostAsset()`.
 - Cross-module references use `import type` and a string relation target, so modules don't import each other's entities at runtime: `@ManyToOne('UserProfile')`.
 - Every date column is `timestamptz`. `TypeormEntityBase` declares its audit columns that way; an entity that doesn't extend it (`PostLike`, `CommentLike`, `ChatParticipant`, `MessageAttachment`, ...) declares `{ type: 'timestamptz' }` itself. Plain `timestamp` columns were read back in the process's local zone and shifted instants (fixed by the `TimestampsWithTimeZone` migration in each service).
@@ -290,11 +295,14 @@ export interface IPostRepository extends RepositoryPort<Post, PostProps> {
     limit: number,
   ): Promise<{ posts: Post[]; nextCursor: string | null }>;
   getCommentCounts(postIds: string[]): Promise<Map<string, number>>;
-  getLikeStats(postIds: string[], viewerId?: string): Promise<Map<string, LikeStats>>;
+  getLikeStats(
+    postIds: string[],
+    viewerId?: string,
+  ): Promise<Map<string, LikeStats>>;
   // ... searchPublishedPosts, findByAuthor, countPublishedByAuthor
 }
 
-export const POST_REPOSITORY = Symbol.for('IPostRepository');
+export const POST_REPOSITORY = Symbol.for("IPostRepository");
 ```
 
 Batch finders (`getCommentCounts`, `getLikeStats`) take every id of a page and return a `Map` with an entry per id, so a list endpoint runs a constant number of queries (§3.15).
@@ -303,15 +311,15 @@ Batch finders (`getCommentCounts`, `getLikeStats`) take every id of a page and r
 
 Non-repository ports follow the same shape:
 
-| Port / token | Module | Adapter | Notes |
-|---|---|---|---|
-| `IFileStoragePort` / `FileStoragePortKey` | assets | `S3StorageAdapter` | `presignGet`, `presignPost`, `head`, `readHead(…, ifMatch)`, `copyToPublic`, `copyToPrivate`, `deleteObject(bucket, key)` |
-| `IContentSniffer` / `CONTENT_SNIFFER` | assets | `FileTypeContentSniffer` | checks the first bytes against the purpose's allowlist (§3.13) |
-| `IAttachmentStoragePort` / `ATTACHMENT_STORAGE_PORT` | chats | `AttachmentStorageAdapter` | `findAssets`, `softDeleteAssets`, `presign` (cached), `invalidateSignedUrls`, `deleteObjects` |
-| `IAvatarAssetPort` / `AVATAR_ASSET_PORT` | profiles | `AvatarAssetAdapter` | `findAvatarSource(assetId)` |
-| `IChatRealtimePort` / `CHAT_REALTIME_PORT` | chats | `ChatsGateway` | §3.8 |
-| `IUserDirectoryPort` / `USER_DIRECTORY_PORT` | profiles | `UserDirectoryAdapter` | §3.4 |
-| `ICacheStore` / `CACHE_STORE` | `common/cache` | `RedisCacheAdapter` | §3.14 |
+| Port / token                                         | Module         | Adapter                    | Notes                                                                                                                     |
+| ---------------------------------------------------- | -------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `IFileStoragePort` / `FileStoragePortKey`            | assets         | `S3StorageAdapter`         | `presignGet`, `presignPost`, `head`, `readHead(…, ifMatch)`, `copyToPublic`, `copyToPrivate`, `deleteObject(bucket, key)` |
+| `IContentSniffer` / `CONTENT_SNIFFER`                | assets         | `FileTypeContentSniffer`   | checks the first bytes against the purpose's allowlist (§3.13)                                                            |
+| `IAttachmentStoragePort` / `ATTACHMENT_STORAGE_PORT` | chats          | `AttachmentStorageAdapter` | `findAssets`, `softDeleteAssets`, `presign` (cached), `invalidateSignedUrls`, `deleteObjects`                             |
+| `IAvatarAssetPort` / `AVATAR_ASSET_PORT`             | profiles       | `AvatarAssetAdapter`       | `findAvatarSource(assetId)`                                                                                               |
+| `IChatRealtimePort` / `CHAT_REALTIME_PORT`           | chats          | `ChatsGateway`             | §3.8                                                                                                                      |
+| `IUserDirectoryPort` / `USER_DIRECTORY_PORT`         | profiles       | `UserDirectoryAdapter`     | §3.4                                                                                                                      |
+| `ICacheStore` / `CACHE_STORE`                        | `common/cache` | `RedisCacheAdapter`        | §3.14                                                                                                                     |
 
 #### Layer 3: Domain Errors (`domain/errors/`) and the HTTP Mapping
 
@@ -326,15 +334,15 @@ export class MessageTooLongError extends DomainError { ... }         // 400
 
 **Error mapping (the one table).** Nest services register `DomainExceptionFilter` from `packages/shared/src/filters/domain-exception.filter.ts` globally (core and notifications); auth uses `apps/auth_microservice/src/middleware/error-handler.middleware.ts`. Both check `instanceof` in this order:
 
-| Error (and its subclasses) | Nest `DomainExceptionFilter` | Express `errorHandler` |
-|---|---|---|
-| `EntityNotFoundError`, `EntityByIdNotFoundError` (e.g. `ChatNotFoundError`, `MessageNotFoundError`, `UserNotFoundError`) | 404 | 404 |
-| `AccessDeniedError` (e.g. `NotChatAdminError`, `NotMessageAuthorError`) | 403 | 403 |
-| `UniqueConstraintViolationError` | 409 | 409 |
-| `DatabaseQueryError` | 500 (logged at error level) | 500 |
-| `UnauthorizedError` | **400** (no special case) | 401 |
-| any other `DomainError` (e.g. `InvalidDisplayNameError`, `MessageTooLongError`) | 400 | 400 |
-| not a `DomainError` | not caught: Nest's default handling (an `HttpException` keeps its status, anything else is 500) | 500 `{ statusCode: 500, message: 'Internal Server Error' }` |
+| Error (and its subclasses)                                                                                               | Nest `DomainExceptionFilter`                                                                    | Express `createErrorHandler`                                |
+| ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `EntityNotFoundError`, `EntityByIdNotFoundError` (e.g. `ChatNotFoundError`, `MessageNotFoundError`, `UserNotFoundError`) | 404                                                                                             | 404                                                         |
+| `AccessDeniedError` (e.g. `NotChatAdminError`, `NotMessageAuthorError`)                                                  | 403                                                                                             | 403                                                         |
+| `UniqueConstraintViolationError`                                                                                         | 409                                                                                             | 409                                                         |
+| `DatabaseQueryError`                                                                                                     | 500 (logged at error level)                                                                     | 500                                                         |
+| `UnauthorizedError`                                                                                                      | **400** (no special case)                                                                       | 401                                                         |
+| any other `DomainError` (e.g. `InvalidDisplayNameError`, `MessageTooLongError`)                                          | 400                                                                                             | 400                                                         |
+| not a `DomainError`                                                                                                      | not caught: Nest's default handling (an `HttpException` keeps its status, anything else is 500) | 500 `{ statusCode: 500, message: 'Internal Server Error' }` |
 
 Body for mapped errors: `{ statusCode, error: <error class name>, message }`. On the socket, `WsDomainExceptionFilter` (`apps/core_microservice/src/modules/chats/infrastructure/realtime/ws-domain-exception.filter.ts`) acks `{ ok: false, error: { code: <class name>, message } }`, and `InternalError` for anything else.
 
@@ -347,9 +355,11 @@ Request DTOs implement the contracts interface and carry `class-validator` and `
 ```typescript
 // apps/core_microservice/src/modules/chats/dto/edit-message.dto.ts
 export class EditMessageDto implements IEditMessageRequest {
-  @ApiProperty({ description: 'New message text (0-2000 chars); blank only if attachments' })
-  @IsString({ message: 'Content must be a text' })
-  @MaxLength(2000, { message: 'Message is too long (max 2000 chars)' })
+  @ApiProperty({
+    description: "New message text (0-2000 chars); blank only if attachments",
+  })
+  @IsString({ message: "Content must be a text" })
+  @MaxLength(2000, { message: "Message is too long (max 2000 chars)" })
   content!: string;
 }
 ```
@@ -382,11 +392,15 @@ export class UserProfileRepository
   public static readonly entity = UserProfile;
   protected relations: string[] = [];
 
-  constructor(@InjectRepository(UserProfile) repository: Repository<UserProfile>) {
+  constructor(
+    @InjectRepository(UserProfile) repository: Repository<UserProfile>,
+  ) {
     super(repository);
   }
 
-  public async findByAuthUserId(authUserId: string): Promise<UserProfile | null> {
+  public async findByAuthUserId(
+    authUserId: string,
+  ): Promise<UserProfile | null> {
     return this.repository.findOne({ where: { authUserId } });
   }
 }
@@ -423,19 +437,19 @@ Controllers map HTTP to service calls and entities to response DTOs. They inject
 
 ```typescript
 // apps/core_microservice/src/modules/chats/messages.controller.ts
-@ApiTags('chats')
+@ApiTags("chats")
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
-@Controller('chats/:chatId/messages')
+@Controller("chats/:chatId/messages")
 export class MessagesController {
   constructor(private readonly messagesService: MessagesService) {}
 
-  @Patch(':messageId')
-  @ApiOperation({ summary: 'Edit your own message' })
+  @Patch(":messageId")
+  @ApiOperation({ summary: "Edit your own message" })
   edit(
-    @CurrentUser('sub') userId: string,
-    @Param('chatId', ParseUUIDPipe) chatId: string,
-    @Param('messageId', ParseUUIDPipe) messageId: string,
+    @CurrentUser("sub") userId: string,
+    @Param("chatId", ParseUUIDPipe) chatId: string,
+    @Param("messageId", ParseUUIDPipe) messageId: string,
     @Body() dto: EditMessageDto,
   ): Promise<MessageResponseDto> {
     return this.messagesService.edit(userId, chatId, messageId, dto);
@@ -452,7 +466,7 @@ Route ids go through `ParseUUIDPipe`; status codes other than the default use `@
 @Module({
   imports: [
     TypeOrmModule.forFeature([Post, PostLike, PostAsset]),
-    LoggerModule.forFeature('PostsService'),
+    LoggerModule.forFeature("PostsService"),
     AssetsModule, // exports AssetsService (checks post images)
   ],
   controllers: [PostsController],
@@ -490,6 +504,7 @@ exports: [COMMENT_REPOSITORY],
 ```
 
 `useClass` vs `useExisting`:
+
 - `{ provide: TOKEN, useClass: Adapter }` when only the token is needed (`CHAT_REPOSITORY`, `MESSAGE_REPOSITORY`, `ATTACHMENT_STORAGE_PORT`, `POST_LIKE_REPOSITORY`, `COMMENT_LIKE_REPOSITORY`, `USER_DIRECTORY_PORT`, `AVATAR_ASSET_PORT`, `FileStoragePortKey`, `UPLOAD_REPOSITORY`, `CONTENT_SNIFFER`, `CACHE_STORE`, `OUTBOX_PORT`, `EVENT_BUS`).
 - `{ provide: TOKEN, useExisting: Adapter }` plus the adapter class as its own provider when the same instance must be reachable both ways. `CHAT_REALTIME_PORT` → `ChatsGateway` needs this: Nest must instantiate the gateway as a gateway, and services must reach that same instance through the port. Repositories bound this way (`POST_REPOSITORY`, `COMMENT_REPOSITORY`, `FollowRepositoryKey`, `UserProfileRepositoryKey`) are still injected by token, except in `ProfilesService` (table below).
 
@@ -499,30 +514,30 @@ In tests the token makes faking trivial: `{ provide: POST_REPOSITORY, useValue: 
 
 Some services inject concrete classes instead of ports. Don't copy these:
 
-| Service | Concrete dependency | Note |
-|---|---|---|
-| `ProfilesService` | `UserProfileRepository`, `ProfileSummaryCache` | the cache is a typed wrapper over `CACHE_STORE` (§3.14) |
-| `AssetsService` | `AssetRepository` | READY-only repository (Layer 5) |
-| `PostsService` | `AssetsService`, `ProfileSummaryCache` | posts calls `Asset` methods on another module's entity (§3.4) |
-| `FollowsService` | `ProfileSummaryCache` | cache invalidation only |
-| `ProfileSummaryService` | `ProfilesService`, `ProfileSummaryCache` | read model composed from other modules (§3.4) |
+| Service                 | Concrete dependency                            | Note                                                          |
+| ----------------------- | ---------------------------------------------- | ------------------------------------------------------------- |
+| `ProfilesService`       | `UserProfileRepository`, `ProfileSummaryCache` | the cache is a typed wrapper over `CACHE_STORE` (§3.14)       |
+| `AssetsService`         | `AssetRepository`                              | READY-only repository (Layer 5)                               |
+| `PostsService`          | `AssetsService`, `ProfileSummaryCache`         | posts calls `Asset` methods on another module's entity (§3.4) |
+| `FollowsService`        | `ProfileSummaryCache`                          | cache invalidation only                                       |
+| `ProfileSummaryService` | `ProfilesService`, `ProfileSummaryCache`       | read model composed from other modules (§3.4)                 |
 
 Adapters may wrap another module's exported service class: `AttachmentStorageAdapter` and `AvatarAssetAdapter` inject `AssetsService`, which is the module-local-port pattern of §3.4. `InternalEventsController` calls `ProfilesService` directly; `ChatsGateway` is injected as a class by `SessionRevocationListener` (same module). Everything else goes through tokens.
 
 ### 3.4 Module Map and Cross-Module Ports
 
-| Module | Owns | Exposes to other modules |
-|---|---|---|
-| `profiles` | `UserProfile`, profile search, by-ids lookup, lazy profile creation, avatar rules (`AVATAR_ASSET_PORT` over `AssetsService`); invalidates the cached profile after a save | `ProfilesService`, `USER_DIRECTORY_PORT` |
-| `profile-summary` | `GET /profiles/by-user/:userId`: a cache-aside read model (profile + follower/following/published-post counts from the cache, `isFollowedByMe` always live, §3.14). Separate module because follows imports profiles, so profiles can't import follows | — |
-| `posts` | `Post`, `PostLike` and `PostAsset` entities, keyset feed (§3.12), search, posts by author; checks post images through `AssetsService`; invalidates the author's cached counts on delete/publish/archive | `POST_REPOSITORY` |
-| `comments` | `Comment`, `CommentLike` entities; reply trees of any depth, paged by root comment; deleting a comment soft-deletes its whole subtree (`softDeleteWithReplies`) | `COMMENT_REPOSITORY` |
-| `likes` | like/unlike routes and the like repositories (entities belong to posts/comments) | — |
-| `follows` | `Follow`; paged followers/following with `isFollowedByMe`; invalidates both users' cached counts after commit | `FollowsService` (unused elsewhere), `FollowRepositoryKey` (used by profile-summary) |
-| `assets` | `Asset`, two-step uploads `POST /uploads` + `/confirm` (§3.13), content sniffing, the pending-upload sweeper, S3 storage (SeaweedFS locally), presigned GET and POST | `AssetsService` (READY-only `findByIds`, `softDeleteMany`, `presignGet`, `deleteObject`) |
-| `chats` | `Chat`, `ChatParticipant`, `Message`, `MessageAttachment`, `ChatsGateway`; no upload route (files come from `/uploads` with purpose `chat-attachment`); signed-URL cache | `CHAT_REALTIME_PORT` |
-| `internal-events` | `POST /internal/events/user-created` | — |
-| `notifications-relay` | AMQP consumer for `notification.*` → sockets | — |
+| Module                | Owns                                                                                                                                                                                                                                                   | Exposes to other modules                                                                 |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| `profiles`            | `UserProfile`, profile search, by-ids lookup, lazy profile creation, avatar rules (`AVATAR_ASSET_PORT` over `AssetsService`); invalidates the cached profile after a save                                                                              | `ProfilesService`, `USER_DIRECTORY_PORT`                                                 |
+| `profile-summary`     | `GET /profiles/by-user/:userId`: a cache-aside read model (profile + follower/following/published-post counts from the cache, `isFollowedByMe` always live, §3.14). Separate module because follows imports profiles, so profiles can't import follows | —                                                                                        |
+| `posts`               | `Post`, `PostLike` and `PostAsset` entities, keyset feed (§3.12), search, posts by author; checks post images through `AssetsService`; invalidates the author's cached counts on delete/publish/archive                                                | `POST_REPOSITORY`                                                                        |
+| `comments`            | `Comment`, `CommentLike` entities; reply trees of any depth, paged by root comment; deleting a comment soft-deletes its whole subtree (`softDeleteWithReplies`)                                                                                        | `COMMENT_REPOSITORY`                                                                     |
+| `likes`               | like/unlike routes and the like repositories (entities belong to posts/comments)                                                                                                                                                                       | —                                                                                        |
+| `follows`             | `Follow`; paged followers/following with `isFollowedByMe`; invalidates both users' cached counts after commit                                                                                                                                          | `FollowsService` (unused elsewhere), `FollowRepositoryKey` (used by profile-summary)     |
+| `assets`              | `Asset`, two-step uploads `POST /uploads` + `/confirm` (§3.13), content sniffing, the pending-upload sweeper, S3 storage (SeaweedFS locally), presigned GET and POST                                                                                   | `AssetsService` (READY-only `findByIds`, `softDeleteMany`, `presignGet`, `deleteObject`) |
+| `chats`               | `Chat`, `ChatParticipant`, `Message`, `MessageAttachment`, `ChatsGateway`; no upload route (files come from `/uploads` with purpose `chat-attachment`); signed-URL cache                                                                               | `CHAT_REALTIME_PORT`                                                                     |
+| `internal-events`     | `POST /internal/events/user-created`                                                                                                                                                                                                                   | —                                                                                        |
+| `notifications-relay` | AMQP consumer for `notification.*` → sockets                                                                                                                                                                                                           | —                                                                                        |
 
 Global infrastructure (no import needed): `AppConfigModule` (`AppConfigService`), `RedisModule` (`REDIS_CLIENT`), `CommonAuthModule` (`ACCESS_TOKEN_VERIFIER`), `MessagingModule` (`OUTBOX_PORT`, `EVENT_BUS`, `AMQP_CONNECTION`), `CacheModule` (`CACHE_STORE`, `ProfileSummaryCache`, `CACHE_REDIS_CLIENT`, §3.14), `MetricsModule` (`METRICS_REGISTRY`, §8). `ObservabilityModule` registers the health and metrics controllers, `InternalTokenGuard`, the checks and `HEALTH_CHECKS`; it exports nothing and is not global. `app.module.ts` also wires two things around every request: `QueryContextMiddleware` (all routes) and `QueryCountInterceptor` as an `APP_INTERCEPTOR` (§3.15).
 
@@ -536,7 +551,7 @@ export interface IUserDirectoryPort {
   /** @throws UserNotFoundError listing the ids that have no profile. */
   assertUsersExist(userIds: string[]): Promise<void>;
 }
-export const USER_DIRECTORY_PORT = Symbol.for('IUserDirectoryPort');
+export const USER_DIRECTORY_PORT = Symbol.for("IUserDirectoryPort");
 ```
 
 `UserDirectoryAdapter` (`apps/core_microservice/src/modules/profiles/infrastructure/user-directory.adapter.ts`) does one `IN` query per call. Chats uses it for participant snapshots and member validation, comments/likes/follows/messages for the actor snapshot in broker events, and the gateway for the typing user. A module that needs it imports `ProfilesModule`.
@@ -556,7 +571,12 @@ export type ChatTransaction = EntityManager;
 
 export interface IChatRepository {
   save(chat: Chat, tx?: ChatTransaction): Promise<Chat>;
-  advanceReadSeq(chatId: string, userId: string, seq: number, tx?: ChatTransaction): Promise<number>;
+  advanceReadSeq(
+    chatId: string,
+    userId: string,
+    seq: number,
+    tx?: ChatTransaction,
+  ): Promise<number>;
   runInTransaction<T>(work: (tx: ChatTransaction) => Promise<T>): Promise<T>;
   // ...
 }
@@ -591,16 +611,24 @@ Rules for chats sequence and read-pointer columns: never persist `chats.lastSeq`
 const result = await this.verifier.verify(this.extractTokenFromHeader(request));
 if (!result.ok) {
   switch (result.reason) {
-    case 'missing':     throw new UnauthorizedException('Authentication token is missing');
-    case 'revoked':     throw new UnauthorizedException('Token has been revoked');
-    case 'unavailable': throw new ServiceUnavailableException('Unable to verify token status, try again later');
-    default:            throw new UnauthorizedException('Invalid or expired authentication token');
+    case "missing":
+      throw new UnauthorizedException("Authentication token is missing");
+    case "revoked":
+      throw new UnauthorizedException("Token has been revoked");
+    case "unavailable":
+      throw new ServiceUnavailableException(
+        "Unable to verify token status, try again later",
+      );
+    default:
+      throw new UnauthorizedException(
+        "Invalid or expired authentication token",
+      );
   }
 }
-request['user'] = result.payload; // { sub, email, jti, sid?, exp }
+request["user"] = result.payload; // { sub, email, jti, sid?, exp }
 ```
 
-`AccessTokenVerifier` (`packages/shared/src/auth/access-token.verifier.ts`) verifies HS256 with `JWT_ACCESS_SECRET` (falling back to `JWT_SECRET`, the name auth signs with), requires `jti`, `sub` and `exp`, then checks Redis `blacklist:access:<jti>`. If Redis throws, the result is `unavailable` and the guard **fails closed with 503**. The provider (`apps/core_microservice/src/common/auth/access-token-verifier.provider.ts`) throws at startup when no secret is configured. Because `CommonAuthModule` and `RedisModule` are global, any module can use `@UseGuards(JwtAuthGuard)` without extra imports.
+`AccessTokenVerifier` (`packages/shared/src/auth/access-token.verifier.ts`) verifies HS256 with `JWT_SECRET` (the secret auth signs with; there is no `JWT_ACCESS_SECRET`), requires `jti`, `sub` and `exp`, then checks Redis `blacklist:access:<jti>`. If Redis throws, the result is `unavailable` and the guard **fails closed with 503**. The provider (`apps/core_microservice/src/common/auth/access-token-verifier.provider.ts`) gets the secret from `AppConfigService.jwtSecret`, so a missing `JWT_SECRET` stops startup in env validation. Because `CommonAuthModule` and `RedisModule` are global, any module can use `@UseGuards(JwtAuthGuard)` without extra imports.
 
 `OptionalJwtAuthGuard` (`apps/core_microservice/src/common/auth/optional-jwt-auth.guard.ts`) is for public routes that personalise the response (`GET /posts/:id`, `/posts/search`, `/comments/post/:postId` compute `likedByMe`; `/posts/author/:userId` shows drafts to their author; `/profiles/by-user/:userId` and `/follows/:userId/followers|following` compute `isFollowedByMe`): any failure leaves `request.user` unset and the request continues anonymously.
 
@@ -608,17 +636,17 @@ request['user'] = result.payload; // { sub, email, jti, sid?, exp }
 
 **IDOR.** Every mutating route uses `JwtAuthGuard` and passes `user.sub` into the service; the check that the caller owns or may touch the resource happens before the mutation. Where it lives today:
 
-| Module | Check | Throws |
-|---|---|---|
-| chats | entity methods: `Chat.assertCanRead/assertCanPost` (non-members get 404, so chat ids don't leak), `Chat` admin checks, `Message.edit/delete` | `ChatNotFoundError` (404), `NotChatAdminError` / `NotMessageAuthorError` (`AccessDeniedError`, 403) |
-| likes | `Post.assertLikeableBy`, `Comment.assertLikeableBy` (an unpublished post is visible to its author only) | `EntityByIdNotFoundError` (404) |
-| follows | scoped by construction: the follower is always `user.sub` | — |
-| posts, comments | service compares `authorId !== userId` | Nest `ForbiddenException` (403) |
-| profiles | `UserProfile.assertOwnedBy` (called from `ProfilesService.updateProfile`), `UserProfile.changeAvatar` (asset must be the owner's, public, a non-SVG image); `AvatarAssetAdapter` also requires the `avatar` or `post-image` purpose | `NotProfileOwnerError`, `AvatarAssetNotOwnedError` (`AccessDeniedError`, 403) |
-| posts (by author) | `Post.assertStatusListableBy`: non-published statuses are listed for the author only | `PostStatusNotVisibleError` (`AccessDeniedError`, 403) |
-| uploads confirm | `UploadsService.confirm` / `Asset.assertConfirmableBy`: someone else's upload looks exactly like an unknown id | `EntityByIdNotFoundError` (404) |
-| posts with `assetIds` | `PostsService` + `Asset.assertAttachableTo('post', userId)`: missing, unconfirmed and foreign ids all read as 404; a wrong purpose is 400 | `EntityByIdNotFoundError` (404), `AssetNotAttachableError` (400) |
-| chat attachments | `Message.create`: missing or foreign assets share one reason, non-private assets are refused | `InvalidAttachmentError` (400) |
+| Module                | Check                                                                                                                                                                                                                               | Throws                                                                                              |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| chats                 | entity methods: `Chat.assertCanRead/assertCanPost` (non-members get 404, so chat ids don't leak), `Chat` admin checks, `Message.edit/delete`                                                                                        | `ChatNotFoundError` (404), `NotChatAdminError` / `NotMessageAuthorError` (`AccessDeniedError`, 403) |
+| likes                 | `Post.assertLikeableBy`, `Comment.assertLikeableBy` (an unpublished post is visible to its author only)                                                                                                                             | `EntityByIdNotFoundError` (404)                                                                     |
+| follows               | scoped by construction: the follower is always `user.sub`                                                                                                                                                                           | —                                                                                                   |
+| posts, comments       | service compares `authorId !== userId`                                                                                                                                                                                              | Nest `ForbiddenException` (403)                                                                     |
+| profiles              | `UserProfile.assertOwnedBy` (called from `ProfilesService.updateProfile`), `UserProfile.changeAvatar` (asset must be the owner's, public, a non-SVG image); `AvatarAssetAdapter` also requires the `avatar` or `post-image` purpose | `NotProfileOwnerError`, `AvatarAssetNotOwnedError` (`AccessDeniedError`, 403)                       |
+| posts (by author)     | `Post.assertStatusListableBy`: non-published statuses are listed for the author only                                                                                                                                                | `PostStatusNotVisibleError` (`AccessDeniedError`, 403)                                              |
+| uploads confirm       | `UploadsService.confirm` / `Asset.assertConfirmableBy`: someone else's upload looks exactly like an unknown id                                                                                                                      | `EntityByIdNotFoundError` (404)                                                                     |
+| posts with `assetIds` | `PostsService` + `Asset.assertAttachableTo('post', userId)`: missing, unconfirmed and foreign ids all read as 404; a wrong purpose is 400                                                                                           | `EntityByIdNotFoundError` (404), `AssetNotAttachableError` (400)                                    |
+| chat attachments      | `Message.create`: missing or foreign assets share one reason, non-private assets are refused                                                                                                                                        | `InvalidAttachmentError` (400)                                                                      |
 
 Ownership is checked on the root of an operation, not on everything it touches: deleting your own comment soft-deletes the whole reply subtree, including other users' replies.
 
@@ -629,12 +657,14 @@ New code follows the chats pattern: an entity method such as `assertOwnedBy(user
 ```typescript
 // apps/core_microservice/src/main.ts (excerpt)
 const app = await NestFactory.create(AppModule, { logger: new WinstonLogger('CoreSystem') });
+app.use(requestIdMiddleware());                       // first: every later log line carries the id (§8.6)
+app.use(accessLogMiddleware(new WinstonLogger('Http')));
 app.use(helmet());
 const registry = app.get<Registry>(METRICS_REGISTRY);
 app.use(httpMetricsMiddleware(registry)); // before routing; reads the route template on `finish` (§8.3)
 app.use(cookieParser());
 app.enableCors({
-  origin: process.env.CLIENT_URL || 'http://localhost:3000',
+  origin: appConfig.clientUrl,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
@@ -644,30 +674,32 @@ appConfig.assertSafeForEnvironment(); // PERF_INSTRUMENTATION=true is refused wh
 appConfig.assertInternalApiToken();   // INTERNAL_API_TOKEN set and 32+ chars, else boot fails
 registerDbPoolGauge(registry, () => /* pg pool of dataSource.driver.master */);
 app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
-app.useGlobalFilters(new DomainExceptionFilter());
-// Swagger at /api
+app.useGlobalFilters(new DomainExceptionFilter(createErrorsCounter(registry))); // counts errors_total (§8.3)
+if (appConfig.swaggerEnabled) setupSwagger(app); // /api, off by default in production (SWAGGER_ENABLED)
 app.enableShutdownHooks(); // runs onModuleDestroy/onApplicationShutdown (outbox relay, sweeper, AMQP, Redis)
 await app.listen(appConfig.port); // CORE_PORT, default 3001
 ```
 
-`createE2eApp` in `apps/core_microservice/test/helpers/app.helpers.ts` repeats the request-facing part of this wiring: the metrics middleware, the pool gauge, `ValidationPipe` and `DomainExceptionFilter`. It skips helmet, cookies, CORS, Swagger, shutdown hooks and the two asserts. Older suites boot `AppModule` with only the pipe and filter. Keep the pipe and filter in sync with `main.ts`.
+`createE2eApp` in `apps/core_microservice/test/helpers/app.helpers.ts` repeats the request-facing part of this wiring: the metrics middleware, the pool gauge, `ValidationPipe` and `DomainExceptionFilter`. It skips the request-id and access-log middleware, helmet, cookies, CORS, Swagger, shutdown hooks and the two asserts. Older suites boot `AppModule` with only the pipe and filter. Keep the pipe and filter in sync with `main.ts`.
 
-Configuration goes through `AppConfigService` (`apps/core_microservice/src/config/app-config.service.ts`), never `process.env`. `SLOW_QUERY_MS`, `CACHE_REDIS_PORT`, the `UPLOAD_*` values, `OUTBOX_MAX_ATTEMPTS` and `S3_PORT` throw on invalid values when first read (`positiveInt` / `nonNegativeInt` and their own checks). `CORE_PORT`, `POSTGRES_PORT` and `REDIS_PORT` are only `parseInt`-ed and are not validated.
+Configuration goes through `AppConfigService` (`apps/core_microservice/src/config/app-config.service.ts`), never `process.env`. `AppConfigModule` validates the environment at bootstrap (`config/env.validation.ts`, `class-validator`): every required variable and every invalid value is reported by name (never its value), and an empty value counts as unset. `SLOW_QUERY_MS`, `CACHE_REDIS_PORT`, the `UPLOAD_*` values, `OUTBOX_MAX_ATTEMPTS` and `S3_PORT` throw on invalid values when first read (`positiveInt` / `nonNegativeInt` and their own checks). `CORE_PORT`, `POSTGRES_PORT` and `REDIS_PORT` are only `parseInt`-ed and are not validated.
 
-| Getter | Variables (default) |
-|---|---|
-| `port` | `CORE_PORT` (3001) |
-| `postgres` | `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `DB_NAME_CORE` |
-| `redis` | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` (sessions and blacklists) |
-| `cacheRedis` | `CACHE_REDIS_HOST` (localhost), `CACHE_REDIS_PORT` (6380) (§3.14) |
-| `rabbitmq` | `RABBITMQ_URL` (required) |
-| `outbox` | `OUTBOX_MAX_ATTEMPTS` (10) |
-| `s3` | `S3_ENDPOINT`, `S3_PORT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET_NAME`, `S3_PRIVATE_BUCKET_NAME`, `S3_PUBLIC_ENDPOINT`, `S3_REGION`, `S3_USE_SSL` |
-| `uploads` | `UPLOAD_LINK_TTL_SEC` (300), `UPLOAD_SWEEP_GRACE_SEC` (3600), `UPLOAD_SWEEP_INTERVAL_SEC` (900) (§3.13) |
-| `perfInstrumentation`, `slowQueryMs` | `PERF_INSTRUMENTATION` (off), `SLOW_QUERY_MS` (200) (§3.15) |
-| `internalApiToken` | `INTERNAL_API_TOKEN` (required, 32+ chars, §8.4) |
+| Getter                               | Variables (default)                                                                                                                                     |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `port`                               | `CORE_PORT` (3001)                                                                                                                                      |
+| `postgres`                           | `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `DB_NAME_CORE`                                                                  |
+| `redis`                              | `REDIS_HOST`, `REDIS_PORT`, `REDIS_PASSWORD` (sessions and blacklists)                                                                                  |
+| `cacheRedis`                         | `CACHE_REDIS_HOST` (localhost), `CACHE_REDIS_PORT` (6380) (§3.14)                                                                                       |
+| `rabbitmq`                           | `RABBITMQ_URL` (required)                                                                                                                               |
+| `outbox`                             | `OUTBOX_MAX_ATTEMPTS` (10)                                                                                                                              |
+| `s3`                                 | `S3_ENDPOINT`, `S3_PORT`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, `S3_BUCKET_NAME`, `S3_PRIVATE_BUCKET_NAME`, `S3_PUBLIC_ENDPOINT`, `S3_REGION`, `S3_USE_SSL` |
+| `uploads`                            | `UPLOAD_LINK_TTL_SEC` (300), `UPLOAD_SWEEP_GRACE_SEC` (3600), `UPLOAD_SWEEP_INTERVAL_SEC` (900) (§3.13)                                                 |
+| `perfInstrumentation`, `slowQueryMs` | `PERF_INSTRUMENTATION` (off), `SLOW_QUERY_MS` (200) (§3.15)                                                                                             |
+| `internalApiToken`                   | `INTERNAL_API_TOKEN` (required, 32+ chars, §8.4)                                                                                                        |
+| `jwtSecret`, `clientUrl`             | `JWT_SECRET` (required), `CLIENT_URL`                                                                                                                   |
+| `swaggerEnabled`                     | `SWAGGER_ENABLED` (on unless `NODE_ENV=production`)                                                                                                     |
 
-Known exceptions that read `process.env` directly: CORS in `main.ts` and the gateway (`CLIENT_URL`; decorator options are evaluated before config loads), `access-token-verifier.provider.ts` (`JWT_ACCESS_SECRET` / `JWT_SECRET`), `notifications-relay.consumer.ts` (`NOTIFICATIONS_RELAY_QUEUE`) and `apps/core_microservice/src/database/database.config.ts` (CLI and seeds run without Nest).
+Known exceptions that read `process.env` directly: `notifications-relay.consumer.ts` (`NOTIFICATIONS_RELAY_QUEUE`) and `apps/core_microservice/src/database/database.config.ts` (CLI and seeds run without Nest).
 
 ### 3.8 Realtime: `ChatsGateway` as an Inbound and Outbound Adapter
 
@@ -723,7 +755,7 @@ const message = await this.chats.runInTransaction(async (tx) => {
   return this.messages.update(found, tx);
 });
 const [response] = await this.toResponses([message]);
-this.emitToChat(chatId, 'message:updated', { message: response }); // post-commit, guarded
+this.emitToChat(chatId, "message:updated", { message: response }); // post-commit, guarded
 ```
 
 Single-instance limitation: rooms live in the in-memory adapter (no socket.io Redis adapter), and `isUserViewingChat` only sees local sockets.
@@ -741,7 +773,7 @@ const sockets = await this.gateway.server.in(userRoom(userId)).fetchSockets();
 for (const socket of sockets) {
   const matches = sid ? socket.data.sid === sid : socket.data.jti === jti;
   if (!matches) continue;
-  socket.emit('session:expired', { reason: 'revoked' });
+  socket.emit("session:expired", { reason: "revoked" });
   socket.disconnect(true);
 }
 ```
@@ -764,15 +796,15 @@ service tx ──▶ outbox_events row ──▶ OutboxRelay ──▶ EVENT_BUS
 
 Files, all under `apps/core_microservice/src/common/messaging/`:
 
-| Piece | File | Role |
-|---|---|---|
-| `IOutboxPort` / `OUTBOX_PORT` | `outbox.port.ts` | `add(routingKey, payload, tx)` for services; `claimPending`, `markPublished`, `markFailed`, `recordError`, `markDead`, `purgePublished` for the relay |
-| `TypeOrmOutboxAdapter` | `typeorm-outbox.adapter.ts` | `FOR UPDATE SKIP LOCKED` claim, post-commit wake signal |
-| `OutboxEvent` | `outbox-event.entity.ts` | table `outbox_events` (`attempts`, `lastError`, `publishedAt`, `deadLetteredAt`) |
-| `EventBusPort` / `EVENT_BUS`, `EventRejectedError` | `event-bus.port.ts` | publish an `EventEnvelope`; resolves on broker confirm |
-| `AmqpEventBus` | `amqp-event-bus.ts` | amqp-connection-manager confirm channel, 10 s timeout |
-| `OutboxRelay` | `outbox-relay.ts` | 500 ms poll + wake, batch 100, backoff 1 s → 30 s, hourly purge of rows published over 7 days ago |
-| `MessagingModule` | `messaging.module.ts` | `@Global()`; exports `OUTBOX_PORT`, `EVENT_BUS`, `AMQP_CONNECTION` |
+| Piece                                              | File                        | Role                                                                                                                                                  |
+| -------------------------------------------------- | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `IOutboxPort` / `OUTBOX_PORT`                      | `outbox.port.ts`            | `add(routingKey, payload, tx)` for services; `claimPending`, `markPublished`, `markFailed`, `recordError`, `markDead`, `purgePublished` for the relay |
+| `TypeOrmOutboxAdapter`                             | `typeorm-outbox.adapter.ts` | `FOR UPDATE SKIP LOCKED` claim, post-commit wake signal                                                                                               |
+| `OutboxEvent`                                      | `outbox-event.entity.ts`    | table `outbox_events` (`attempts`, `lastError`, `publishedAt`, `deadLetteredAt`)                                                                      |
+| `EventBusPort` / `EVENT_BUS`, `EventRejectedError` | `event-bus.port.ts`         | publish an `EventEnvelope`; resolves on broker confirm                                                                                                |
+| `AmqpEventBus`                                     | `amqp-event-bus.ts`         | amqp-connection-manager confirm channel, 10 s timeout                                                                                                 |
+| `OutboxRelay`                                      | `outbox-relay.ts`           | 500 ms poll + wake, batch 100, backoff 1 s → 30 s, hourly purge of rows published over 7 days ago                                                     |
+| `MessagingModule`                                  | `messaging.module.ts`       | `@Global()`; exports `OUTBOX_PORT`, `EVENT_BUS`, `AMQP_CONNECTION`                                                                                    |
 
 **Failure rules in the relay.** A broker-side failure (broker down, nack, confirm timeout, closed channel) only records `lastError` (`recordError`) and backs off; it never counts toward dead-lettering, so an outage of any length can't kill healthy rows. Only `EventRejectedError` (the event itself can't be published, e.g. its payload can't be serialized) counts: `markFailed` bumps `attempts`, and at `OUTBOX_MAX_ATTEMPTS` (env, default 10, `AppConfigService.outbox.maxAttempts`) the row is `markDead` (sets `deadLetteredAt`), logged at error level and skipped. The relay lives in the non-global `OutboxRelayModule` so it stops and finishes its drain before the AMQP providers close.
 
@@ -786,37 +818,42 @@ Files, all under `apps/core_microservice/src/common/messaging/`:
 
 Every list is bounded. `limit` is validated in the query DTO against `PAGE_SIZE_MAX` (50) from `@repo/contracts`, or `CHANGES_PAGE_SIZE_MAX` (200) for `GET /chats/:chatId/messages/changes`. Zero, negative, non-numeric or above-maximum values are a **400, never clamped**. Defaults are per endpoint:
 
-| Default `limit` | Endpoints |
-|---|---|
-| 20 | feed, post search, posts by author, comments, chats |
-| 50 | followers, following, messages |
-| 10 | profile search |
-| 200 | message changes |
+| Default `limit` | Endpoints                                           |
+| --------------- | --------------------------------------------------- |
+| 20              | feed, post search, posts by author, comments, chats |
+| 50              | followers, following, messages                      |
+| 10              | profile search                                      |
+| 200             | message changes                                     |
 
 ```typescript
 // apps/core_microservice/src/modules/posts/dto/feed-query.dto.ts
 export class FeedQueryDto implements IFeedQuery {
-  @IsOptional() @IsFeedCursor()
+  @IsOptional()
+  @IsFeedCursor()
   cursor?: string;
 
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(PAGE_SIZE_MAX)
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(PAGE_SIZE_MAX)
   limit: number = 20;
 
   /** Declared only so `whitelist` keeps it and validation can reject it. */
-  @Equals(undefined, { message: 'page is not supported; use cursor' })
+  @Equals(undefined, { message: "page is not supported; use cursor" })
   page?: unknown;
 }
 ```
 
 The last property is how a removed parameter is retired: the global `ValidationPipe` would silently strip an undeclared `page`, so the DTO declares it and rejects any value.
 
-| Envelope | Shape | Used by |
-|---|---|---|
-| `IOffsetPage<T>` (`packages/contracts/src/common/pagination.ts`) | `{ items, page, limit, hasMore }`; `hasMore` from fetching `limit + 1`, no `COUNT` | comments (`GET /comments/post/:postId`), followers, following |
-| `IFeedPage` | `{ items, nextCursor }` (`null` on the last page) | `GET /posts/feed` |
-| `ICursorPage<T>` | `{ items, hasMore }`, cursor in the query (`before`, `beforeSeq`, `afterChangeSeq`) | chats, messages, message changes |
-| legacy offset with `total` | `{ items, total, page, limit }` (+ `hasMore` for by-author) | `GET /posts/search`, `GET /posts/author/:userId` |
-| `IPaginatedResponse` / `PAGINATION_DEFAULTS` | unused legacy exports; their `MAX_LIMIT: 100` does not apply | — |
+| Envelope                                                         | Shape                                                                               | Used by                                                       |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `IOffsetPage<T>` (`packages/contracts/src/common/pagination.ts`) | `{ items, page, limit, hasMore }`; `hasMore` from fetching `limit + 1`, no `COUNT`  | comments (`GET /comments/post/:postId`), followers, following |
+| `IFeedPage`                                                      | `{ items, nextCursor }` (`null` on the last page)                                   | `GET /posts/feed`                                             |
+| `ICursorPage<T>`                                                 | `{ items, hasMore }`, cursor in the query (`before`, `beforeSeq`, `afterChangeSeq`) | chats, messages, message changes                              |
+| legacy offset with `total`                                       | `{ items, total, page, limit }` (+ `hasMore` for by-author)                         | `GET /posts/search`, `GET /posts/author/:userId`              |
+| `IPaginatedResponse` / `PAGINATION_DEFAULTS`                     | unused legacy exports; their `MAX_LIMIT: 100` does not apply                        | —                                                             |
 
 New lists use `IOffsetPage` or a cursor, not `total`.
 
@@ -849,13 +886,13 @@ POST /uploads/:uploadId/confirm   (idempotent: a READY upload returns the same b
 
 `UploadsService.confirm` (`apps/core_microservice/src/modules/assets/uploads.service.ts`) runs these steps, and the rules sit on `Asset`:
 
-| Rule | Where | Failure |
-|---|---|---|
-| declared type is in `UPLOAD_ALLOWLIST[purpose]`, size ≤ `UPLOAD_MAX_BYTES` | `Asset.createPending` | `UploadTypeNotAllowedError`, `UploadTooLargeError` (400) |
-| caller owns it, it is PENDING, not past `expiresAt` + 60 s grace | `Asset.assertConfirmableBy` | 404 for a foreign id, `UploadNotPendingError`, `UploadExpiredError` (400) |
-| stored object exists and its real size is in range | `UploadsService` + `Asset.assertStoredSizeAcceptable` | `UploadNotReadyError`; oversize is rejected |
-| the bytes match the purpose (the declared type is only a hint) | `IContentSniffer` (`FileTypeContentSniffer`) | `UploadContentRejectedError` (400) |
-| only READY, owned assets with a fitting purpose are attached | `Asset.assertAttachableTo(target, userId)` | `UploadNotReadyError`, `AssetNotAttachableError` (400) |
+| Rule                                                                       | Where                                                 | Failure                                                                   |
+| -------------------------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------- |
+| declared type is in `UPLOAD_ALLOWLIST[purpose]`, size ≤ `UPLOAD_MAX_BYTES` | `Asset.createPending`                                 | `UploadTypeNotAllowedError`, `UploadTooLargeError` (400)                  |
+| caller owns it, it is PENDING, not past `expiresAt` + 60 s grace           | `Asset.assertConfirmableBy`                           | 404 for a foreign id, `UploadNotPendingError`, `UploadExpiredError` (400) |
+| stored object exists and its real size is in range                         | `UploadsService` + `Asset.assertStoredSizeAcceptable` | `UploadNotReadyError`; oversize is rejected                               |
+| the bytes match the purpose (the declared type is only a hint)             | `IContentSniffer` (`FileTypeContentSniffer`)          | `UploadContentRejectedError` (400)                                        |
+| only READY, owned assets with a fitting purpose are attached               | `Asset.assertAttachableTo(target, userId)`            | `UploadNotReadyError`, `AssetNotAttachableError` (400)                    |
 
 A rejected upload (bad content or size) is discarded: the object is deleted and the row soft-deleted (`Asset.reject`). `uploads_total{purpose, outcome}` counts four outcomes: `confirmed`, `rejected_content`, `rejected_size` and `expired`. Replays and other errors are not counted.
 
@@ -894,24 +931,25 @@ export interface ICacheStore {
   set<T>(key: string, value: T, ttlSec: number): Promise<void>;
   del(...keys: string[]): Promise<void>;
 }
-export const CACHE_STORE = Symbol.for('ICacheStore');
+export const CACHE_STORE = Symbol.for("ICacheStore");
 ```
 
 **Fail-open.** The client uses `commandTimeout: 50`, `enableOfflineQueue: false` and `maxRetriesPerRequest: 0`, so a down or slow cache never blocks a request or startup. `RedisCacheAdapter` catches every store error: `get` returns `null`, `set`/`del` resolve. The failure is counted as `result="error"` and logged at most once per 10 s. Values are never logged. The only throw is a `RangeError` for an invalid TTL, which is a programming error. Callers therefore don't need a `try` around cache calls (`ProfileSummaryService` still wraps its calls defensively).
 
 **Keys** (`cache-keys.ts`): `cache:v1:<resource>:<id>`. Bump `v1` to invalidate a whole layout.
 
-| Key | TTL | Holds | Written by | Invalidated by (after commit) |
-|---|---|---|---|---|
-| `cache:v1:profile:<authUserId>` | 60 s | public profile fields | `ProfileSummaryService` on a miss | `ProfilesService` (after create, including the lazy create, and after update) |
-| `cache:v1:counts:<authUserId>` | 60 s | follower, following and published-post counts | `ProfileSummaryService` on a miss | `FollowsService` (both users, on follow/unfollow), `PostsService` (author, on delete/publish/archive) |
-| `cache:v1:surl:<assetId>:<hash(disposition)>` | 450 s (half the 15 min link) | presigned attachment URL | `AttachmentStorageAdapter.presign` | `MessagesService` after a message delete |
+| Key                                           | TTL                          | Holds                                         | Written by                         | Invalidated by (after commit)                                                                         |
+| --------------------------------------------- | ---------------------------- | --------------------------------------------- | ---------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `cache:v1:profile:<authUserId>`               | 60 s                         | public profile fields                         | `ProfileSummaryService` on a miss  | `ProfilesService` (after create, including the lazy create, and after update)                         |
+| `cache:v1:counts:<authUserId>`                | 60 s                         | follower, following and published-post counts | `ProfileSummaryService` on a miss  | `FollowsService` (both users, on follow/unfollow), `PostsService` (author, on delete/publish/archive) |
+| `cache:v1:surl:<assetId>:<hash(disposition)>` | 450 s (half the 15 min link) | presigned attachment URL                      | `AttachmentStorageAdapter.presign` | `MessagesService` after a message delete                                                              |
 
 `ProfileSummaryCache` (`common/cache/profile-summary-cache.ts`) is the typed wrapper for the first two keys. It whitelists public fields before writing and stores dates as ISO strings; the reader treats a corrupt entry as a miss. Viewer-specific data such as `isFollowedByMe` is never cached. A cached signed URL is reused only while at least half of its validity remains, so a client never gets a link about to expire.
 
 `CacheModule` is global and exports `CACHE_STORE`, `ProfileSummaryCache` and `CACHE_REDIS_CLIENT`. Hits, misses and errors are counted in `cache_requests_total{resource, result}`; the perf gate requires a profile hit ratio of at least 0.80.
 
 To cache a new resource:
+
 1. Add a key helper, a TTL constant and a `CacheResource` label in `cache-keys.ts` / `cache-store.port.ts`.
 2. Read through `CACHE_STORE` (or a typed wrapper), writing on a miss.
 3. Delete the key after every commit that changes the source data, never inside the transaction (§3.5).
@@ -934,6 +972,7 @@ QueryCountInterceptor (APP_INTERCEPTOR)  → observes db_queries_per_request{rou
 - **Slow-query log.** The root TypeORM config sets `logging: ['query', 'error']`, `logger: new TypeOrmPerfLogger()` and `maxQueryExecutionTime: SLOW_QUERY_MS` (default 200). A slow query is logged at warn level with `durationMs`, a `queryId` (a hash of the normalized SQL, for grouping) and the SQL text cut to 2048 characters. **Query parameters are never logged**; the logger methods don't even take them.
 
 Rules for list queries, so that their query count stays constant and they use an index:
+
 - **Batch per page.** Load the page, then fetch related data for all its ids at once (`getLikeStats`, `getCommentCounts`, `findFollowedAmong`, `UserDirectoryAdapter.getUsers`). Never query once per row.
 - **Ids first, then hydrate**, when the filter needs SQL the ORM can't express. `findFeedPage` selects ids with a LATERAL fan-out over followed authors, then loads the entities with relations by `In(ids)` and restores the order.
 - **`limit + 1` instead of `COUNT`** for `hasMore`.
@@ -997,30 +1036,42 @@ const internalServer = internalApp.listen(internalPort, internalHost);
 // apps/auth_microservice/src/app.ts (excerpt)
 // createApp(dataSource, logger, redisService, sessionRedisClient, observability = {})
 // `observability` ({ healthChecks?, metricsRegistry? }) is a test seam
-const registry = observability.metricsRegistry ?? createMetricsRegistry('auth');
+const registry = observability.metricsRegistry ?? createMetricsRegistry("auth");
 registerDbPoolGauge(registry, () => getPgPool(dataSource));
 const healthChecks = observability.healthChecks ?? [
-  createDatabaseCheck(dataSource), createRedisCheck(sessionRedisClient),
+  createDatabaseCheck(dataSource),
+  createRedisCheck(sessionRedisClient),
 ];
-app.use(httpMetricsMiddleware(registry));      // first, so every route is timed
+app.use(requestIdMiddleware()); // very first: request context for every log line
+app.use(httpMetricsMiddleware(registry)); // so every route is timed
+app.use(accessLogMiddleware(logger));
 // express.json → cookieParser → helmet → cors → setupSwagger
 const cryptoService = new BcryptService(env.crypto.saltRounds);
 const authUserRepository = new AuthUserRepository(dataSource);
-const usersService = new UsersService(authUserRepository, logger, cryptoService, new HttpEventPublisher(logger));
+const usersService = new UsersService(
+  authUserRepository,
+  logger,
+  cryptoService,
+  new HttpEventPublisher(logger, env.app.internalApiToken),
+);
 const authService = new AuthService(
-  usersService, redisService, logger, cryptoService,
-  new JwtService(), new GoogleOAuthService(),
+  usersService,
+  redisService,
+  logger,
+  cryptoService,
+  new JwtService(),
+  new GoogleOAuthService(),
   new RedisSessionRevocationPublisher(sessionRedisClient, logger),
 );
 app.use(createObservabilityRouter(registry, healthChecks)); // /health, /health/details, /metrics (§8)
-app.use('/users', createUsersRouter(usersService));
-app.use('/auth', createAuthRouter(authService));
-app.use(errorHandler); // last
+app.use("/users", createUsersRouter(usersService));
+app.use("/auth", createAuthRouter(authService));
+app.use(createErrorHandler(logger, errorsCounter)); // last
 ```
 
-The middleware order is `httpMetricsMiddleware` → `express.json()` → `cookieParser()` (the refresh cookie depends on it) → `helmet()` → CORS from `env.app.allowedOrigins` (`AUTH_ALLOWED_ORIGINS`, `credentials: true`) → Swagger (`swagger-jsdoc` over the `@openapi` JSDoc blocks in `routes/`) → observability router → routers.
+The middleware order is `requestIdMiddleware` → `httpMetricsMiddleware` → `accessLogMiddleware` → `express.json()` → `cookieParser()` (the refresh cookie depends on it) → `helmet()` → CORS from `env.app.allowedOrigins` (`AUTH_ALLOWED_ORIGINS`, `credentials: true`) → Swagger (`setupSwagger`, only when `SWAGGER_ENABLED` allows it) → observability router → routers.
 
-Configuration lives only in `apps/auth_microservice/src/config/env.ts`: `requireEnv(key, default?)` throws on a missing variable, and the rest of the code reads the exported `env` object, never `process.env`. Add new variables there and to `.env.example`. `INTERNAL_API_TOKEN` is required and length-checked (32+) there, by auth's own code rather than the shared `assertInternalApiToken` that notifications uses. Specs that import anything loading `env` set the required variables (`CORE_SERVICE_URL`, `AUTH_ALLOWED_ORIGINS`, `INTERNAL_API_TOKEN`, ...) before the import. `config/env.spec.ts` tests the fail-fast cases with `jest.isolateModules` and a mocked `dotenv`.
+Configuration lives only in `apps/auth_microservice/src/config/env.ts`: `requireEnv(key, default?)` throws on a missing variable (the message names the variable, not its value), `requireJwtSecret` makes `JWT_SECRET` / `JWT_REFRESH_SECRET` strict in production (32+ chars, not the `.env.example` or `CHANGE_ME` placeholders), an invalid `SWAGGER_ENABLED` throws, and the rest of the code reads the exported `env` object, never `process.env`. Add new variables there and to `.env.example`. `INTERNAL_API_TOKEN` is required and length-checked (32+) there, by auth's own code rather than the shared `assertInternalApiToken` that notifications uses. Specs that import anything loading `env` set the required variables (`CORE_SERVICE_URL`, `AUTH_ALLOWED_ORIGINS`, `INTERNAL_API_TOKEN`, ...) before the import. `config/env.spec.ts` tests the fail-fast cases with `jest.isolateModules` and a mocked `dotenv`.
 
 ### 4.3 Routes, Validation and Errors
 
@@ -1030,16 +1081,22 @@ Routers are factories that receive their service:
 // apps/auth_microservice/src/routes/auth.routes.ts (excerpt)
 export function createAuthRouter(authService: AuthService): Router {
   const router = Router();
-  router.post('/login', validateBody(LoginDto), async (req, res, next) => {
+  router.post("/login", validateBody(LoginDto), async (req, res, next) => {
     try {
       const { email, password } = req.body as LoginDto;
-      const result = await authService.login(email, password, sessionContext(req)); // { ipAddress, userAgent }
+      const result = await authService.login(
+        email,
+        password,
+        sessionContext(req),
+      ); // { ipAddress, userAgent }
       sendSession(res, result); // refresh token → httpOnly cookie, body = { accessToken, user }
     } catch (error) {
-      next(error); // → errorHandler
+      next(error); // → error handler
     }
   });
-  router.get('/me', requireAuth(authService), (req, res) => { /* req.user */ });
+  router.get("/me", requireAuth(authService), (req, res) => {
+    /* req.user */
+  });
   return router;
 }
 ```
@@ -1050,7 +1107,7 @@ Routes on the public listener: `POST /users/register`, `POST /auth/login`, `POST
 
 - `validateBody(DtoClass)` (`apps/auth_microservice/src/middleware/validate.middleware.ts`) runs `plainToInstance` + `validate` and answers 400 `{ statusCode, error: 'Bad Request', message: string[] }`; on success `req.body` is the DTO instance. DTOs come from `@repo/shared` (`LoginDto`, `CreateUserDto`, `GoogleLoginDto`).
 - `requireAuth(authService)` (`apps/auth_microservice/src/middleware/auth.middleware.ts`) reads the Bearer token, calls `authService.verifyToken` (signature + access blacklist) and sets `req.user`; failures are `UnauthorizedError` → 401.
-- `errorHandler` maps errors with the table in §3.2 Layer 3.
+- `createErrorHandler(logger, errorsCounter?)` (the error middleware) maps errors with the table in §3.2 Layer 3, logs 5xx and counts them in `errors_total`. Malformed JSON bodies are a 400, neither logged nor counted.
 
 ### 4.4 Services
 
@@ -1071,16 +1128,16 @@ constructor(
 
 ### 4.5 Ports and Adapters
 
-| Port (`domain/interfaces/`) | File | Adapter |
-|---|---|---|
-| `IAuthUserRepository` (extends `RepositoryPort`) | `auth-user-repository.interface.ts` | `AuthUserRepository` (`TypeormRepositoryBase`, `super(dataSource.getRepository(AuthUser))`) |
-| `ICacheService` (`get`, `setWithExpiry`, `delete`, `has`, `getOrSet`) | `cache.service.ts` | `RedisService` (ioredis) |
-| `ICryptoService` | `crypto.service.interface.ts` | `BcryptService` |
-| `IJwtService` (+ `JwtPayload`, `RefreshTokenPayload`) | `jwt.service.interface.ts` | `JwtService` (jsonwebtoken) |
-| `IOAuthService` | `oauth.service.interface.ts` | `GoogleOAuthService` (google-auth-library) |
-| `IEventPublisher` | `event-publisher.interface.ts` | `HttpEventPublisher` |
-| `ISessionRevocationPublisher` | `session-revocation-publisher.ts` | `RedisSessionRevocationPublisher` |
-| `SessionContext { ipAddress?, userAgent? }` (value type, not a port) | `session-context.ts` | built by the routes from the request |
+| Port (`domain/interfaces/`)                                           | File                                | Adapter                                                                                     |
+| --------------------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------- |
+| `IAuthUserRepository` (extends `RepositoryPort`)                      | `auth-user-repository.interface.ts` | `AuthUserRepository` (`TypeormRepositoryBase`, `super(dataSource.getRepository(AuthUser))`) |
+| `ICacheService` (`get`, `setWithExpiry`, `delete`, `has`, `getOrSet`) | `cache.service.ts`                  | `RedisService` (ioredis)                                                                    |
+| `ICryptoService`                                                      | `crypto.service.interface.ts`       | `BcryptService`                                                                             |
+| `IJwtService` (+ `JwtPayload`, `RefreshTokenPayload`)                 | `jwt.service.interface.ts`          | `JwtService` (jsonwebtoken)                                                                 |
+| `IOAuthService`                                                       | `oauth.service.interface.ts`        | `GoogleOAuthService` (google-auth-library)                                                  |
+| `IEventPublisher`                                                     | `event-publisher.interface.ts`      | `HttpEventPublisher`                                                                        |
+| `ISessionRevocationPublisher`                                         | `session-revocation-publisher.ts`   | `RedisSessionRevocationPublisher`                                                           |
+| `SessionContext { ipAddress?, userAgent? }` (value type, not a port)  | `session-context.ts`                | built by the routes from the request                                                        |
 
 Health checks are not ports: `createDatabaseCheck` and `createRedisCheck` return plain `HealthCheck` objects from `@repo/shared` (§8.2).
 
@@ -1092,12 +1149,12 @@ Gotcha: `http-event-publisher.ts` imports its port as `'src/domain/interfaces/ev
 
 Key layout is shared with core through `RedisKeys` (`packages/shared/src/redis/redis-keys.ts`):
 
-| Key | Written by | Meaning |
-|---|---|---|
-| `refresh_tokens:{jti}` | auth | refresh session JSON `{ userId, sid, ipAddress, userAgent, expiresAt }`, TTL = refresh lifetime |
-| `blacklist:refresh:{jti}` | auth | rotated or revoked refresh token |
-| `blacklist:access:{jti}` | auth (read by core) | revoked access token, TTL = time left |
-| `auth:session-revoked` (channel) | auth (consumed by core) | `SessionRevokedEvent` JSON |
+| Key                              | Written by              | Meaning                                                                                         |
+| -------------------------------- | ----------------------- | ----------------------------------------------------------------------------------------------- |
+| `refresh_tokens:{jti}`           | auth                    | refresh session JSON `{ userId, sid, ipAddress, userAgent, expiresAt }`, TTL = refresh lifetime |
+| `blacklist:refresh:{jti}`        | auth                    | rotated or revoked refresh token                                                                |
+| `blacklist:access:{jti}`         | auth (read by core)     | revoked access token, TTL = time left                                                           |
+| `auth:session-revoked` (channel) | auth (consumed by core) | `SessionRevokedEvent` JSON                                                                      |
 
 - Login and Google login create a session id `sid` (`randomUUID()`); access and refresh tokens both carry it, along with a `jti`.
 - `POST /auth/refresh` reads the refresh token from the `refresh_token` cookie, checks the refresh blacklist and the `refresh_tokens:{jti}` record, blacklists the old refresh token (rotation) and issues a new pair with the **same** `sid` (new cookie, new access token in the body).
@@ -1105,12 +1162,12 @@ Key layout is shared with core through `RedisKeys` (`packages/shared/src/redis/r
 
 ### 4.7 The Internal Listener
 
-`createInternalApp(dataSource, logger)` serves `/internal` on its own listener, `AUTH_INTERNAL_HOST`:`AUTH_INTERNAL_PORT` (default `127.0.0.1:3012`); the public app never mounts `/internal`. It has no CORS, no Swagger and no `/health`.
+`createInternalApp(dataSource, logger, errorsCounter?)` serves `/internal` on its own listener, `AUTH_INTERNAL_HOST`:`AUTH_INTERNAL_PORT` (default `127.0.0.1:3012`); the public app never mounts `/internal`. It has no CORS, no Swagger and no `/health`.
 
 ```typescript
 // apps/auth_microservice/src/app.ts
 app.use(
-  '/internal',
+  "/internal",
   createInternalTokenMiddleware(logger), // shared isValidInternalToken (SHA-256 + timingSafeEqual) → 401
   createInternalRouter(new AuthUserRepository(dataSource)),
 );
@@ -1120,28 +1177,28 @@ app.use(
 
 **Exception to "internal routes live on the internal listener":** `/health/details` and `/metrics` are on the **public** port 3002, so that Prometheus scrapes all three services the same way. They are guarded by the shared `requireInternalToken` instead. The two token middlewares behave differently on failure:
 
-| Middleware | Used on | On failure |
-|---|---|---|
-| `createInternalTokenMiddleware` | `/internal` (internal listener) | logs a warning, `UnauthorizedError` → `errorHandler` → 401 `{ statusCode, error, message: 'Invalid internal token' }` |
-| `requireInternalToken` (`@repo/shared`) | `/health/details`, `/metrics` (public listener) | no log, fixed 401 `{ statusCode: 401, message: 'Unauthorized' }` |
+| Middleware                              | Used on                                         | On failure                                                                                                           |
+| --------------------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `createInternalTokenMiddleware`         | `/internal` (internal listener)                 | logs a warning, `UnauthorizedError` → error handler → 401 `{ statusCode, error, message: 'Invalid internal token' }` |
+| `requireInternalToken` (`@repo/shared`) | `/health/details`, `/metrics` (public listener) | no log, fixed 401 `{ statusCode: 401, message: 'Unauthorized' }`                                                     |
 
 ### 4.8 NestJS vs. Express Mapping
 
-| Concern | NestJS (core, notifications) | Express (auth) |
-|---|---|---|
-| Entry point | `main.ts` → `NestFactory.create(AppModule)` | `main.ts` → `createApp(...)` + `createInternalApp(...)` |
-| Wiring | `@Module({ imports, controllers, providers })` | `new` in `createApp()` |
-| Port binding | `{ provide: TOKEN, useClass/useExisting }` + `@Inject(TOKEN)` | constructor argument typed as the interface |
-| Controllers | `@Controller` + route decorators | router factories |
-| Validation | global `ValidationPipe` (`whitelist`, `transform`) | per-route `validateBody(Dto)` |
-| Auth | `@UseGuards(JwtAuthGuard)` + `@CurrentUser()` | `requireAuth(authService)` + `req.user` |
-| Error mapping | `DomainExceptionFilter` | `errorHandler` (table in §3.2 Layer 3) |
-| Config | `AppConfigService` over `@nestjs/config` | `env` from `config/env.ts` |
-| Shutdown | `enableShutdownHooks()` + lifecycle hooks | `SIGINT`/`SIGTERM` handlers in `main.ts` |
-| Swagger | `@nestjs/swagger` decorators | `swagger-jsdoc` over `@openapi` comments |
-| Health and metrics | `ObservabilityModule` controllers, global `MetricsModule` (`METRICS_REGISTRY`), `httpMetricsMiddleware` + `registerDbPoolGauge` in `main.ts` | `createObservabilityRouter()` in `app.ts`, check factories in `infrastructure/health/` |
-| Internal token | `@UseGuards(InternalTokenGuard)` (one copy per service) | `requireInternalToken` (shared) or `createInternalTokenMiddleware` (`/internal`) |
-| HTTP tests | `Test.createTestingModule`; core e2e via `createE2eApp()` (§9) | supertest against `createApp(fakeDataSource, logger, fakeRedis, fakeRedis, { healthChecks })` |
+| Concern            | NestJS (core, notifications)                                                                                                                 | Express (auth)                                                                                        |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Entry point        | `main.ts` → `NestFactory.create(AppModule)`                                                                                                  | `main.ts` → `createApp(...)` + `createInternalApp(...)`                                               |
+| Wiring             | `@Module({ imports, controllers, providers })`                                                                                               | `new` in `createApp()`                                                                                |
+| Port binding       | `{ provide: TOKEN, useClass/useExisting }` + `@Inject(TOKEN)`                                                                                | constructor argument typed as the interface                                                           |
+| Controllers        | `@Controller` + route decorators                                                                                                             | router factories                                                                                      |
+| Validation         | global `ValidationPipe` (`whitelist`, `transform`)                                                                                           | per-route `validateBody(Dto)`                                                                         |
+| Auth               | `@UseGuards(JwtAuthGuard)` + `@CurrentUser()`                                                                                                | `requireAuth(authService)` + `req.user`                                                               |
+| Error mapping      | `DomainExceptionFilter`                                                                                                                      | `createErrorHandler` (table in §3.2 Layer 3)                                                          |
+| Config             | `AppConfigService` over `@nestjs/config`                                                                                                     | `env` from `config/env.ts`                                                                            |
+| Shutdown           | `enableShutdownHooks()` + lifecycle hooks                                                                                                    | `SIGINT`/`SIGTERM` handlers in `main.ts`                                                              |
+| Swagger            | `@nestjs/swagger` decorators                                                                                                                 | typed OpenAPI object in `config/openapi.ts` (no `swagger-jsdoc`: auth compiles with `removeComments`) |
+| Health and metrics | `ObservabilityModule` controllers, global `MetricsModule` (`METRICS_REGISTRY`), `httpMetricsMiddleware` + `registerDbPoolGauge` in `main.ts` | `createObservabilityRouter()` in `app.ts`, check factories in `infrastructure/health/`                |
+| Internal token     | `@UseGuards(InternalTokenGuard)` (one copy per service)                                                                                      | `requireInternalToken` (shared) or `createInternalTokenMiddleware` (`/internal`)                      |
+| HTTP tests         | `Test.createTestingModule`; core e2e via `createE2eApp()` (§9)                                                                               | supertest against `createApp(fakeDataSource, logger, fakeRedis, fakeRedis, { healthChecks })`         |
 
 ---
 
@@ -1163,28 +1220,34 @@ apps/notifications_consumer_microservice/src/
     └── preferences/     # domain/, dto/, infrastructure/, controller + service
 ```
 
-Modules split into `domain/` (entities, ports with `Symbol` tokens, errors), `application/` (message handlers and workers) and `infrastructure/` (TypeORM repositories, `NodemailerAdapter` behind `MAILER`, `AuthDirectoryAdapter` behind `RECIPIENT_DIRECTORY`). `MessagingModule` also exports `AMQP_CONNECTION` and `NotificationsModule` exports `MAILER`, both only so the health checks can reach them. The REST surface is `GET /notifications`, `GET /notifications/unseen-count`, `POST /notifications/seen`, `GET|PUT /notifications/preferences`, all scoped to `user.sub`, with Swagger at `/api`. On top of that come `GET /health`, `GET /health/details` and `GET /metrics` (§8), hidden from Swagger with `@ApiExcludeController`. `main.ts` registers the same `ValidationPipe` and `DomainExceptionFilter` as core, CORS from `AppConfigService.clientUrl`, `httpMetricsMiddleware` and `registerDbPoolGauge`. `AppConfigService.onModuleInit` runs the shared `assertInternalApiToken`, so a missing or short `INTERNAL_API_TOKEN` stops startup instead of failing on the first email.
+Modules split into `domain/` (entities, ports with `Symbol` tokens, errors), `application/` (message handlers and workers) and `infrastructure/` (TypeORM repositories, `NodemailerAdapter` behind `MAILER`, `AuthDirectoryAdapter` behind `RECIPIENT_DIRECTORY`). `MessagingModule` also exports `AMQP_CONNECTION` and `NotificationsModule` exports `MAILER`, both only so the health checks can reach them. The REST surface is `GET /notifications`, `GET /notifications/unseen-count`, `POST /notifications/seen`, `GET|PUT /notifications/preferences`, all scoped to `user.sub`, with Swagger at `/api`. On top of that come `GET /health`, `GET /health/details` and `GET /metrics` (§8), hidden from Swagger with `@ApiExcludeController`. `main.ts` registers the same request-id/access-log middleware, `ValidationPipe` and `DomainExceptionFilter` as core, CORS from `AppConfigService.clientUrl`, `httpMetricsMiddleware`, `registerDbPoolGauge` and Swagger (`SWAGGER_ENABLED`). `config/env.validation.ts` fails fast on missing required variables, as in core. `AppConfigService.onModuleInit` runs the shared `assertInternalApiToken`, so a missing or short `INTERNAL_API_TOKEN` stops startup instead of failing on the first email.
 
 **Keyset pagination of `GET /notifications`.** `before` is the previous page's opaque `nextCursor`: base64url JSON of `[isoOccurredAt, id]` (`modules/notifications/dto/notification-cursor.ts`). A bare ISO `occurredAt` is still accepted for older clients, but it has no tie-breaker. `limit` is 1–50 (`PAGE_SIZE_MAX`), default 20. A malformed cursor is a 400 (DTO validator, plus `InvalidNotificationCursorError` as a plain `DomainError`). The response is `{ items, hasMore, unseenCount, nextCursor }`, with `nextCursor` null on the last page.
 
 ```typescript
 // apps/notifications_consumer_microservice/src/modules/notifications/infrastructure/repository/notification.repository.ts
 if (before?.id) {
-  query.andWhere('(n."occurredAt", n.id) < (:beforeAt, :beforeId)', { beforeAt: before.occurredAt, beforeId: before.id });
+  query.andWhere('(n."occurredAt", n.id) < (:beforeAt, :beforeId)', {
+    beforeAt: before.occurredAt,
+    beforeId: before.id,
+  });
 } else if (before) {
   query.andWhere('n."occurredAt" < :beforeAt', { beforeAt: before.occurredAt }); // legacy cursor
 }
-query.orderBy('n.occurredAt', 'DESC').addOrderBy('n.id', 'DESC').limit(options.limit + 1);
+query
+  .orderBy("n.occurredAt", "DESC")
+  .addOrderBy("n.id", "DESC")
+  .limit(options.limit + 1);
 ```
 
 The index `IDX_notifications_recipientId_occurredAt_id` (`recipientId, occurredAt DESC, id DESC`, migration `1792600000000-NotificationsKeysetIndex.ts`) matches that order.
 
 **Queues** (`apps/notifications_consumer_microservice/src/common/messaging/amqp-topology.ts`):
 
-| Queue | Bindings | Retry | Dead letter |
-|---|---|---|---|
-| `notifications.events` | `social.#`, `chat.message.alerted` | `.retry` (10 s), 5 attempts | `.dlq` |
-| `notifications.email` | email jobs | `.retry` (30 s), 3 attempts | none (dropped) |
+| Queue                  | Bindings                           | Retry                       | Dead letter    |
+| ---------------------- | ---------------------------------- | --------------------------- | -------------- |
+| `notifications.events` | `social.#`, `chat.message.alerted` | `.retry` (10 s), 5 attempts | `.dlq`         |
+| `notifications.email`  | email jobs                         | `.retry` (30 s), 3 attempts | none (dropped) |
 
 A failed message is re-published to its retry queue with an incremented `x-attempts` and then acked. Invalid payloads, unknown types and `PoisonMessageError` skip retries.
 
@@ -1224,9 +1287,25 @@ Registration in auth is followed by a fire-and-forget HTTP call to core; there i
 ```typescript
 // apps/auth_microservice/src/infrastructure/events/http-event-publisher.ts (excerpt)
 const url = `${coreUrl}/internal/events/user-created`; // coreUrl = CORE_SERVICE_URL
-fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
-  .then((res) => { if (!res.ok) this.logger.warn(`Failed to publish event to Core. Status: ${res.status}`); })
-  .catch((err) => this.logger.error('Network error while publishing event to Core', { error: err }));
+fetch(url, {
+  method: "POST",
+  headers: {
+    "Content-Type": "application/json",
+    [INTERNAL_TOKEN_HEADER]: this.internalApiToken,
+  },
+  body: JSON.stringify(payload),
+})
+  .then((res) => {
+    if (!res.ok)
+      this.logger.warn(
+        `Failed to publish event to Core. Status: ${res.status}`,
+      );
+  })
+  .catch((err) =>
+    this.logger.error(
+      `Network error while publishing event to Core: ${err.message}`,
+    ),
+  );
 ```
 
 **Core side.** `InternalEventsModule` imports `ProfilesModule`; its controller is a routing layer with no business logic:
@@ -1234,21 +1313,20 @@ fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, bo
 ```typescript
 // apps/core_microservice/src/modules/internal-events/internal-events.controller.ts
 @ApiExcludeController()
-@Controller('internal/events')
+@Controller("internal/events")
 export class InternalEventsController {
   constructor(private readonly profilesService: ProfilesService) {}
 
-  @Post('user-created')
+  @Post("user-created")
   @HttpCode(HttpStatus.OK)
+  @UseGuards(InternalTokenGuard)
   async handleUserCreated(@Body() event: UserCreatedEvent): Promise<void> {
     await this.profilesService.createProfile(event.authUserId, event.handle);
   }
 }
 ```
 
-`UserCreatedEvent` (`packages/shared/src/events/user-created.event.ts`) carries `class-validator` decorators; without them the global `ValidationPipe` would strip every field. `createProfile` is idempotent (an existing profile for the `authUserId` is returned) and retries a username collision with a random suffix. It is also safe against the race between the event and a lazy create: on a `UniqueConstraintViolationError` it re-reads by `authUserId` and returns the row the other request created, instead of answering 409. After an insert it invalidates the cached profile (§3.14). The route is excluded from Swagger and must stay internal (Docker network only, never exposed publicly).
-
-**Known gap.** The route has no `InternalTokenGuard`, and `HttpEventPublisher` sends no `X-Internal-Token`, so network isolation is its only protection today.
+`UserCreatedEvent` (`packages/shared/src/events/user-created.event.ts`) carries `class-validator` decorators; without them the global `ValidationPipe` would strip every field. `createProfile` is idempotent (an existing profile for the `authUserId` is returned) and retries a username collision with a random suffix. It is also safe against the race between the event and a lazy create: on a `UniqueConstraintViolationError` it re-reads by `authUserId` and returns the row the other request created, instead of answering 409. After an insert it invalidates the cached profile (§3.14). The route is excluded from Swagger and must stay internal (Docker network only, never exposed publicly). It is guarded by `InternalTokenGuard` (§8.4): `HttpEventPublisher` sends `X-Internal-Token` with `INTERNAL_API_TOKEN`, so a wrong or missing token gets 401 and no profile.
 
 **Lazy-init fallback.** Failures are logged, never retried, so a profile can be missing. `GET /profiles/me` calls `ProfilesService.getOrCreateProfileByAuthUserId(sub, email)` (`apps/core_microservice/src/modules/profiles/profiles.service.ts`), which creates the profile on first read when it doesn't exist. The client loads its own profile through that route (`getMyProfile` in `apps/client_app/src/lib/api/profile.ts`). `AppShell` (`apps/client_app/src/components/shell/app-shell.tsx`) calls it on every signed-in route, so the gap closes on the first page load.
 
@@ -1260,11 +1338,11 @@ All three backends expose the same three endpoints, built from one shared implem
 
 ### 8.1 Endpoints
 
-| Route | Access | Returns |
-|---|---|---|
-| `GET /health` | public | `{ status }` (`IHealthStatus`): 200 for `healthy`/`degraded`, 503 for `unhealthy`. Never names dependencies |
+| Route                 | Access             | Returns                                                                                                     |
+| --------------------- | ------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `GET /health`         | public             | `{ status }` (`IHealthStatus`): 200 for `healthy`/`degraded`, 503 for `unhealthy`. Never names dependencies |
 | `GET /health/details` | `X-Internal-Token` | `IHealthReport { status, service, checkedAt, checks: { <name>: { status, critical, latencyMs, error? } } }` |
-| `GET /metrics` | `X-Internal-Token` | Prometheus text format |
+| `GET /metrics`        | `X-Internal-Token` | Prometheus text format                                                                                      |
 
 They are served on each service's **main port** (3001, 3002, 3003), not on auth's internal listener (§4.7). None of them uses `JwtAuthGuard`. `httpMetricsMiddleware` skips them, so probes don't skew request metrics.
 
@@ -1281,23 +1359,24 @@ export interface HealthCheck {
 
 `runHealthChecks(service, checks)` runs every check in parallel, each raced against a 1 s timeout. The rollup is: any critical check down → `unhealthy`, any other check down → `degraded`, otherwise `healthy`. A failed check reports only the error's class name, because driver messages can contain hosts or credentials.
 
-| Service | Critical | Non-critical |
-|---|---|---|
-| core | `database` (`SELECT 1`), `session_redis` | `cache_redis`, `broker`, `object_storage` (`HeadBucket` on the private bucket) |
-| notifications | `database`, `session_redis`, `broker` (consuming is its job) | `smtp` |
-| auth | `database`, `redis` | — |
+| Service       | Critical                                                     | Non-critical                                                                   |
+| ------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------ |
+| core          | `database` (`SELECT 1`), `session_redis`                     | `cache_redis`, `broker`, `object_storage` (`HeadBucket` on the private bucket) |
+| notifications | `database`, `session_redis`, `broker` (consuming is its job) | `smtp`                                                                         |
+| auth          | `database`, `redis`                                          | —                                                                              |
 
 Adding a check works differently per service:
+
 - **core:** an `@Injectable() class XCheck implements HealthCheck` in `apps/core_microservice/src/common/observability/checks/`. Add it to `providers` **and** to the `inject` list of the `HEALTH_CHECKS` factory in `observability.module.ts`:
 
   ```typescript
   @Injectable()
   export class CacheRedisCheck implements HealthCheck {
-    readonly name = 'cache_redis';
+    readonly name = "cache_redis";
     readonly critical = false;
     constructor(@Inject(CACHE_REDIS_CLIENT) private readonly redis: Redis) {}
     async run(): Promise<void> {
-      if (this.redis.status !== 'ready') throw new Error('not ready');
+      if (this.redis.status !== "ready") throw new Error("not ready");
       await this.redis.ping();
     }
   }
@@ -1316,34 +1395,55 @@ A check should be cheap (a ping, `SELECT 1`, a HEAD request). When the client ha
 // apps/core_microservice/src/common/perf/query-count.interceptor.ts
 const existing = registry.getSingleMetric(METRIC_NAME);
 this.queries =
-  (existing as Histogram<'route'> | undefined) ??
-  new Histogram({ name: METRIC_NAME, help: '…', labelNames: ['route'], buckets: BUCKETS, registers: [registry] });
+  (existing as Histogram<"route"> | undefined) ??
+  new Histogram({
+    name: METRIC_NAME,
+    help: "…",
+    labelNames: ["route"],
+    buckets: BUCKETS,
+    registers: [registry],
+  });
 ```
 
-| Series | Labels | Recorded by |
-|---|---|---|
-| `http_request_duration_seconds` | `method`, `route`, `status_class` | `httpMetricsMiddleware` (all services) |
-| `http_request_errors_total` | `method`, `route`, `status_class` (4xx and 5xx) | `httpMetricsMiddleware` |
-| `db_pool_connections` | `state` (`total`, `idle`, `waiting`) | `registerDbPoolGauge` (register **once** per registry; not idempotent) |
-| `db_queries_per_request` | `route` | `QueryCountInterceptor` (core, §3.15) |
-| `cache_requests_total` | `resource`, `result` (`hit`, `miss`, `error`) | `RedisCacheAdapter` (core, §3.14) |
-| `uploads_total` | `purpose`, `outcome` | `UploadsService` (core, §3.13) |
-| Node defaults (`process_resident_memory_bytes`, ...) | `service` | `createMetricsRegistry` |
+| Series                                                                                                                  | Labels                                                          | Recorded by                                                                                                                                                                                                                          |
+| ----------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `http_request_duration_seconds`                                                                                         | `method`, `route`, `status_class`                               | `httpMetricsMiddleware` (all services)                                                                                                                                                                                               |
+| `http_request_errors_total`                                                                                             | `method`, `route`, `status_class` (4xx and 5xx)                 | `httpMetricsMiddleware`                                                                                                                                                                                                              |
+| `db_pool_connections`                                                                                                   | `state` (`total`, `idle`, `waiting`)                            | `registerDbPoolGauge` (register **once** per registry; not idempotent)                                                                                                                                                               |
+| `db_queries_per_request`                                                                                                | `route`                                                         | `QueryCountInterceptor` (core, §3.15)                                                                                                                                                                                                |
+| `cache_requests_total`                                                                                                  | `resource`, `result` (`hit`, `miss`, `error`)                   | `RedisCacheAdapter` (core, §3.14)                                                                                                                                                                                                    |
+| `uploads_total`                                                                                                         | `purpose`, `outcome`                                            | `UploadsService` (core, §3.13)                                                                                                                                                                                                       |
+| `errors_total`                                                                                                          | `source` (`http`, `amqp`, `process`), `type` (error class name) | `DomainExceptionFilter` / `createErrorHandler` (every handled error incl. 4xx domain errors), consumers (failed handler), process error hooks. `recordError(counter, source, err)`; `createErrorsCounter(registry)` is get-or-create |
+| `amqp_messages_total`, `amqp_handler_duration_seconds`                                                                  | `queue`, `outcome` (`ack`, `retry`, `dlq`, `drop`); `queue`     | core relay and notifications consumers via `createAmqpMetrics` / `recordAmqpOutcome` / `observeAmqpHandler`                                                                                                                          |
+| `outbox_published_total`, `outbox_failed_total`, `outbox_dead_total`, `outbox_pending`, `outbox_oldest_pending_seconds` | none                                                            | `OutboxRelay` (core, §3.11)                                                                                                                                                                                                          |
+| Node defaults (`process_resident_memory_bytes`, ...)                                                                    | `service`                                                       | `createMetricsRegistry`                                                                                                                                                                                                              |
 
 **Label cardinality.** Labels take values from a small fixed set. `route` is the matched route template (`/posts/:id`) or `unmatched`, never the raw URL, which would create a series per id and leak ids. Never use a user id, an email or an error message as a label.
 
 ### 8.4 The internal token
 
 `X-Internal-Token` (`INTERNAL_TOKEN_HEADER`) carries `INTERNAL_API_TOKEN`. That is one value for all three services, at least 32 characters (`MIN_INTERNAL_API_TOKEN_LENGTH`), and each service refuses to start without it (core in `main.ts`, notifications in `AppConfigService.onModuleInit`, auth in `env.ts`). The shared helpers live in `packages/shared/src/observability/internal-token.ts`:
+
 - `isValidInternalToken(given, expected)` hashes both values with SHA-256 and compares them with `timingSafeEqual`, so neither timing nor length leaks.
 - `requireInternalToken(expected)` is the Express middleware (auth).
 - `assertInternalApiToken(value)` is the startup check.
 
-Nest services guard a route with `@UseGuards(InternalTokenGuard)`. The guard reads `AppConfigService.internalApiToken` and throws 401; core and notifications each have their own copy in `common/observability/internal-token.guard.ts`. The same token authorizes notifications' calls to `GET /internal/users/:id/contact` (§4.7). `POST /internal/events/user-created` doesn't check it yet (§7).
+Nest services guard a route with `@UseGuards(InternalTokenGuard)`. The guard reads `AppConfigService.internalApiToken` and throws 401; core and notifications each have their own copy in `common/observability/internal-token.guard.ts`. The same token authorizes notifications' calls to `GET /internal/users/:id/contact` (§4.7). `POST /internal/events/user-created` is guarded the same way (§7).
 
 ### 8.5 Monitoring profile
 
-`docker compose --profile monitoring up -d` starts Prometheus (no host port) and Grafana (`http://localhost:3030`, anonymous viewer, provisioned dashboard `docker/monitoring/grafana/`). Prometheus scrapes `host.docker.internal:3001/3002/3003` every 15 s. `docker/monitoring/entrypoint.sh` writes `INTERNAL_API_TOKEN` to a tmpfs file that `prometheus.yml` reads for the header, so the token is never committed, and the container fails to start when the variable is unset.
+`docker compose --profile monitoring up -d` starts Prometheus (no host port) and Grafana (`http://localhost:3030`, anonymous viewer, provisioned dashboard `docker/monitoring/grafana/`, admin password from `GRAFANA_ADMIN_PASSWORD`; the Grafana entrypoint refuses an empty one). Prometheus runs one job, `innogram`, scraping every 15 s the targets in `PROMETHEUS_TARGETS` (default `host.docker.internal:3001/3002/3003`; `docker-compose.apps.yml` sets `core:3001,auth:3002,notifications:3003`), each with a `service` label. `docker/monitoring/entrypoint.sh` writes the targets and `INTERNAL_API_TOKEN` to tmpfs files that `prometheus.yml` reads, so the token is never committed, and the container fails to start when the token is unset. With the Docker app stack, add the same `--profile monitoring` to the `docker:apps:up` compose command (`docs/DEPLOYMENT.md`).
+
+Alerts are defined in `docker/monitoring/alerts.yml`: `ServiceDown`, `High5xxRate`, `HighP95Latency`, `OutboxBacklog`, `OutboxDead`, `AmqpDlqGrowth`, `DbPoolSaturated`. A new metric that deserves an alert gets a rule there. Metric and alert reference: `docs/OBSERVABILITY.md`.
+
+### 8.6 Logging, request ids and error tracking
+
+All three backends log JSON through `WinstonLogger` (`LOG_LEVEL`; invalid values fall back to the default). Error tracking is self-hosted: structured logs, `errors_total` (§8.3), the alerts above and, in the client, Next error boundaries (`error.tsx`, `global-error.tsx`). There is no Sentry or other SaaS.
+
+- **Request id.** `requestIdMiddleware()` (first in every app) takes a valid incoming `x-request-id` (1–128 chars of `A-Za-z0-9._-`) or generates a UUID, echoes it on the response and stores it in `AsyncLocalStorage`. `currentRequestId()` reads it anywhere below, without passing it through calls.
+- **Access log.** `accessLogMiddleware(logger)` writes one line per response on `finish`: method, route template, status, duration (`correlationId` in the log data). Never query strings, bodies or headers. It skips `/health` and `/metrics`.
+- **Across the broker.** `EventBus.publish(event, { correlationId })` sets the AMQP header `x-correlation-id` (`CORRELATION_ID_HEADER`). Core's outbox keeps it in `outbox_events.correlation_id`, so notifications and the relay log the id of the request that caused the event.
+- **Never log** secrets, tokens, cookies or request bodies, and keep metric labels bounded (§8.3).
 
 ---
 
@@ -1351,17 +1451,17 @@ Nest services guard a route with `@UseGuards(InternalTokenGuard)`. The guard rea
 
 Commands are in `AGENTS.md` / `CLAUDE.md`; this section is about where each kind of test lives and what it needs.
 
-| Layer | Where | What it uses | Needs |
-|---|---|---|---|
-| Entity specs | next to the entity (`*.entity.spec.ts`) | fakers from `modules/<m>/__tests__/fakers/` | nothing (no Nest) |
-| Nest service and controller specs | next to the file (`*.service.spec.ts`) | `Test.createTestingModule` with token fakes (`useValue`), a `LoggerKey` fake, `ProfileSummaryCache` / `METRICS_REGISTRY` fakes where injected (§3.3) | nothing |
-| Express specs (auth) | next to the file | fakes implementing the port (`FakeCache implements ICacheService`); supertest against `createApp(fakeDataSource, logger, fakeRedis, fakeRedis, { healthChecks })`; env set before import, `jest.isolateModules` for fail-fast config | nothing |
-| Core e2e | `apps/core_microservice/test/*.e2e-spec.ts` | `test/helpers`: `createE2eApp(env?)` → `{ app, http, db, close }` (request-facing `main.ts` wiring, §3.7), `registerAndLogin`, `createPublishedPosts`, `dbQueryCount` (with `PERF_INSTRUMENTATION=true`), `connectSocket`, `cleanupE2eData` | real Postgres, Redis, redis-cache, RabbitMQ, SeaweedFS, a running auth (and notifications for the relay suite); dependencies are not mocked (only `observability.e2e-spec.ts` overrides `HEALTH_CHECKS` with fakes) |
-| Notifications e2e | `apps/notifications_consumer_microservice/test/` | repositories, idempotency, a broker round trip, the HTTP API; `observability.e2e-spec.ts` boots `AppModule` itself and repeats the `main.ts` wiring | Postgres, Redis, RabbitMQ |
-| Browser E2E | `apps/client_app/e2e/` (Playwright, Chromium) | `fixtures/test.ts` fails a test on any `console.error`; `fixtures/run-id.ts` `uniqueUser()` makes fresh users per run (no seed needed); `fixtures/api.ts` sets data up through the API | the full stack and the client already running (no `webServer`) |
-| Performance gate | `apps/core_microservice/test/load/` (k6 + `run-k6.sh`, `group-fanout.ts`) | per-endpoint p95 and error-rate thresholds in `k6/thresholds.js`, profile cache hit ratio ≥ 0.80 from `/metrics`; reports in `reports/` | core and auth built (`node dist/main`), the `perf` seed |
+| Layer                             | Where                                                                     | What it uses                                                                                                                                                                                                                                | Needs                                                                                                                                                                                                               |
+| --------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Entity specs                      | next to the entity (`*.entity.spec.ts`)                                   | fakers from `modules/<m>/__tests__/fakers/`                                                                                                                                                                                                 | nothing (no Nest)                                                                                                                                                                                                   |
+| Nest service and controller specs | next to the file (`*.service.spec.ts`)                                    | `Test.createTestingModule` with token fakes (`useValue`), a `LoggerKey` fake, `ProfileSummaryCache` / `METRICS_REGISTRY` fakes where injected (§3.3)                                                                                        | nothing                                                                                                                                                                                                             |
+| Express specs (auth)              | next to the file                                                          | fakes implementing the port (`FakeCache implements ICacheService`); supertest against `createApp(fakeDataSource, logger, fakeRedis, fakeRedis, { healthChecks })`; env set before import, `jest.isolateModules` for fail-fast config        | nothing                                                                                                                                                                                                             |
+| Core e2e                          | `apps/core_microservice/test/*.e2e-spec.ts`                               | `test/helpers`: `createE2eApp(env?)` → `{ app, http, db, close }` (request-facing `main.ts` wiring, §3.7), `registerAndLogin`, `createPublishedPosts`, `dbQueryCount` (with `PERF_INSTRUMENTATION=true`), `connectSocket`, `cleanupE2eData` | real Postgres, Redis, redis-cache, RabbitMQ, SeaweedFS, a running auth (and notifications for the relay suite); dependencies are not mocked (only `observability.e2e-spec.ts` overrides `HEALTH_CHECKS` with fakes) |
+| Notifications e2e                 | `apps/notifications_consumer_microservice/test/`                          | repositories, idempotency, a broker round trip, the HTTP API; `observability.e2e-spec.ts` boots `AppModule` itself and repeats the `main.ts` wiring                                                                                         | Postgres, Redis, RabbitMQ                                                                                                                                                                                           |
+| Browser E2E                       | `apps/client_app/e2e/` (Playwright, Chromium)                             | `fixtures/test.ts` fails a test on any `console.error`; `fixtures/run-id.ts` `uniqueUser()` makes fresh users per run (no seed needed); `fixtures/api.ts` sets data up through the API                                                      | the full stack and the client already running (no `webServer`)                                                                                                                                                      |
+| Performance gate                  | `apps/core_microservice/test/load/` (k6 + `run-k6.sh`, `group-fanout.ts`) | per-endpoint p95 and error-rate thresholds in `k6/thresholds.js`, profile cache hit ratio ≥ 0.80 from `/metrics`; reports in `reports/`                                                                                                     | core and auth built (`node dist/main`), the `perf` seed                                                                                                                                                             |
 
-- **Coverage gate.** `npm run test:cov -w <ws>` enforces 70% lines / 60% branches globally in core, auth, notifications and `@repo/shared`. CI runs it as a 4-entry matrix after lint and build. CI doesn't run e2e, Playwright or perf.
+- **Coverage gate.** `npm run test:cov -w <ws>` enforces 70% lines / 60% branches globally in core, auth, notifications and `@repo/shared`. CI (`.github/workflows/ci.yml`) runs `lint:check` → `build` → `type-check`, then the coverage as a 4-entry matrix. `docker-images.yml` only builds the images. CI doesn't run e2e, Playwright or perf. Core and notifications e2e load the root `.env` through `test/setup-env.ts`.
 - **Seeds.** `seed/` in auth and core, plus the root `seed/fixtures.ts` and `seed/perf.ts`. The `perf` profile is deterministic and must be seeded in auth first, then core (`--profile perf --reset`). Seeds write tables directly, so no outbox events fire.
 - **Runbooks:** `apps/core_microservice/test/README.md` (what each suite needs, the helper catalogue) and `apps/core_microservice/test/load/README.md` (perf gate, baseline and compare).
 
@@ -1391,6 +1491,7 @@ modules/bookmarks/
 ### Step 2: Contracts
 
 Add these under a new `bookmarks/` area in `packages/contracts/src/`:
+
 - `ICreateBookmarkRequest { postId: string }`
 - `IListBookmarksQuery { page?: number; limit?: number }`
 - `IBookmarkResponse { id, postId, createdAt }`
@@ -1409,22 +1510,29 @@ export interface BookmarkProps {
 
 ```typescript
 // domain/entities/bookmark.entity.ts
-@Entity('bookmarks')
-@Unique('UQ_bookmarks_userId_postId', ['userId', 'postId'])
-@Index('IDX_bookmarks_userId_createdAt_id', ['userId', 'createdAt', 'id']) // serves the paged list (Step 7)
+@Entity("bookmarks")
+@Unique("UQ_bookmarks_userId_postId", ["userId", "postId"])
+@Index("IDX_bookmarks_userId_createdAt_id", ["userId", "createdAt", "id"]) // serves the paged list (Step 7)
 export class Bookmark extends TypeormEntityBase implements BookmarkProps {
-  @Column({ type: 'uuid' })
+  @Column({ type: "uuid" })
   userId!: string;
 
-  @ManyToOne('UserProfile')
-  @JoinColumn({ name: 'userId', referencedColumnName: 'authUserId', foreignKeyConstraintName: 'FK_bookmarks_userId_authUserId' })
+  @ManyToOne("UserProfile")
+  @JoinColumn({
+    name: "userId",
+    referencedColumnName: "authUserId",
+    foreignKeyConstraintName: "FK_bookmarks_userId_authUserId",
+  })
   user!: UserProfile; // import type
 
-  @Column({ type: 'uuid' })
+  @Column({ type: "uuid" })
   postId!: string;
 
-  @ManyToOne('Post', { onDelete: 'CASCADE' })
-  @JoinColumn({ name: 'postId', foreignKeyConstraintName: 'FK_bookmarks_postId' })
+  @ManyToOne("Post", { onDelete: "CASCADE" })
+  @JoinColumn({
+    name: "postId",
+    foreignKeyConstraintName: "FK_bookmarks_postId",
+  })
   post!: Post; // import type
 
   static create(props: BookmarkProps): Bookmark {
@@ -1445,13 +1553,19 @@ export class Bookmark extends TypeormEntityBase implements BookmarkProps {
 
 ```typescript
 // domain/errors/bookmark.errors.ts
-import { AccessDeniedError, DomainError } from '@repo/shared';
+import { AccessDeniedError, DomainError } from "@repo/shared";
 
-export class NotBookmarkOwnerError extends AccessDeniedError {      // → 403
-  constructor() { super('You can only remove your own bookmarks.'); }
+export class NotBookmarkOwnerError extends AccessDeniedError {
+  // → 403
+  constructor() {
+    super("You can only remove your own bookmarks.");
+  }
 }
-export class PostNotBookmarkableError extends DomainError {         // → 400
-  constructor(postId: string) { super(`Post ${postId} cannot be bookmarked.`); }
+export class PostNotBookmarkableError extends DomainError {
+  // → 400
+  constructor(postId: string) {
+    super(`Post ${postId} cannot be bookmarked.`);
+  }
 }
 ```
 
@@ -1461,16 +1575,22 @@ A missing bookmark comes from the base `findOneByIdOrThrow` (`EntityByIdNotFound
 
 ```typescript
 // domain/interfaces/bookmark-repository.port.ts
-import type { RepositoryPort } from '@repo/shared';
-import type { Bookmark } from '../entities/bookmark.entity';
-import type { BookmarkProps } from './bookmark.props';
+import type { RepositoryPort } from "@repo/shared";
+import type { Bookmark } from "../entities/bookmark.entity";
+import type { BookmarkProps } from "./bookmark.props";
 
-export interface IBookmarkRepository extends RepositoryPort<Bookmark, BookmarkProps> {
+export interface IBookmarkRepository extends RepositoryPort<
+  Bookmark,
+  BookmarkProps
+> {
   /** The user's bookmarks, newest first; returns up to `limit + 1` rows so the caller can set `hasMore`. */
-  findPageByUser(userId: string, paging: { offset: number; limit: number }): Promise<Bookmark[]>;
+  findPageByUser(
+    userId: string,
+    paging: { offset: number; limit: number },
+  ): Promise<Bookmark[]>;
 }
 
-export const BOOKMARK_REPOSITORY = Symbol.for('IBookmarkRepository');
+export const BOOKMARK_REPOSITORY = Symbol.for("IBookmarkRepository");
 ```
 
 ### Step 6: DTOs
@@ -1478,7 +1598,7 @@ export const BOOKMARK_REPOSITORY = Symbol.for('IBookmarkRepository');
 ```typescript
 // dto/create-bookmark.dto.ts
 export class CreateBookmarkDto implements ICreateBookmarkRequest {
-  @ApiProperty({ format: 'uuid' })
+  @ApiProperty({ format: "uuid" })
   @IsUUID()
   postId!: string;
 }
@@ -1486,11 +1606,18 @@ export class CreateBookmarkDto implements ICreateBookmarkRequest {
 // dto/list-bookmarks-query.dto.ts (out-of-range limit → 400, never clamped, §3.12)
 export class ListBookmarksQueryDto implements IListBookmarksQuery {
   @ApiPropertyOptional({ default: 1, minimum: 1 })
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1)
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
   page: number = 1;
 
   @ApiPropertyOptional({ default: 20, minimum: 1, maximum: PAGE_SIZE_MAX })
-  @IsOptional() @Type(() => Number) @IsInt() @Min(1) @Max(PAGE_SIZE_MAX)
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(PAGE_SIZE_MAX)
   limit: number = 20;
 }
 
@@ -1524,12 +1651,15 @@ export class BookmarkRepository
     super(repository);
   }
 
-  findPageByUser(userId: string, { offset, limit }: { offset: number; limit: number }): Promise<Bookmark[]> {
+  findPageByUser(
+    userId: string,
+    { offset, limit }: { offset: number; limit: number },
+  ): Promise<Bookmark[]> {
     return this.repository.find({
       where: { userId },
-      order: { createdAt: 'DESC', id: 'DESC' }, // stable: ties on createdAt are broken by id
+      order: { createdAt: "DESC", id: "DESC" }, // stable: ties on createdAt are broken by id
       skip: offset,
-      take: limit + 1,                          // the extra row only answers "is there more?"
+      take: limit + 1, // the extra row only answers "is there more?"
     });
   }
 }
@@ -1543,29 +1673,44 @@ export class BookmarkRepository
 export class BookmarksService {
   constructor(
     @Inject(LoggerKey) private readonly logger: Logger,
-    @Inject(BOOKMARK_REPOSITORY) private readonly bookmarks: IBookmarkRepository,
+    @Inject(BOOKMARK_REPOSITORY)
+    private readonly bookmarks: IBookmarkRepository,
     @Inject(POST_REPOSITORY) private readonly posts: IPostRepository,
   ) {}
 
   async create(userId: string, dto: CreateBookmarkDto): Promise<Bookmark> {
     const post = await this.posts.findById(dto.postId);
-    if (!post) throw new EntityByIdNotFoundError('Post', dto.postId);
+    if (!post) throw new EntityByIdNotFoundError("Post", dto.postId);
     // A visibility rule would be a Post method (cf. Post.assertLikeableBy).
-    const saved = await this.bookmarks.save(Bookmark.create({ userId, postId: post.id }));
-    this.logger.debug('Bookmark created', { props: { bookmarkId: saved.id } });
+    const saved = await this.bookmarks.save(
+      Bookmark.create({ userId, postId: post.id }),
+    );
+    this.logger.debug("Bookmark created", { props: { bookmarkId: saved.id } });
     return saved;
   }
 
-  async listMine(userId: string, page: number, limit: number): Promise<IOffsetPage<Bookmark>> {
-    const rows = await this.bookmarks.findPageByUser(userId, { offset: (page - 1) * limit, limit });
-    return { items: rows.slice(0, limit), page, limit, hasMore: rows.length > limit };
+  async listMine(
+    userId: string,
+    page: number,
+    limit: number,
+  ): Promise<IOffsetPage<Bookmark>> {
+    const rows = await this.bookmarks.findPageByUser(userId, {
+      offset: (page - 1) * limit,
+      limit,
+    });
+    return {
+      items: rows.slice(0, limit),
+      page,
+      limit,
+      hasMore: rows.length > limit,
+    };
   }
 
   async remove(userId: string, id: string): Promise<void> {
     const bookmark = await this.bookmarks.findOneByIdOrThrow(id); // 404
-    bookmark.assertOwnedBy(userId);                               // 403 for anyone else
+    bookmark.assertOwnedBy(userId); // 403 for anyone else
     await this.bookmarks.delete(bookmark);
-    this.logger.debug('Bookmark removed', { props: { bookmarkId: id } });
+    this.logger.debug("Bookmark removed", { props: { bookmarkId: id } });
   }
 }
 ```
@@ -1576,33 +1721,48 @@ If creating a bookmark should notify someone, write the outbox row in the same t
 
 ```typescript
 // bookmarks.controller.ts
-@ApiTags('Bookmarks')
+@ApiTags("Bookmarks")
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
-@Controller('bookmarks')
+@Controller("bookmarks")
 export class BookmarksController {
   constructor(private readonly bookmarksService: BookmarksService) {}
 
   @Post()
-  @ApiOperation({ summary: 'Bookmark a post' })
-  async create(@CurrentUser('sub') userId: string, @Body() dto: CreateBookmarkDto): Promise<BookmarkResponseDto> {
-    return new BookmarkResponseDto(await this.bookmarksService.create(userId, dto));
+  @ApiOperation({ summary: "Bookmark a post" })
+  async create(
+    @CurrentUser("sub") userId: string,
+    @Body() dto: CreateBookmarkDto,
+  ): Promise<BookmarkResponseDto> {
+    return new BookmarkResponseDto(
+      await this.bookmarksService.create(userId, dto),
+    );
   }
 
   @Get()
-  @ApiOperation({ summary: 'List my bookmarks' })
+  @ApiOperation({ summary: "List my bookmarks" })
   async listMine(
-    @CurrentUser('sub') userId: string,
+    @CurrentUser("sub") userId: string,
     @Query() query: ListBookmarksQueryDto,
   ): Promise<IOffsetPage<BookmarkResponseDto>> {
-    const page = await this.bookmarksService.listMine(userId, query.page, query.limit);
-    return { ...page, items: page.items.map((b) => new BookmarkResponseDto(b)) };
+    const page = await this.bookmarksService.listMine(
+      userId,
+      query.page,
+      query.limit,
+    );
+    return {
+      ...page,
+      items: page.items.map((b) => new BookmarkResponseDto(b)),
+    };
   }
 
-  @Delete(':id')
+  @Delete(":id")
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Remove one of my bookmarks' })
-  remove(@CurrentUser('sub') userId: string, @Param('id', ParseUUIDPipe) id: string): Promise<void> {
+  @ApiOperation({ summary: "Remove one of my bookmarks" })
+  remove(
+    @CurrentUser("sub") userId: string,
+    @Param("id", ParseUUIDPipe) id: string,
+  ): Promise<void> {
     return this.bookmarksService.remove(userId, id);
   }
 }
@@ -1617,7 +1777,7 @@ The user id always comes from the verified token, never from the body or a route
 @Module({
   imports: [
     TypeOrmModule.forFeature([Bookmark]),
-    LoggerModule.forFeature('BookmarksService'),
+    LoggerModule.forFeature("BookmarksService"),
     PostsModule, // exports POST_REPOSITORY
   ],
   controllers: [BookmarksController],
@@ -1629,7 +1789,7 @@ The user id always comes from the verified token, never from the body or a route
 export class BookmarksModule {}
 ```
 
-Add `BookmarksModule` to the imports in `apps/core_microservice/src/app.module.ts` and, optionally, `.addTag('Bookmarks')` to the Swagger `DocumentBuilder` in `main.ts`.
+Add `BookmarksModule` to the imports in `apps/core_microservice/src/app.module.ts` and, optionally, a tag to `SWAGGER_TAGS` in `apps/core_microservice/src/swagger.ts`. Document every route (`@ApiOperation`, response decorators, `@ApiBearerAuth` when guarded): `test/openapi.e2e-spec.ts` checks the generated document and fails on an undocumented route.
 
 ### Step 11: Migration
 
@@ -1668,20 +1828,21 @@ Check that the generated SQL contains only your table, and that the constraint n
 
 ### A.1 Modules in `core_microservice`
 
-| Module | Ports and tokens (in `domain/interfaces/`) | Adapters | Notes |
-|---|---|---|---|
-| `profiles` | `UserProfileRepositoryKey`, `USER_DIRECTORY_PORT`, `AVATAR_ASSET_PORT` | `UserProfileRepository`, `UserDirectoryAdapter`, `AvatarAssetAdapter` | reference layout; `ProfilesService` still injects the concrete repository and `ProfileSummaryCache` |
-| `profile-summary` | — (uses `FollowRepositoryKey`, `POST_REPOSITORY`, `ProfilesService`) | — | `GET /profiles/by-user/:userId`, cache-aside read model (§3.14) |
-| `posts` | `POST_REPOSITORY` | `PostRepository` | keyset `findFeedPage` + `FeedCursor` (§3.12), batch `getLikeStats` / `getCommentCounts`; images checked through `AssetsService`; ownership checked in the service |
-| `comments` | `COMMENT_REPOSITORY` (`CommentTransaction`) | `CommentRepository` | reply trees (`findRootPage`, `findRepliesOf`, `softDeleteWithReplies`); outbox `social.post.commented` |
-| `likes` | `POST_LIKE_REPOSITORY`, `COMMENT_LIKE_REPOSITORY` | `PostLikeRepository`, `CommentLikeRepository` | entities owned by posts/comments; outbox `social.*.liked` |
-| `follows` | `FollowRepositoryKey` | `FollowRepository` | paged followers/following; counts invalidated after commit; outbox `social.user.followed` |
-| `assets` | `FileStoragePortKey`, `UPLOAD_REPOSITORY`, `CONTENT_SNIFFER` | `S3StorageAdapter`, `UploadRepository`, `FileTypeContentSniffer`, `AssetRepository` (concrete, READY-only) | two-step uploads (§3.13), `PendingUploadSweeper`, public and private buckets, presigned GET and POST |
-| `chats` | `CHAT_REPOSITORY`, `MESSAGE_REPOSITORY`, `ATTACHMENT_STORAGE_PORT`, `CHAT_REALTIME_PORT` | `ChatRepository`, `MessageRepository`, `AttachmentStorageAdapter`, `ChatsGateway` | three services (chats, messages, membership); signed-URL cache; `SessionRevocationListener` registered here |
-| `internal-events` | — | — | `POST /internal/events/user-created` |
-| `notifications-relay` | — | `NotificationsRelayConsumer` | `core.realtime-relay` → `emitToUser` |
+| Module                | Ports and tokens (in `domain/interfaces/`)                                               | Adapters                                                                                                   | Notes                                                                                                                                                             |
+| --------------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `profiles`            | `UserProfileRepositoryKey`, `USER_DIRECTORY_PORT`, `AVATAR_ASSET_PORT`                   | `UserProfileRepository`, `UserDirectoryAdapter`, `AvatarAssetAdapter`                                      | reference layout; `ProfilesService` still injects the concrete repository and `ProfileSummaryCache`                                                               |
+| `profile-summary`     | — (uses `FollowRepositoryKey`, `POST_REPOSITORY`, `ProfilesService`)                     | —                                                                                                          | `GET /profiles/by-user/:userId`, cache-aside read model (§3.14)                                                                                                   |
+| `posts`               | `POST_REPOSITORY`                                                                        | `PostRepository`                                                                                           | keyset `findFeedPage` + `FeedCursor` (§3.12), batch `getLikeStats` / `getCommentCounts`; images checked through `AssetsService`; ownership checked in the service |
+| `comments`            | `COMMENT_REPOSITORY` (`CommentTransaction`)                                              | `CommentRepository`                                                                                        | reply trees (`findRootPage`, `findRepliesOf`, `softDeleteWithReplies`); outbox `social.post.commented`                                                            |
+| `likes`               | `POST_LIKE_REPOSITORY`, `COMMENT_LIKE_REPOSITORY`                                        | `PostLikeRepository`, `CommentLikeRepository`                                                              | entities owned by posts/comments; outbox `social.*.liked`                                                                                                         |
+| `follows`             | `FollowRepositoryKey`                                                                    | `FollowRepository`                                                                                         | paged followers/following; counts invalidated after commit; outbox `social.user.followed`                                                                         |
+| `assets`              | `FileStoragePortKey`, `UPLOAD_REPOSITORY`, `CONTENT_SNIFFER`                             | `S3StorageAdapter`, `UploadRepository`, `FileTypeContentSniffer`, `AssetRepository` (concrete, READY-only) | two-step uploads (§3.13), `PendingUploadSweeper`, public and private buckets, presigned GET and POST                                                              |
+| `chats`               | `CHAT_REPOSITORY`, `MESSAGE_REPOSITORY`, `ATTACHMENT_STORAGE_PORT`, `CHAT_REALTIME_PORT` | `ChatRepository`, `MessageRepository`, `AttachmentStorageAdapter`, `ChatsGateway`                          | three services (chats, messages, membership); signed-URL cache; `SessionRevocationListener` registered here                                                       |
+| `internal-events`     | —                                                                                        | —                                                                                                          | `POST /internal/events/user-created`                                                                                                                              |
+| `notifications-relay` | —                                                                                        | `NotificationsRelayConsumer`                                                                               | `core.realtime-relay` → `emitToUser`                                                                                                                              |
 
 `common/`:
+
 - `auth/` (verifier provider, `CommonAuthModule`, `OptionalJwtAuthGuard`), `guards/jwt-auth.guard.ts`, `decorators/current-user.decorator.ts`, `dto/user-summary.dto.ts`
 - `redis/` (`RedisModule`, `SessionRevocationListener`), `messaging/` (§3.11)
 - `cache/` (`CacheModule`, `CACHE_STORE`, `ProfileSummaryCache`, §3.14)
@@ -1691,35 +1852,36 @@ Check that the generated SQL contains only your table, and that the constraint n
 
 ### A.2 `auth_microservice` at a glance
 
-| Layer | Contents |
-|---|---|
-| Composition | `main.ts`, `app.ts` (`createApp`, `createInternalApp`) |
-| Routes | `/users` (`users.routes.ts`), `/auth` (`auth.routes.ts`), `/health`, `/health/details`, `/metrics` (`createObservabilityRouter` in `app.ts`), `/internal` (`internal.routes.ts`, internal listener only) |
-| Middleware | `requireAuth`, `validateBody`, `errorHandler`, `createInternalTokenMiddleware`; from `@repo/shared`: `httpMetricsMiddleware`, `requireInternalToken` |
-| Services | `UsersService`, `AuthService` |
-| Ports / adapters | table in §4.5 |
-| Health checks | `infrastructure/health/{database,redis}.check.ts` (§8.2) |
-| Entity | `AuthUser` (`domain/entities/auth-user.entity.ts`) |
-| Migrations | `src/migrations/`, CLI via `apps/auth_microservice/data-source.ts` |
-| Seeds | `seed/` (`npm run db:seed -w auth_microservice [-- --profile perf --reset]`) |
-| Tests | co-located `*.spec.ts`, `npm run test:cov` (70/60); no e2e suite |
+| Layer            | Contents                                                                                                                                                                                                 |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Composition      | `main.ts`, `app.ts` (`createApp`, `createInternalApp`)                                                                                                                                                   |
+| Routes           | `/users` (`users.routes.ts`), `/auth` (`auth.routes.ts`), `/health`, `/health/details`, `/metrics` (`createObservabilityRouter` in `app.ts`), `/internal` (`internal.routes.ts`, internal listener only) |
+| Middleware       | `requireAuth`, `validateBody`, `createErrorHandler`, `createInternalTokenMiddleware`; from `@repo/shared`: `requestIdMiddleware`, `accessLogMiddleware`, `httpMetricsMiddleware`, `requireInternalToken` |
+| Services         | `UsersService`, `AuthService`                                                                                                                                                                            |
+| Ports / adapters | table in §4.5                                                                                                                                                                                            |
+| Health checks    | `infrastructure/health/{database,redis}.check.ts` (§8.2)                                                                                                                                                 |
+| Entity           | `AuthUser` (`domain/entities/auth-user.entity.ts`)                                                                                                                                                       |
+| Migrations       | `src/migrations/`, CLI via `apps/auth_microservice/data-source.ts`                                                                                                                                       |
+| Seeds            | `seed/` (`npm run db:seed -w auth_microservice [-- --profile perf --reset]`)                                                                                                                             |
+| Tests            | co-located `*.spec.ts`, `npm run test:cov` (70/60); no e2e suite                                                                                                                                         |
 
 ### A.3 Global Infrastructure in core `main.ts`
 
-| Setting | Value |
-|---|---|
-| Logger | `new WinstonLogger('CoreSystem')` |
-| `helmet()` | security headers |
-| `httpMetricsMiddleware(registry)` | request duration and error counters (§8.3) |
-| `cookieParser()` | cookie parsing |
-| CORS | origin `CLIENT_URL` (default `http://localhost:3000`), `credentials: true`, methods GET/POST/PUT/PATCH/DELETE/OPTIONS, headers `Content-Type`, `Authorization`, `Accept` |
-| Fail-fast asserts | `assertSafeForEnvironment()` (no `PERF_INSTRUMENTATION` in production), `assertInternalApiToken()` (32+ chars) |
-| DB pool gauge | `registerDbPoolGauge(registry, …)` → `db_pool_connections{state}` |
-| Pipe | `ValidationPipe({ whitelist: true, transform: true })` |
-| Filter | `DomainExceptionFilter` |
-| Swagger | `DocumentBuilder` → `/api` |
-| Shutdown | `enableShutdownHooks()` |
-| Port | `AppConfigService.port` (`CORE_PORT`, 3001) |
+| Setting                                          | Value                                                                                                                                                                 |
+| ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Logger                                           | `new WinstonLogger('CoreSystem')` (`LOG_LEVEL`)                                                                                                                       |
+| `requestIdMiddleware()`, `accessLogMiddleware()` | request id in `AsyncLocalStorage`, one access-log line per request (§8.6)                                                                                             |
+| `helmet()`                                       | security headers                                                                                                                                                      |
+| `httpMetricsMiddleware(registry)`                | request duration and error counters (§8.3)                                                                                                                            |
+| `cookieParser()`                                 | cookie parsing                                                                                                                                                        |
+| CORS                                             | origin `AppConfigService.clientUrl` (`CLIENT_URL`), `credentials: true`, methods GET/POST/PUT/PATCH/DELETE/OPTIONS, headers `Content-Type`, `Authorization`, `Accept` |
+| Fail-fast asserts                                | `assertSafeForEnvironment()` (no `PERF_INSTRUMENTATION` in production), `assertInternalApiToken()` (32+ chars)                                                        |
+| DB pool gauge                                    | `registerDbPoolGauge(registry, …)` → `db_pool_connections{state}`                                                                                                     |
+| Pipe                                             | `ValidationPipe({ whitelist: true, transform: true })`                                                                                                                |
+| Filter                                           | `DomainExceptionFilter(createErrorsCounter(registry))`                                                                                                                |
+| Swagger                                          | `setupSwagger` (`src/swagger.ts`) → `/api` when `swaggerEnabled`                                                                                                      |
+| Shutdown                                         | `enableShutdownHooks()`                                                                                                                                               |
+| Port                                             | `AppConfigService.port` (`CORE_PORT`, 3001)                                                                                                                           |
 
 Wired in `app.module.ts`, not `main.ts`: `QueryContextMiddleware` for all routes and `QueryCountInterceptor` as `APP_INTERCEPTOR` (§3.15). `test/helpers/app.helpers.ts` repeats the request-facing part of it for e2e (§3.7).
 
@@ -1731,46 +1893,46 @@ Wired in `app.module.ts`, not `main.ts`: `QueryContextMiddleware` for all routes
 
 ### A.5 DTOs in `@repo/shared`
 
-| DTO | File | Used by |
-|---|---|---|
-| `CreateUserDto` | `packages/shared/src/dtos/auth/create-user.dto.ts` | auth `POST /users/register` |
-| `LoginDto` | `packages/shared/src/dtos/auth/login.dto.ts` | auth `POST /auth/login` |
-| `GoogleLoginDto` | `packages/shared/src/dtos/auth/google-login.dto.ts` | auth `POST /auth/google` |
-| `UpdateProfileDto` | `packages/shared/src/dtos/core/update-profile.dto.ts` | core `PATCH /profiles/:id` |
-| `CreateCommentDto` | `packages/shared/src/dtos/core/create-comment.dto.ts` | core comments |
-| `UpdateCommentDto` | `packages/shared/src/dtos/core/update-comment.dto.ts` | core comments |
+| DTO                                                                                             | File                                                         | Used by                          |
+| ----------------------------------------------------------------------------------------------- | ------------------------------------------------------------ | -------------------------------- |
+| `CreateUserDto`                                                                                 | `packages/shared/src/dtos/auth/create-user.dto.ts`           | auth `POST /users/register`      |
+| `LoginDto`                                                                                      | `packages/shared/src/dtos/auth/login.dto.ts`                 | auth `POST /auth/login`          |
+| `GoogleLoginDto`                                                                                | `packages/shared/src/dtos/auth/google-login.dto.ts`          | auth `POST /auth/google`         |
+| `UpdateProfileDto`                                                                              | `packages/shared/src/dtos/core/update-profile.dto.ts`        | core `PATCH /profiles/:id`       |
+| `CreateCommentDto`                                                                              | `packages/shared/src/dtos/core/create-comment.dto.ts`        | core comments                    |
+| `UpdateCommentDto`                                                                              | `packages/shared/src/dtos/core/update-comment.dto.ts`        | core comments                    |
 | `PostsByAuthorQueryDto` (+ `POST_LIST_STATUSES`, `POSTS_BY_AUTHOR_MAX_LIMIT` = `PAGE_SIZE_MAX`) | `packages/shared/src/dtos/core/posts-by-author-query.dto.ts` | core `GET /posts/author/:userId` |
 
 The `auth/` DTOs serve auth, and the `core/` DTOs serve only core. Refresh and logout take no DTO, since the token comes from the cookie (§4.3). Every other request DTO is module-local (`modules/<module>/dto/`).
 
 ### A.6 Domain Errors in `@repo/shared`
 
-| Class | File | Base |
-|---|---|---|
-| `DomainError` | `packages/shared/src/errors/domain.error.ts` | abstract |
-| `EntityNotFoundError`, `EntityByIdNotFoundError`, `UniqueConstraintViolationError`, `DatabaseQueryError`, `UnauthorizedError` | `packages/shared/src/errors/database.errors.ts` | `DomainError` |
-| `AccessDeniedError` | `packages/shared/src/errors/access-denied.error.ts` | `DomainError` |
+| Class                                                                                                                         | File                                                | Base          |
+| ----------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------- | ------------- |
+| `DomainError`                                                                                                                 | `packages/shared/src/errors/domain.error.ts`        | abstract      |
+| `EntityNotFoundError`, `EntityByIdNotFoundError`, `UniqueConstraintViolationError`, `DatabaseQueryError`, `UnauthorizedError` | `packages/shared/src/errors/database.errors.ts`     | `DomainError` |
+| `AccessDeniedError`                                                                                                           | `packages/shared/src/errors/access-denied.error.ts` | `DomainError` |
 
 HTTP statuses: the table in §3.2 Layer 3.
 
 ### A.7 Contracts in `@repo/contracts`
 
-| Area | Exports |
-|---|---|
-| `common` | `PAGE_SIZE_MAX` (50), `CHANGES_PAGE_SIZE_MAX` (200), `IOffsetPage<T>`, `IUserSummary`; legacy and unused: `IPaginatedResponse`, `IPaginationMeta`, `PAGINATION_DEFAULTS` |
-| `auth` | `ILoginRequest`, `IRegisterRequest`, `IGoogleLoginRequest`, `IAuthUserResponse`, `ILoginResponse`, `IRegisterResponse` |
-| `profiles` | `ICreateProfileRequest`, `IUpdateProfileRequest`, `ISearchProfilesQuery`, `IProfileResponse`, `IProfileSummaryResponse` |
-| `posts` | `PostStatus`, `ICreatePostRequest`, `IUpdatePostRequest`, `IPostsByAuthorQuery`, `IFeedQuery` (`cursor`, `limit`), `IPostResponse`, `IPostAssetResponse`, `IFeedPage` (`items`, `nextCursor`) |
-| `comments` | `IListCommentsQuery`, `ICommentResponse` |
-| `likes` | `ILikeState` |
-| `follows` | `ICreateFollowRequest`, `IFollowListQuery`, `IFollowResponse`, `IFollowListItem` (adds `isFollowedByMe`) |
-| `assets` | `IAssetResponse` (confirm result for `post-image` and `avatar`) |
-| `uploads` | `UploadPurpose` (`post-image`, `avatar`, `chat-attachment`), `ICreateUploadRequest`, `IUploadTicket`; constants `UPLOAD_MAX_BYTES`, `UPLOAD_ALLOWLIST`, `UPLOAD_LINK_TTL_SECONDS` (unused; the live TTL is `UPLOAD_LINK_TTL_SEC` in core config) |
-| `chats` | requests: `ICreateDirectChatRequest`, `ICreateGroupChatRequest`, `IListChatsQuery`, `IRenameGroupRequest`, `IAddMembersRequest`, `IListMessagesQuery`, `IMessageChangesQuery`, `ISendMessageRequest`, `IEditMessageRequest`, `IMarkReadRequest`; responses: `IMessage`, `IMessageResponse`, `IChatUser`, `IChatParticipant`, `IAttachment`, `IConversationSummary`, `IConversationDetail`, `ICursorPage`, `IReadState`, `IUploadedAttachment` (also the confirm result for `chat-attachment`), `IAttachmentUrl`, `ChatType`, `ParticipantRole`, `SystemEventType`; constants `MESSAGE_MAX_ATTACHMENTS`, `ATTACHMENT_MAX_BYTES` |
-| `notifications` | `IListNotificationsQuery` (`before` = opaque cursor, bare ISO still accepted), `IMarkSeenRequest`, `NotificationKind`, `INotification`, `INotificationPreferences`, `INotificationsPage` (`items`, `hasMore`, `unseenCount`, `nextCursor`), `IUnseenCount` |
-| `observability` | `HealthStatus`, `IHealthStatus`, `IHealthCheckResult`, `IHealthReport` |
-| `realtime` | `REALTIME_NAMESPACE`, `ServerToClientEvents` (`message:new`, `message:updated`, `message:deleted`, `chat:upsert`, `chat:removed`, `chat:read`, `chat:alert`, `typing`, `notification:new`, `notifications:seen`, `session:expired`), `ClientToServerEvents` (`chat:view`, `typing:start`, `typing:stop`, `auth:renew`), `IRealtimeAckError` |
+| Area            | Exports                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `common`        | `PAGE_SIZE_MAX` (50), `CHANGES_PAGE_SIZE_MAX` (200), `IOffsetPage<T>`, `IUserSummary`; legacy and unused: `IPaginatedResponse`, `IPaginationMeta`, `PAGINATION_DEFAULTS`                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `auth`          | `ILoginRequest`, `IRegisterRequest`, `IGoogleLoginRequest`, `IAuthUserResponse`, `ILoginResponse`, `IRegisterResponse`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `profiles`      | `ICreateProfileRequest`, `IUpdateProfileRequest`, `ISearchProfilesQuery`, `IProfileResponse`, `IProfileSummaryResponse`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `posts`         | `PostStatus`, `ICreatePostRequest`, `IUpdatePostRequest`, `IPostsByAuthorQuery`, `IFeedQuery` (`cursor`, `limit`), `IPostResponse`, `IPostAssetResponse`, `IFeedPage` (`items`, `nextCursor`)                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| `comments`      | `IListCommentsQuery`, `ICommentResponse`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `likes`         | `ILikeState`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `follows`       | `ICreateFollowRequest`, `IFollowListQuery`, `IFollowResponse`, `IFollowListItem` (adds `isFollowedByMe`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `assets`        | `IAssetResponse` (confirm result for `post-image` and `avatar`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| `uploads`       | `UploadPurpose` (`post-image`, `avatar`, `chat-attachment`), `ICreateUploadRequest`, `IUploadTicket`; constants `UPLOAD_MAX_BYTES`, `UPLOAD_ALLOWLIST`, `UPLOAD_LINK_TTL_SECONDS` (unused; the live TTL is `UPLOAD_LINK_TTL_SEC` in core config)                                                                                                                                                                                                                                                                                                                                                                               |
+| `chats`         | requests: `ICreateDirectChatRequest`, `ICreateGroupChatRequest`, `IListChatsQuery`, `IRenameGroupRequest`, `IAddMembersRequest`, `IListMessagesQuery`, `IMessageChangesQuery`, `ISendMessageRequest`, `IEditMessageRequest`, `IMarkReadRequest`; responses: `IMessage`, `IMessageResponse`, `IChatUser`, `IChatParticipant`, `IAttachment`, `IConversationSummary`, `IConversationDetail`, `ICursorPage`, `IReadState`, `IUploadedAttachment` (also the confirm result for `chat-attachment`), `IAttachmentUrl`, `ChatType`, `ParticipantRole`, `SystemEventType`; constants `MESSAGE_MAX_ATTACHMENTS`, `ATTACHMENT_MAX_BYTES` |
+| `notifications` | `IListNotificationsQuery` (`before` = opaque cursor, bare ISO still accepted), `IMarkSeenRequest`, `NotificationKind`, `INotification`, `INotificationPreferences`, `INotificationsPage` (`items`, `hasMore`, `unseenCount`, `nextCursor`), `IUnseenCount`                                                                                                                                                                                                                                                                                                                                                                     |
+| `observability` | `HealthStatus`, `IHealthStatus`, `IHealthCheckResult`, `IHealthReport`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| `realtime`      | `REALTIME_NAMESPACE`, `ServerToClientEvents` (`message:new`, `message:updated`, `message:deleted`, `chat:upsert`, `chat:removed`, `chat:read`, `chat:alert`, `typing`, `notification:new`, `notifications:seen`, `session:expired`), `ClientToServerEvents` (`chat:view`, `typing:start`, `typing:stop`, `auth:renew`), `IRealtimeAckError`                                                                                                                                                                                                                                                                                    |
 
 ---
 
-*This guide reflects the architecture as of 2026-10-26. If you find discrepancies between the guide and the code, the code is authoritative: update the guide.*
+_This guide reflects the architecture as of 2026-10-26. If you find discrepancies between the guide and the code, the code is authoritative: update the guide._
