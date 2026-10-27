@@ -135,3 +135,7 @@ apps/core_microservice/test/load/reports/*.json
 # Per-workspace lockfiles (the root package-lock.json is the only lockfile)
 apps/*/package-lock.json
 packages/*/package-lock.json
+
+# Batch implementation (/impl-batch) gate output and per-lane run evidence
+specs/*/impl/baseline/
+specs/*/impl/run/
