@@ -164,6 +164,24 @@ export class EnvironmentVariables {
   UPLOAD_SWEEP_INTERVAL_SEC?: number;
 }
 
+/** Placeholder that `.env.production.example` puts in every secret. */
+export const PRODUCTION_SECRET_PLACEHOLDER = 'CHANGE_ME';
+const PRODUCTION_SECRETS = ['JWT_SECRET', 'INTERNAL_API_TOKEN'] as const;
+
+/** In production, a secret still holding the example placeholder is an error. */
+function placeholderErrors(config: Record<string, unknown>): string[] {
+  if (config.NODE_ENV !== 'production') return [];
+  return PRODUCTION_SECRETS.filter((key) => {
+    const value = config[key];
+    return (
+      typeof value === 'string' && value.includes(PRODUCTION_SECRET_PLACEHOLDER)
+    );
+  }).map(
+    (key) =>
+      `${key}: must not be the .env.production.example placeholder in production`,
+  );
+}
+
 /**
  * `ConfigModule.forRoot({ validate })` hook. Throws one error naming every
  * failing variable (never its value) and returns the raw config unchanged, so
@@ -180,11 +198,14 @@ export function validate(
     enableImplicitConversion: true,
   });
   const errors = validateSync(instance, { skipMissingProperties: false });
-  if (errors.length > 0) {
-    const lines = errors.map(
+  const lines = [
+    ...errors.map(
       (e) =>
         `${e.property}: ${Object.values(e.constraints ?? {}).join('; ') || 'invalid'}`,
-    );
+    ),
+    ...placeholderErrors(present),
+  ];
+  if (lines.length > 0) {
     throw new Error(
       `Invalid environment configuration:\n  ${lines.join('\n  ')}`,
     );

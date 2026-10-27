@@ -219,6 +219,16 @@ describe('config/env', () => {
       },
     );
 
+    it.each(['JWT_SECRET', 'JWT_REFRESH_SECRET'] as const)(
+      'rejects the .env.production.example CHANGE_ME placeholder for %s',
+      (key) => {
+        const placeholder = 'CHANGE_ME'.padEnd(40, '_');
+        expect(() =>
+          loadEnv({ NODE_ENV: 'production', ...PROD_SECRETS, [key]: placeholder }),
+        ).toThrow(`${key} must not be the .env.production.example placeholder`);
+      },
+    );
+
     it('keeps the dev defaults outside production', () => {
       const env = loadEnv({ NODE_ENV: 'development' });
       expect(env.jwt.accessTokenSecret).toBe(PLACEHOLDERS.JWT_SECRET);

@@ -8,6 +8,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/main.js",
+    "migrate:prod": "node dist/migrate.js",
     "dev": "ts-node-dev --respawn --transpile-only src/main.ts",
     "lint": "eslint \"src/**/*.ts\" --fix",
     "lint:check": "eslint \"src/**/*.ts\"",
@@ -80,6 +81,7 @@
     "collectCoverageFrom": [
       "**/*.(t|j)s",
       "!main.ts",
+      "!migrate.ts",
       "!**/*.module.ts",
       "!migrations/**",
       "!**/index.ts",

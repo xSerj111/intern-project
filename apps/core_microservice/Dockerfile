@@ -1,48 +1,40 @@
-# ==========================================
-# Stage 1: Build (Builder)
-# ==========================================
-FROM node:20-alpine AS builder
+# syntax=docker/dockerfile:1
+# Build context: the repo root (`docker build -f apps/core_microservice/Dockerfile .`).
+ARG NODE_IMAGE=node:20-alpine
+ARG TURBO_VERSION=1.13.4
 
-# Set the working directory inside the container to the project root
-WORKDIR /app
-
-# Copy configuration files for the entire monorepo
-COPY package*.json ./
-COPY turbo.json ./
-
-# Copy all code (be sure to use .dockerignore to avoid copying node_modules!)
+# Prune the monorepo to core and the workspaces it depends on.
+FROM ${NODE_IMAGE} AS prune
+ARG TURBO_VERSION
+WORKDIR /repo
+RUN npm install -g turbo@${TURBO_VERSION}
 COPY . .
+RUN turbo prune core_microservice --docker
 
-# Install all dependencies (including devDependencies needed to build the code)
+# Install every dependency (dev included) from the pruned manifests only, so
+# this layer is cached until a package.json or the lockfile changes.
+FROM ${NODE_IMAGE} AS deps
+WORKDIR /repo
+COPY --from=prune /repo/out/json/ ./
 RUN npm ci
 
-# Build the specific microservice using Turborepo
-# The --filter flag ensures we only build core_microservice and its dependencies
+FROM deps AS build
+COPY --from=prune /repo/out/full/ ./
+# Shared compiler options; turbo prune does not carry root files over.
+COPY tsconfig.json ./
 RUN npx turbo run build --filter=core_microservice...
 
-# ==========================================
-# Stage 2: Production (Runner)
-# ==========================================
-FROM node:20-alpine AS runner
-
-WORKDIR /app
-
-# Set the production environment
+FROM ${NODE_IMAGE} AS runner
 ENV NODE_ENV=production
-
-# Copy the main package.json to install only production dependencies
-COPY package*.json ./
-RUN npm ci --omit=dev
-
-# Copy the built microservice files from the builder stage
-COPY --from=builder /app/apps/core_microservice/dist ./apps/core_microservice/dist
-COPY --from=builder /app/apps/core_microservice/package.json ./apps/core_microservice/package.json
-
-# (Optional) If the microservice uses packages/shared, copy their built versions as well:
-# COPY --from=builder /app/packages ./packages
-
-# Core Service runs on port 3001 (according to your .env)
+WORKDIR /repo
+COPY --from=prune /repo/out/json/ ./
+RUN npm ci --omit=dev && npm cache clean --force
+COPY --from=build /repo/packages/contracts/dist ./packages/contracts/dist
+COPY --from=build /repo/packages/shared/dist ./packages/shared/dist
+COPY --from=build /repo/apps/core_microservice/dist ./apps/core_microservice/dist
+WORKDIR /repo/apps/core_microservice
+USER node
 EXPOSE 3001
-
-# Run the application from the root perspective (so that paths in the monorepo match)
-CMD ["node", "apps/core_microservice/dist/main.js"]
+HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=5 \
+  CMD wget -qO- http://127.0.0.1:${CORE_PORT:-3001}/health > /dev/null || exit 1
+CMD ["node", "dist/main.js"]

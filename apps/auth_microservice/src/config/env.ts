@@ -33,6 +33,9 @@ export const JWT_PLACEHOLDER_SECRETS: readonly string[] = [
   'your-super-secret-jwt-refresh-key-here',
 ];
 
+// What .env.production.example puts in every secret.
+export const PRODUCTION_SECRET_PLACEHOLDER = 'CHANGE_ME';
+
 // Production has no fallback and refuses short or copied-from-example secrets.
 // Outside production the dev default is kept. Errors name the variable only.
 const requireJwtSecret = (key: string, devDefault: string): string => {
@@ -41,6 +44,11 @@ const requireJwtSecret = (key: string, devDefault: string): string => {
   if (JWT_PLACEHOLDER_SECRETS.includes(secret)) {
     throw new Error(
       `${key} must not be the .env.example placeholder value in production`,
+    );
+  }
+  if (secret.includes(PRODUCTION_SECRET_PLACEHOLDER)) {
+    throw new Error(
+      `${key} must not be the .env.production.example placeholder in production`,
     );
   }
   if (secret.length < JWT_SECRET_MIN_LENGTH) {

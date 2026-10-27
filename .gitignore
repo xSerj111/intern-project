@@ -29,6 +29,7 @@ tsconfig.tsbuildinfo
 .env.development.local
 .env.test.local
 .env.production.local
+.env.production
 
 # Claude Code personal settings (shared .claude/settings.json stays tracked)
 .claude/settings.local.json
@@ -107,8 +108,6 @@ temp/
 *.db
 *.sqlite
 
-# Docker
-.dockerignore
 
 # Initialization script
 init-script.sh

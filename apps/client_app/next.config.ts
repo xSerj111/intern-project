@@ -35,6 +35,10 @@ if (missingServiceUrlVars.length > 0) {
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // Self-contained server for the Docker image (`.next/standalone`). Tracing from
+  // the repo root keeps workspace packages and hoisted node_modules in the bundle.
+  output: 'standalone',
+  outputFileTracingRoot: resolve(__dirname, '../..'),
   // Lint is a first-class turbo task (`turbo run lint`); don't run a second,
   // differently-configured ESLint pass inside `next build`.
   eslint: {

@@ -129,20 +129,20 @@ description: "Task list for the final feature: docs, deployment, observability, 
 
 ## Phase 5: Docker, deployment and CD — Batch B5 (solo)
 
-- [ ] T039 Root `.dockerignore`: `**/node_modules`, `**/dist`, `**/.next`, `**/coverage`, `**/.turbo`, `.git`, `.env`, `.env.*` with `!.env.example` and `!.env.production.example`, `specs`, `.claude`, `.specify`, `apps/client_app/e2e/.artifacts`, `apps/client_app/playwright-report`, `apps/client_app/test-results`, `apps/core_microservice/test/load/reports`
-- [ ] T040 Backend Dockerfiles `apps/{auth_microservice,core_microservice,notifications_consumer_microservice}/Dockerfile`, same pattern (confirm `turbo prune --docker` output layout with the installed turbo version first). Do core first and prove it end to end (image builds, container starts, `/health` 200, `require('@repo/shared')` resolves) before writing auth and notifications: pruned npm lockfiles on turbo 1.13 have known bugs, and if `npm ci` rejects the pruned lock, fall back to copying the root lockfile and stop for a decision:
+- [X] T039 Root `.dockerignore`: `**/node_modules`, `**/dist`, `**/.next`, `**/coverage`, `**/.turbo`, `.git`, `.env`, `.env.*` with `!.env.example` and `!.env.production.example`, `specs`, `.claude`, `.specify`, `apps/client_app/e2e/.artifacts`, `apps/client_app/playwright-report`, `apps/client_app/test-results`, `apps/core_microservice/test/load/reports`
+- [X] T040 Backend Dockerfiles `apps/{auth_microservice,core_microservice,notifications_consumer_microservice}/Dockerfile`, same pattern (confirm `turbo prune --docker` output layout with the installed turbo version first). Do core first and prove it end to end (image builds, container starts, `/health` 200, `require('@repo/shared')` resolves) before writing auth and notifications: pruned npm lockfiles on turbo 1.13 have known bugs, and if `npm ci` rejects the pruned lock, fall back to copying the root lockfile and stop for a decision:
   - `prune` stage: `npx turbo prune <app> --docker`.
   - `deps` stage: `npm ci` on `out/json` and the pruned lockfile.
   - `build` stage: copy `out/full`, `npx turbo run build --filter=<app>...`.
   - `runner` stage: `node:20-alpine`, `NODE_ENV=production`, `npm ci --omit=dev` from `out/json`; copy the app `dist` and `packages/{shared,contracts}/dist`; `USER node`; `EXPOSE`; `HEALTHCHECK` via `wget -qO- http://127.0.0.1:<port>/health`; `CMD ["node", "dist/main.js"]` from the app dir (check where `nest build` puts `main.js` given `include: ["src/**/*","test/**/*"]`).
   - Each image must start, and `require('@repo/shared')` must resolve.
-- [ ] T041 Container migrations. Per backend, `src/migrate.ts`: builds the app's `DataSource` options (reuse the TypeORM options the app already builds; don't duplicate connection logic), `runMigrations({ transaction: 'each' })`, logs the applied names, exits 0/1. It must be compiled into `dist/`, along with the migration files. Fix `apps/auth_microservice/src/config/database.ts` migrations glob to `migrations/*.{ts,js}` (and check core/notifications globs work from `dist`). Add a `migrate:prod` script (`node dist/migrate.js`) to each backend
-- [ ] T042 Client image. `apps/client_app/next.config.ts`: `output: 'standalone'` (and `outputFileTracingRoot` at the repo root for the monorepo). `apps/client_app/Dockerfile`: same prune pattern; `ARG AUTH_SERVICE_URL`, `ARG CORE_SERVICE_URL`, `ARG NOTIFICATIONS_SERVICE_URL` (names as in `next.config.ts`) passed to `next build`; runner copies `.next/standalone`, `.next/static`, `public`; `USER node`; `HEALTHCHECK`; `CMD ["node", "apps/client_app/server.js"]` (verify the path standalone produces)
-- [ ] T043 Infra hardening in `docker-compose.yml`:
+- [X] T041 Container migrations. Per backend, `src/migrate.ts`: builds the app's `DataSource` options (reuse the TypeORM options the app already builds; don't duplicate connection logic), `runMigrations({ transaction: 'each' })`, logs the applied names, exits 0/1. It must be compiled into `dist/`, along with the migration files. Fix `apps/auth_microservice/src/config/database.ts` migrations glob to `migrations/*.{ts,js}` (and check core/notifications globs work from `dist`). Add a `migrate:prod` script (`node dist/migrate.js`) to each backend
+- [X] T042 Client image. `apps/client_app/next.config.ts`: `output: 'standalone'` (and `outputFileTracingRoot` at the repo root for the monorepo). `apps/client_app/Dockerfile`: same prune pattern; `ARG AUTH_SERVICE_URL`, `ARG CORE_SERVICE_URL`, `ARG NOTIFICATIONS_SERVICE_URL` (names as in `next.config.ts`) passed to `next build`; runner copies `.next/standalone`, `.next/static`, `public`; `USER node`; `HEALTHCHECK`; `CMD ["node", "apps/client_app/server.js"]` (verify the path standalone produces)
+- [X] T043 Infra hardening in `docker-compose.yml`:
   - Healthchecks: `pg_isready` for postgres, `redis-cli ping` for redis and redis-cache, `rabbitmq-diagnostics -q ping` for rabbitmq, and an HTTP check against the mailpit UI.
   - `restart: unless-stopped` on long-running services.
   - Keep host port mappings for dev unchanged.
-- [ ] T044 `docker-compose.apps.yml` overlay:
+- [X] T044 `docker-compose.apps.yml` overlay:
   - Services: `auth-migrate`, `core-migrate`, `notifications-migrate` (one-shot, `command: ["node","dist/migrate.js"]`), then `auth`, `core`, `notifications`, `client` (built from the Dockerfiles, `env_file: .env.production`).
   - `depends_on`: infra `service_healthy`, the migrate jobs `service_completed_successfully`.
   - Internal hostnames (`postgres`, `redis`, `redis-cache`, `rabbitmq`, `mailpit`, `seaweedfs`, `auth:3012` for `AUTH_INTERNAL_URL`, `http://core:3001` for `CORE_SERVICE_URL`).
@@ -150,8 +150,8 @@ description: "Task list for the final feature: docs, deployment, observability, 
   - Published ports 3000–3003.
   - `PROMETHEUS_TARGETS=core:3001,auth:3002,notifications:3003` for the monitoring profile.
   - Root scripts: `"docker:apps:up": "docker compose -f docker-compose.yml -f docker-compose.apps.yml up -d --build"`, `"docker:apps:down"` (no `-v`).
-- [ ] T045 `.env.production.example`: every var the overlay needs, with container hostnames, `NODE_ENV=production`, `AUTH_INTERNAL_HOST=0.0.0.0`, `AUTH_COOKIE_SAMESITE` guidance, and `CHANGE_ME` placeholders for every secret (`JWT_*`, `INTERNAL_API_TOKEN`, DB/RabbitMQ/S3 creds, `GRAFANA_ADMIN_PASSWORD`). The B2 validation must reject the placeholders in production where the var is a secret. Add `.env.production` to `.gitignore`
-- [ ] T046 [sonnet] CD workflow `.github/workflows/docker-images.yml`:
+- [X] T045 `.env.production.example`: every var the overlay needs, with container hostnames, `NODE_ENV=production`, `AUTH_INTERNAL_HOST=0.0.0.0`, `AUTH_COOKIE_SAMESITE` guidance, and `CHANGE_ME` placeholders for every secret (`JWT_*`, `INTERNAL_API_TOKEN`, DB/RabbitMQ/S3 creds, `GRAFANA_ADMIN_PASSWORD`). The B2 validation must reject the placeholders in production where the var is a secret. Add `.env.production` to `.gitignore`
+- [X] T046 [sonnet] CD workflow `.github/workflows/docker-images.yml`:
   - Trigger on `pull_request` and on `push` to `main` and to `v*` tags.
   - Matrix over `auth_microservice`, `core_microservice`, `notifications_consumer_microservice`, `client_app` → image `ghcr.io/${{ github.repository_owner }}/innogram-<short>`.
   - Use `docker/setup-buildx-action`, `docker/metadata-action` (tags: `sha`, `latest` on main, semver on tags) and `docker/build-push-action` with `cache-from/to: type=gha,scope=<app>`, plus `docker/login-action` to GHCR with `GITHUB_TOKEN`.
@@ -159,16 +159,16 @@ description: "Task list for the final feature: docs, deployment, observability, 
   - `permissions: contents: read, packages: write`.
   - Pin action major versions.
   - Lint with `actionlint` if it is available (`docker run --rm -v $PWD:/repo -w /repo rhysd/actionlint:latest`), otherwise state it wasn't checked.
-- [ ] T047 [evidence] Clean deploy run with a separate project, so the user's dev data is untouched:
+- [X] T047 [evidence] Clean deploy run with a separate project, so the user's dev data is untouched:
   - Ask the user first if their dev stack holds ports 3000–3003/5432/… (it must be stopped for this run, or the overlay ports must be overridden).
   - `cp .env.production.example .env.production` with generated secrets.
   - `docker compose -p innogram-verify -f docker-compose.yml -f docker-compose.apps.yml up -d --build`.
   - Confirm: all services healthy, the migrate jobs exit 0, `curl` `/health` 200 on 3001/3002/3003, the client serves `/` on 3000, `docker compose -p innogram-verify exec core id` shows a non-root uid, and image sizes are recorded.
   - Tear down with `docker compose -p innogram-verify … down -v` (this project only).
-- [ ] T048 [evidence] Playwright `npm run e2e` against the `innogram-verify` stack (before teardown in T047, or bring it up again). Record pass/fail counts
-- [ ] T049 [gate] Builds, type-check, lint:check, unit tests with coverage, core and notifications e2e on the dev stack
+- [X] T048 [evidence] Playwright `npm run e2e` against the `innogram-verify` stack (before teardown in T047, or bring it up again). Record pass/fail counts
+- [X] T049 [gate] Builds, type-check, lint:check, unit tests with coverage, core and notifications e2e on the dev stack
 - [ ] T050 [human] Push the branch / open the PR: the `docker-images` workflow builds all 4 images without pushing; after merge, the images appear in GHCR
-- [ ] T051 [orch] Add a progress.md Global decision with the exact deploy commands and image names (B7 docs use them verbatim)
+- [X] T051 [orch] Add a progress.md Global decision with the exact deploy commands and image names (B7 docs use them verbatim)
 
 **Checkpoint**: A clean machine with Docker runs the whole stack from two compose files and one env file; images are built in CI.
 

@@ -47,6 +47,8 @@ export class S3StorageAdapter implements IFileStoragePort {
   private readonly presignClient: S3Client;
   private readonly bucketName: string;
   private readonly privateBucket: string;
+  // Browser-facing base URL (scheme, host, port) for public object URLs.
+  private readonly publicBaseUrl: string;
   private readonly logger = new Logger(S3StorageAdapter.name);
 
   constructor(private readonly appConfig: AppConfigService) {
@@ -82,6 +84,7 @@ export class S3StorageAdapter implements IFileStoragePort {
     const publicUrl = publicEndpoint.includes('://')
       ? publicEndpoint
       : `${protocol}://${publicEndpoint}:${port}`;
+    this.publicBaseUrl = publicUrl.replace(/\/+$/, '');
 
     this.presignClient = new S3Client({
       endpoint: publicUrl,
@@ -275,10 +278,7 @@ export class S3StorageAdapter implements IFileStoragePort {
   }
 
   private buildPublicUrl(fileKey: string): string {
-    const { endpoint, port, useSsl, bucketName } = this.appConfig.s3;
-    const protocol = useSsl ? 'https' : 'http';
-
-    return `${protocol}://${endpoint}:${port}/${bucketName}/${fileKey}`;
+    return `${this.publicBaseUrl}/${this.bucketName}/${fileKey}`;
   }
 }
 

@@ -90,4 +90,19 @@ describe('env validation', () => {
     expect(message).toContain('INTERNAL_API_TOKEN');
     expect(message).not.toContain(token);
   });
+
+  it.each(['JWT_SECRET', 'INTERNAL_API_TOKEN'])(
+    'rejects the CHANGE_ME placeholder for %s in production only',
+    (key) => {
+      const config = { ...valid(), [key]: 'CHANGE_ME'.padEnd(40, '_') };
+      expect(() => validate({ ...config, NODE_ENV: 'production' })).toThrow(
+        new RegExp(
+          `${key}: must not be the \\.env\\.production\\.example placeholder`,
+        ),
+      );
+      expect(() =>
+        validate({ ...config, NODE_ENV: 'development' }),
+      ).not.toThrow();
+    },
+  );
 });

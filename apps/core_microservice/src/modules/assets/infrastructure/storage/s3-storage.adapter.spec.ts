@@ -233,7 +233,7 @@ describe('S3StorageAdapter', () => {
   });
 
   describe('copyToPublic', () => {
-    it('copies inside storage into the public bucket and returns the public URL', async () => {
+    it('copies inside storage into the public bucket and returns the browser-facing URL', async () => {
       send.mockResolvedValue({});
 
       const url = await adapter.copyToPublic(
@@ -242,7 +242,7 @@ describe('S3StorageAdapter', () => {
         'a1.png',
       );
 
-      expect(url).toBe('http://storage:9000/public-bucket/a1.png');
+      expect(url).toBe('http://localhost:9000/public-bucket/a1.png');
       const cmd = firstCommand() as CopyObjectCommand;
       expect(cmd).toBeInstanceOf(CopyObjectCommand);
       expect(cmd.input).toEqual({

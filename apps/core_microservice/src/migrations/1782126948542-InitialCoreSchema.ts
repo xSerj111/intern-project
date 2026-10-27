@@ -4,6 +4,8 @@ export class InitialCoreSchema1782126948542 implements MigrationInterface {
   name = 'InitialCoreSchema1782126948542';
 
   public async up(queryRunner: QueryRunner): Promise<void> {
+    // A fresh database has no uuid_generate_v4(); applied databases skip this migration.
+    await queryRunner.query(`CREATE EXTENSION IF NOT EXISTS "uuid-ossp"`);
     await queryRunner.query(
       `CREATE TABLE "likes" ("id" uuid NOT NULL DEFAULT uuid_generate_v4(), "postId" uuid NOT NULL, "userId" uuid NOT NULL, "createdAt" TIMESTAMP NOT NULL DEFAULT now(), "deletedAt" TIMESTAMP, CONSTRAINT "PK_a9323de3f8bced7539a794b4a37" PRIMARY KEY ("id"))`,
     );

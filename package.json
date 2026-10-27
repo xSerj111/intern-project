@@ -17,6 +17,8 @@
     "clean": "turbo run clean",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down",
+    "docker:apps:up": "docker compose -f docker-compose.yml -f docker-compose.apps.yml --env-file .env.production up -d --build",
+    "docker:apps:down": "docker compose -f docker-compose.yml -f docker-compose.apps.yml --env-file .env.production down",
     "db:migrate": "turbo run db:migrate",
     "db:seed": "turbo run db:seed",
     "perf:baseline": "MODE=measure bash apps/core_microservice/test/load/run-k6.sh",

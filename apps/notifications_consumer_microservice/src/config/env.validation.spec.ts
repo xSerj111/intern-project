@@ -106,4 +106,19 @@ describe('notifications env validation', () => {
       expect(message).not.toContain('s3cr3t-pw');
     }
   });
+
+  it.each(['JWT_SECRET', 'INTERNAL_API_TOKEN'])(
+    'rejects the CHANGE_ME placeholder for %s in production only',
+    (key) => {
+      const config = { ...valid(), [key]: 'CHANGE_ME'.padEnd(40, '_') };
+      expect(() => validate({ ...config, NODE_ENV: 'production' })).toThrow(
+        new RegExp(
+          `${key}: must not be the \\.env\\.production\\.example placeholder`,
+        ),
+      );
+      expect(() =>
+        validate({ ...config, NODE_ENV: 'development' }),
+      ).not.toThrow();
+    },
+  );
 });
