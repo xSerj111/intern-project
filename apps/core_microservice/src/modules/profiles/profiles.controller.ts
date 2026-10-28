@@ -81,7 +81,9 @@ export class ProfilesController {
 
   @ApiBearerAuth()
   @UseGuards(JwtAuthGuard)
-  @ApiOperation({ summary: 'Search users by username prefix' })
+  @ApiOperation({
+    summary: 'Search users whose username or display name contains the query',
+  })
   @ApiOkResponse({ type: [ProfileUserResponseDto] })
   @ApiBadRequestResponse({ description: 'Invalid query parameters' })
   @ApiUnauthorizedResponse({ description: 'Missing or invalid access token' })

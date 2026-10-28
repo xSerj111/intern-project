@@ -227,7 +227,7 @@ export class ProfilesService {
     return localPart || 'user';
   }
 
-  /** Username-prefix search for starting conversations; the caller is left out. */
+  /** Search for starting conversations: username or display name contains q; the caller is left out. */
   async searchProfiles(
     q: string,
     limit: number,

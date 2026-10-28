@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository, ILike } from 'typeorm';
+import { In, Repository } from 'typeorm';
 
 import { TypeormRepositoryBase } from '@repo/shared';
+import { escapeLikePattern } from '../../../../common/db/like-pattern';
 import { Post, PostStatus } from '../../domain/entities/post.entity';
 import { PostLike } from '../../domain/entities/post-like.entity';
 import type { PostProps } from '../../domain/interfaces/post.props';
@@ -136,25 +137,35 @@ export class PostRepository
     return counts;
   }
 
+  /**
+   * Published posts whose content contains `keyword` literally (`%`, `_` and
+   * `\` are escaped), newest first. Served by `IDX_posts_content_trgm`: the
+   * status literal stays inline (see `findFeedPage`) and TypeORM adds
+   * `"deletedAt" IS NULL` because `withDeleted` is not set, so the query
+   * matches the index predicate.
+   */
   async searchPublishedPosts(
     keyword: string,
     page: number,
     limit: number,
   ): Promise<[Post[], number]> {
-    const skip = (page - 1) * limit;
-
-    return this.repository.findAndCount({
-      where: {
-        content: ILike(`%${keyword}%`),
-        status: PostStatus.Published,
-      },
-      relations: { author: true, assets: { asset: true } },
-      order: {
-        createdAt: 'DESC',
-      },
-      skip,
-      take: limit,
-    });
+    return (
+      this.repository
+        .createQueryBuilder('p')
+        .leftJoinAndSelect('p.author', 'author')
+        .leftJoinAndSelect('p.assets', 'assets')
+        .leftJoinAndSelect('assets.asset', 'asset')
+        .where("p.content ILIKE '%' || :q || '%' ESCAPE '\\'", {
+          q: escapeLikePattern(keyword),
+        })
+        .andWhere(`p.status = '${PostStatus.Published}'`)
+        .orderBy('p.createdAt', 'DESC')
+        .addOrderBy('p.id', 'DESC')
+        // skip/take (not offset/limit) page correctly over the to-many join.
+        .skip((page - 1) * limit)
+        .take(limit)
+        .getManyAndCount()
+    );
   }
 
   /**

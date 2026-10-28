@@ -61,7 +61,7 @@ export function getMyProfile(
   return coreApi<IProfileResponse>('/profiles/me', { token, signal });
 }
 
-/** Search users by username prefix (`GET /profiles/search`), no follow needed. */
+/** Search users whose username or display name contains the query (`GET /profiles/search`), no follow needed. */
 export function searchProfiles(
   { q, limit }: ISearchProfilesQuery,
   token?: string | null,

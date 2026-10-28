@@ -4,7 +4,11 @@ import { IsInt, IsOptional, IsString, Length, Max, Min } from 'class-validator';
 import { PAGE_SIZE_MAX, type ISearchProfilesQuery } from '@repo/contracts';
 
 export class SearchProfilesQueryDto implements ISearchProfilesQuery {
-  @ApiProperty({ description: 'Username prefix', minLength: 2, maxLength: 50 })
+  @ApiProperty({
+    description: 'Text the username or display name contains',
+    minLength: 2,
+    maxLength: 50,
+  })
   @IsString()
   @Length(2, 50)
   q!: string;

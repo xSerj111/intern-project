@@ -34,7 +34,7 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../../common/auth/optional-jwt-auth.guard';
 import { Post, PostStatus } from './domain/entities/post.entity';
 import { PostsByAuthorQueryDto } from '@repo/shared';
-import type { IFeedPage } from '@repo/contracts';
+import type { IFeedPage, IPostSearchPage } from '@repo/contracts';
 import { FeedPageResponseDto } from './dto/feed-page-response.dto';
 import { PostSearchResponseDto } from './dto/post-search-response.dto';
 import { AuthorPostsResponseDto } from './dto/author-posts-response.dto';
@@ -133,7 +133,7 @@ export class PostsController {
   async searchPosts(
     @CurrentUser('sub') userId: string | undefined,
     @Query() query: SearchQueryDto,
-  ) {
+  ): Promise<IPostSearchPage> {
     const { items, total } = await this.postsService.searchPosts(
       query.keyword,
       query.page,
