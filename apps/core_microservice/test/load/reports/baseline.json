@@ -1,0 +1,103 @@
+{
+  "name": "baseline",
+  "createdAt": "2026-10-20T14:01:42.664Z",
+  "gitRevision": "51d384d-dirty",
+  "seed": {
+    "profile": "perf",
+    "version": 1
+  },
+  "loadProfile": {
+    "vus": 20,
+    "rampSec": 30,
+    "holdSec": 120,
+    "warmupSec": 15,
+    "flow": "legacy"
+  },
+  "environment": {
+    "cpu": "11th Gen Intel(R) Core(TM) i5-1135G7 @ 2.40GHz (8 cores)",
+    "memGb": 23,
+    "os": "Linux 7.0.0-38-generic",
+    "node": "v24.16.0",
+    "notes": "B1 baseline, pre-B2 code, local docker infra, core PERF_INSTRUMENTATION=true"
+  },
+  "endpoints": [
+    {
+      "key": "feed",
+      "method": "GET",
+      "route": "/posts/feed",
+      "p50Ms": 64.22,
+      "p95Ms": 79.34,
+      "errorRate": 0,
+      "queriesPerRequest": {
+        "avg": 6,
+        "max": 6
+      },
+      "samples": 13472
+    },
+    {
+      "key": "profile",
+      "method": "GET",
+      "route": "/profiles/by-user/:userId",
+      "p50Ms": 26.73,
+      "p95Ms": 37.02,
+      "errorRate": 0,
+      "queriesPerRequest": {
+        "avg": 4.98,
+        "max": 5
+      },
+      "samples": 13472
+    },
+    {
+      "key": "comments",
+      "method": "GET",
+      "route": "/comments/post/:postId",
+      "p50Ms": 29.98,
+      "p95Ms": 43.5,
+      "errorRate": 0,
+      "queriesPerRequest": {
+        "avg": 2.05,
+        "max": 3
+      },
+      "samples": 13472
+    },
+    {
+      "key": "profile_search",
+      "method": "GET",
+      "route": "/profiles/search",
+      "p50Ms": 16.19,
+      "p95Ms": 24.44,
+      "errorRate": 0,
+      "queriesPerRequest": {
+        "avg": 1,
+        "max": 1
+      },
+      "samples": 13472
+    },
+    {
+      "key": "chat_list",
+      "method": "GET",
+      "route": "/chats",
+      "p50Ms": 25.38,
+      "p95Ms": 64.64,
+      "errorRate": 0,
+      "queriesPerRequest": {
+        "avg": 3,
+        "max": 5
+      },
+      "samples": 13472
+    },
+    {
+      "key": "post_create_image",
+      "method": "POST",
+      "route": "/assets/upload + /posts",
+      "p50Ms": 99,
+      "p95Ms": 123,
+      "errorRate": 0,
+      "queriesPerRequest": {
+        "avg": 11,
+        "max": 11
+      },
+      "samples": 2690
+    }
+  ]
+}

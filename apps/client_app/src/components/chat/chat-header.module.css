@@ -1,0 +1,68 @@
+.header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: 64px;
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.back {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin-left: calc(var(--space-1) * -1);
+  border-radius: var(--radius-full);
+  transition: background-color var(--duration-fast) ease;
+}
+
+.back:hover {
+  background: var(--color-surface-2);
+}
+
+/* The list is always visible next to the thread from tablet width up. */
+@media (min-width: 768px) {
+  .back {
+    display: none;
+  }
+}
+
+.identity {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: var(--space-3);
+  min-width: 0;
+  border-radius: var(--radius-md);
+}
+
+a.identity:hover .title {
+  text-decoration: underline;
+}
+
+.text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.title {
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--text-md);
+  font-weight: var(--weight-bold);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subtitle {
+  overflow: hidden;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

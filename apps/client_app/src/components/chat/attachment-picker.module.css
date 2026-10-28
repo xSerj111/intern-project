@@ -1,0 +1,79 @@
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: 100%;
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-3);
+  font-size: var(--text-sm);
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+}
+
+.chipError {
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+  border-color: var(--color-danger);
+}
+
+.fileIcon {
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+
+.name {
+  max-width: 10rem;
+  overflow: hidden;
+  font-weight: var(--weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.chipError .status {
+  color: var(--color-danger);
+}
+
+.progress {
+  width: 4rem;
+  height: 0.4rem;
+  vertical-align: middle;
+  accent-color: var(--color-primary);
+}
+
+.iconButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  color: var(--color-text-muted);
+  background: none;
+  border: none;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+}
+
+.iconButton:hover:not(:disabled) {
+  color: var(--color-text);
+  background: var(--color-surface-3);
+}
+
+.iconButton:disabled {
+  opacity: 0.35;
+  cursor: default;
+}

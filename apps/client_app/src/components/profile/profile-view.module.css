@@ -1,0 +1,12 @@
+.page {
+  width: 100%;
+  max-width: var(--content-width-wide);
+  margin: 0 auto;
+  padding: 0 var(--space-4);
+}
+
+@media (min-width: 768px) {
+  .page {
+    padding: 0 var(--space-6);
+  }
+}

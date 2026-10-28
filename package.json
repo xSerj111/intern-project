@@ -1,0 +1,36 @@
+{
+  "name": "innogram",
+  "version": "1.0.0",
+  "description": "Innogram - Social Media Application",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "lint:check": "turbo run lint:check",
+    "type-check": "turbo run type-check",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "docker:apps:up": "docker compose -f docker-compose.yml -f docker-compose.apps.yml --env-file .env.production up -d --build",
+    "docker:apps:down": "docker compose -f docker-compose.yml -f docker-compose.apps.yml --env-file .env.production down",
+    "db:migrate": "turbo run db:migrate",
+    "db:seed": "turbo run db:seed",
+    "perf:baseline": "MODE=measure bash apps/core_microservice/test/load/run-k6.sh",
+    "perf:compare": "ts-node apps/core_microservice/test/load/compare-reports.ts",
+    "e2e": "npm run test:e2e -w client_app --",
+    "perf": "MODE=gate bash apps/core_microservice/test/load/run-k6.sh && npx ts-node apps/core_microservice/test/load/group-fanout.ts --members 100 --messages 50"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/node": "^20.19.43",
+    "dotenv-cli": "^11.0.0",
+    "eslint-config-prettier": "^10.0.1",
+    "turbo": "^1.10.0",
+    "typescript": "^5.0.0"
+  }
+}

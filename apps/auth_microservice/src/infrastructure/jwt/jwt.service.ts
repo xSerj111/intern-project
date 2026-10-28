@@ -1,0 +1,64 @@
+import {
+  IJwtService,
+  JwtPayload,
+  RefreshTokenPayload,
+} from '../../domain/interfaces/jwt.service.interface';
+import jwt, { SignOptions } from 'jsonwebtoken';
+import { env } from '../../config/env';
+import { randomUUID } from 'crypto';
+
+export class JwtService implements IJwtService {
+  signAccessToken(payload: JwtPayload): string {
+    return jwt.sign(
+      payload,
+      env.jwt.accessTokenSecret,
+      // Env value is a plain string; the typings expect the narrower StringValue literal type
+      {
+        expiresIn: env.jwt.accessTokenExpiry as SignOptions['expiresIn'],
+        jwtid: randomUUID(),
+      },
+    );
+  }
+
+  verifyAccessToken(token: string): JwtPayload {
+    // jwt.verify throws (e.g. TokenExpiredError) if the token is invalid.
+    // The error is caught later, in our middleware.
+    const decoded = jwt.verify(token, env.jwt.accessTokenSecret) as JwtPayload;
+    return decoded;
+  }
+
+  signRefreshToken(
+    userId: string,
+    sid?: string,
+  ): { token: string; jti: string; expiresAt: Date } {
+    const jti = randomUUID();
+    const token = jwt.sign(sid ? { sid } : {}, env.jwt.refreshTokenSecret, {
+      subject: userId,
+      jwtid: jti,
+      expiresIn: this.parseExpiryToSeconds(env.jwt.refreshTokenExpiry),
+    });
+    const { exp } = jwt.decode(token) as { exp: number };
+    return { token, jti, expiresAt: new Date(exp * 1000) };
+  }
+
+  verifyRefreshToken(token: string): RefreshTokenPayload {
+    const decoded = jwt.verify(
+      token,
+      env.jwt.refreshTokenSecret,
+    ) as Partial<RefreshTokenPayload>;
+    if (!decoded.sub || !decoded.jti || !decoded.exp) {
+      throw new Error('Malformed refresh token');
+    }
+    return { sub: decoded.sub, jti: decoded.jti, exp: decoded.exp, sid: decoded.sid };
+  }
+
+  parseExpiryToSeconds(expiry: string): number {
+    const match = expiry.match(/^(\d+)([smhd])$/);
+    if (!match) return 604800; // Defaults to 7 days, in seconds
+
+    const value = parseInt(match[1], 10);
+    const unit = match[2];
+    const multipliers: Record<string, number> = { s: 1, m: 60, h: 3600, d: 86400 };
+    return value * (multipliers[unit] || 1);
+  }
+}

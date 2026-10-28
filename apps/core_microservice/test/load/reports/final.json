@@ -1,0 +1,106 @@
+{
+  "name": "final",
+  "createdAt": "2026-10-21T11:28:25.661Z",
+  "gitRevision": "199ac0e-dirty",
+  "seed": {
+    "profile": "perf",
+    "version": 1
+  },
+  "loadProfile": {
+    "vus": 20,
+    "rampSec": 30,
+    "holdSec": 120,
+    "warmupSec": 15,
+    "flow": "current"
+  },
+  "environment": {
+    "cpu": "11th Gen Intel(R) Core(TM) i5-1135G7 @ 2.40GHz (8 cores)",
+    "memGb": 23,
+    "os": "Linux 7.0.0-38-generic",
+    "node": "v24.16.0",
+    "notes": "B7 final, post-B6 code, local docker infra, core PERF_INSTRUMENTATION=true"
+  },
+  "endpoints": [
+    {
+      "key": "feed",
+      "method": "GET",
+      "route": "/posts/feed",
+      "p50Ms": 41.16,
+      "p95Ms": 52.69,
+      "errorRate": 0,
+      "queriesPerRequest": {
+        "avg": 4,
+        "max": 4
+      },
+      "samples": 15683
+    },
+    {
+      "key": "profile",
+      "method": "GET",
+      "route": "/profiles/by-user/:userId",
+      "p50Ms": 20.43,
+      "p95Ms": 29.34,
+      "errorRate": 0,
+      "queriesPerRequest": {
+        "avg": 1.02,
+        "max": 5
+      },
+      "samples": 15683
+    },
+    {
+      "key": "comments",
+      "method": "GET",
+      "route": "/comments/post/:postId",
+      "p50Ms": 24.51,
+      "p95Ms": 45.74,
+      "errorRate": 0,
+      "queriesPerRequest": {
+        "avg": 2.88,
+        "max": 5
+      },
+      "samples": 15683
+    },
+    {
+      "key": "profile_search",
+      "method": "GET",
+      "route": "/profiles/search",
+      "p50Ms": 15.23,
+      "p95Ms": 22.09,
+      "errorRate": 0,
+      "queriesPerRequest": {
+        "avg": 1,
+        "max": 1
+      },
+      "samples": 15683
+    },
+    {
+      "key": "chat_list",
+      "method": "GET",
+      "route": "/chats",
+      "p50Ms": 25.03,
+      "p95Ms": 49.37,
+      "errorRate": 0,
+      "queriesPerRequest": {
+        "avg": 3.07,
+        "max": 5
+      },
+      "samples": 15683
+    },
+    {
+      "key": "post_create_image",
+      "method": "POST",
+      "route": "/uploads + /posts",
+      "p50Ms": 168,
+      "p95Ms": 201,
+      "errorRate": 0,
+      "queriesPerRequest": {
+        "avg": 16,
+        "max": 16
+      },
+      "samples": 3134
+    }
+  ],
+  "cache": {
+    "profileHitRatio": 0.9906
+  }
+}

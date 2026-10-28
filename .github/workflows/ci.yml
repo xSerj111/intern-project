@@ -1,0 +1,84 @@
+name: Innogram CI Pipeline
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+    types: [opened, synchronize, reopened]
+
+jobs:
+  # Job 1: Lint and Type-check for the entire monorepo
+  lint-and-type-check:
+    name: Lint & Type-Check
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint (via Turborepo)
+        # "lint:check" runs ESLint without --fix, so CI never mutates files
+        run: npx turbo run lint:check
+
+      - name: Build (via Turborepo)
+        # Turborepo builds all applications and packages, ensuring they compile
+        run: npx turbo run build
+        env:
+          # client_app's production build refuses to run without these (next.config.ts)
+          AUTH_SERVICE_URL: http://localhost:3002
+          CORE_SERVICE_URL: http://localhost:3001
+          NOTIFICATIONS_SERVICE_URL: http://localhost:3003
+
+      - name: Type-Check (via Turborepo)
+        # "type-check" runs tsc --noEmit in every workspace that defines it
+        run: npx turbo run type-check
+
+  # Job 2: Unit tests with coverage for every backend app and the shared package
+  unit-tests:
+    name: Unit tests (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    needs: lint-and-type-check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: core, ws: core_microservice, dir: apps/core_microservice }
+          - { name: auth, ws: auth_microservice, dir: apps/auth_microservice }
+          - { name: notifications, ws: notifications_consumer_microservice, dir: apps/notifications_consumer_microservice }
+          - { name: shared, ws: '@repo/shared', dir: packages/shared }
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build shared packages
+        run: npm run build -w @repo/contracts -w @repo/shared
+
+      - name: Run unit tests with coverage
+        run: npm run test:cov -w ${{ matrix.ws }}
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-${{ matrix.name }}
+          path: ${{ matrix.dir }}/coverage

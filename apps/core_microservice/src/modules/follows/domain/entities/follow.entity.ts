@@ -1,0 +1,29 @@
+import { TypeormEntityBase } from '@repo/shared';
+import { Entity, Column, Index, Unique } from 'typeorm';
+import { FollowProps } from '../interfaces/follow.props';
+
+@Entity('follows')
+@Unique(['followerId', 'followingId'])
+export class Follow extends TypeormEntityBase implements FollowProps {
+  // Logical reference: The user who is initiating the follow
+  @Index()
+  @Column({ type: 'uuid' })
+  followerId!: string;
+
+  // Logical reference: The user being followed
+  @Index()
+  @Column({ type: 'uuid' })
+  followingId!: string;
+
+  static create(props: FollowProps): Follow {
+    const follow = new Follow();
+    follow.followerId = props.followerId;
+    follow.followingId = props.followingId;
+    return follow;
+  }
+
+  /** Following yourself is not worth a notification. */
+  notifiesFollowed(): boolean {
+    return this.followerId !== this.followingId;
+  }
+}
