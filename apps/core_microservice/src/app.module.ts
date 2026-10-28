@@ -1,10 +1,22 @@
-import { Module } from '@nestjs/common';
+import {
+  MiddlewareConsumer,
+  Module,
+  NestModule,
+  RequestMethod,
+} from '@nestjs/common';
+import { APP_INTERCEPTOR } from '@nestjs/core';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AppConfigModule } from './config/app-config.module';
 import { AppConfigService } from './config/app-config.service';
 import { RedisModule } from './common/redis/redis.module';
+import { CacheModule } from './common/cache/cache.module';
 import { CommonAuthModule } from './common/auth/common-auth.module';
+import { MetricsModule } from './common/observability/metrics.module';
+import { ObservabilityModule } from './common/observability/observability.module';
+import { QueryContextMiddleware } from './common/db/query-context';
+import { TypeOrmPerfLogger } from './common/db/typeorm-perf.logger';
+import { QueryCountInterceptor } from './common/perf/query-count.interceptor';
 import { MessagingModule } from './common/messaging/messaging.module';
 import { ProfilesModule } from './modules/profiles/profiles.module';
 import { ProfileSummaryModule } from './modules/profile-summary/profile-summary.module';
@@ -20,7 +32,9 @@ import { NotificationsRelayModule } from './modules/notifications-relay/notifica
 @Module({
   imports: [
     AppConfigModule,
+    MetricsModule,
     RedisModule,
+    CacheModule,
     CommonAuthModule,
 
     TypeOrmModule.forRootAsync({
@@ -30,6 +44,10 @@ import { NotificationsRelayModule } from './modules/notifications-relay/notifica
       useFactory: (config: AppConfigService) => ({
         ...config.postgres,
         autoLoadEntities: true,
+        // Query logging feeds the per-request query counter; the logger prints nothing for queries.
+        logging: ['query', 'error'] as ('query' | 'error')[],
+        logger: new TypeOrmPerfLogger(),
+        maxQueryExecutionTime: config.slowQueryMs,
       }),
     }),
     MessagingModule,
@@ -44,6 +62,14 @@ import { NotificationsRelayModule } from './modules/notifications-relay/notifica
     LikesModule,
     InternalEventsModule,
     NotificationsRelayModule,
+    ObservabilityModule,
   ],
+  providers: [{ provide: APP_INTERCEPTOR, useClass: QueryCountInterceptor }],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    consumer
+      .apply(QueryContextMiddleware)
+      .forRoutes({ path: '{*splat}', method: RequestMethod.ALL });
+  }
+}

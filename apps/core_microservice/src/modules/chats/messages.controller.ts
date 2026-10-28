@@ -26,11 +26,11 @@ import { SendMessageDto } from './dto/send-message.dto';
 import { EditMessageDto } from './dto/edit-message.dto';
 import { ListMessagesQueryDto } from './dto/list-messages-query.dto';
 import { MessageChangesQueryDto } from './dto/message-changes-query.dto';
-import { MessageResponseDto } from './dto/message-response.dto';
+import { MessagePageDto, MessageResponseDto } from './dto/message-response.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 
-@ApiTags('chats')
+@ApiTags('Chats')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller('chats/:chatId/messages')
@@ -42,6 +42,7 @@ export class MessagesController {
   @ApiResponse({
     status: HttpStatus.OK,
     description: 'Cursor page of messages, newest first',
+    type: MessagePageDto,
   })
   history(
     @CurrentUser('sub') userId: string,
@@ -57,6 +58,7 @@ export class MessagesController {
   @ApiResponse({
     status: HttpStatus.OK,
     description: 'Cursor page of created or edited messages',
+    type: MessagePageDto,
   })
   changes(
     @CurrentUser('sub') userId: string,

@@ -1,36 +1,48 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { assertInternalApiToken } from '@repo/shared';
 
 /**
  * Typed application configuration, backed by `@nestjs/config`'s ConfigService.
- * The single place the running app reads environment-derived settings. Required
- * settings use `getOrThrow`, so a missing variable fails fast at first read.
+ * The single place the running app reads environment-derived settings. Startup
+ * validation (`env.validation.ts`) guarantees required variables exist; required
+ * settings use `getOrThrow`, optional ones `get` with their default.
  */
-const INTERNAL_API_TOKEN_MIN_LENGTH = 32;
-
 @Injectable()
-export class AppConfigService {
+export class AppConfigService implements OnModuleInit {
   constructor(private readonly config: ConfigService) {}
+
+  /** Fail fast at bootstrap: a missing or short INTERNAL_API_TOKEN stops the service. */
+  onModuleInit(): void {
+    void this.internalApiToken;
+  }
 
   /** HTTP port the Notifications service listens on. */
   get port(): number {
     // Own variable, not the shared PORT: every service reads the same root
     // config file, so a single PORT makes two services fight over one socket.
-    return parseInt(this.config.get<string>('NOTIFICATIONS_PORT', '3003'), 10);
+    return Number(this.config.get<string | number>('NOTIFICATIONS_PORT', 3003));
+  }
+
+  /**
+   * Whether to serve Swagger UI. `SWAGGER_ENABLED` ('true'/'false') wins;
+   * unset means on, except when NODE_ENV is production.
+   */
+  get swaggerEnabled(): boolean {
+    const raw = this.config.get<string>('SWAGGER_ENABLED');
+    if (raw !== undefined && raw !== '') return raw === 'true';
+    return this.config.get<string>('NODE_ENV') !== 'production';
   }
 
   /** Postgres connection settings for the Notifications database. */
   get postgres() {
     return {
       type: 'postgres' as const,
-      host: this.config.getOrThrow<string>('POSTGRES_HOST', 'localhost'),
-      port: parseInt(
-        this.config.getOrThrow<string>('POSTGRES_PORT', '5432'),
-        10,
-      ),
-      username: this.config.getOrThrow<string>('POSTGRES_USER', 'postgres'),
-      password: this.config.getOrThrow<string>('POSTGRES_PASSWORD', 'postgres'),
-      database: this.config.getOrThrow<string>(
+      host: this.config.get<string>('POSTGRES_HOST', 'localhost'),
+      port: Number(this.config.get<string | number>('POSTGRES_PORT', 5432)),
+      username: this.config.getOrThrow<string>('POSTGRES_USER'),
+      password: this.config.getOrThrow<string>('POSTGRES_PASSWORD'),
+      database: this.config.get<string>(
         'DB_NAME_NOTIFICATIONS',
         'innogram_notifications',
       ),
@@ -49,7 +61,7 @@ export class AppConfigService {
   get redis() {
     return {
       host: this.config.get<string>('REDIS_HOST', 'localhost'),
-      port: parseInt(this.config.get<string>('REDIS_PORT', '6379'), 10),
+      port: Number(this.config.get<string | number>('REDIS_PORT', 6379)),
       password: this.config.get<string>('REDIS_PASSWORD') || undefined,
     };
   }
@@ -61,13 +73,9 @@ export class AppConfigService {
 
   /** Shared secret for service-to-service calls to auth's internal API. */
   get internalApiToken(): string {
-    const token = this.config.getOrThrow<string>('INTERNAL_API_TOKEN');
-    // Same floor as auth's own check, so a weak token fails here too.
-    if (token.length < INTERNAL_API_TOKEN_MIN_LENGTH) {
-      throw new Error(
-        `INTERNAL_API_TOKEN must be at least ${INTERNAL_API_TOKEN_MIN_LENGTH} characters long`,
-      );
-    }
+    // Same floor (32 chars) as auth's own check, via the shared assertion.
+    const token = this.config.get<string>('INTERNAL_API_TOKEN');
+    assertInternalApiToken(token);
     return token;
   }
 
@@ -83,15 +91,9 @@ export class AppConfigService {
 
   /** SMTP transport settings for email delivery. */
   get smtp() {
-    const port = Number(this.config.getOrThrow<string>('SMTP_PORT'));
-
-    if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-      throw new Error('SMTP_PORT must be a valid port number');
-    }
-
     return {
       host: this.config.getOrThrow<string>('SMTP_HOST'),
-      port,
+      port: Number(this.config.getOrThrow<string | number>('SMTP_PORT')),
       secure:
         this.config.getOrThrow<string>('SMTP_SECURE').toLowerCase() === 'true',
       from: this.config.getOrThrow<string>('SMTP_FROM'),

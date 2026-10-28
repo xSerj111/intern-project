@@ -30,6 +30,11 @@ export class NodemailerAdapter implements IMailer, OnApplicationShutdown {
     });
   }
 
+  /** Connectivity probe for the health check; rejects when SMTP is unreachable. */
+  verify(): Promise<true> {
+    return this.transporter.verify();
+  }
+
   onApplicationShutdown(): void {
     this.transporter.close();
   }

@@ -12,12 +12,17 @@
     "test": {
       "dependsOn": ["^build"]
     },
-    "lint": {},
+    "lint": {
+      "dependsOn": ["^build"]
+    },
+    "lint:check": {
+      "dependsOn": ["^build"]
+    },
     "type-check": {
       "dependsOn": ["^build"]
     },
-    "clean": {
-      "cache": false
+    "client_app#type-check": {
+      "dependsOn": ["^build", "build"]
     },
     "db:migrate": {
       "cache": false

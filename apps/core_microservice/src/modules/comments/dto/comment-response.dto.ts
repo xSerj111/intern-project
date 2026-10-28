@@ -4,7 +4,7 @@ import { UserSummaryDto } from '../../../common/dto/user-summary.dto';
 import { Comment } from '../domain/entities/comment.entity';
 
 /** Response DTO for a comment, built from the entity in its constructor. */
-export class CommentResponseDto {
+export class CommentResponseDto implements ICommentResponse {
   @ApiProperty()
   id: string;
 

@@ -7,6 +7,8 @@ import * as jwt from 'jsonwebtoken';
 import request from 'supertest';
 import { DataSource } from 'typeorm';
 import { AppModule } from './../src/app.module';
+import type { UploadPurpose } from '@repo/contracts';
+import { PDF_BYTES, presignedUpload } from './helpers/attachment.helpers';
 
 jest.setTimeout(60000);
 
@@ -86,19 +88,21 @@ describe('Profile page: author posts, summary, avatar (e2e)', () => {
   });
 
   describe('avatar', () => {
-    const upload = async (
+    const upload = (
       sub: string,
       buf: Buffer,
       name: string,
       type: string,
+      purpose: UploadPurpose = 'post-image',
     ) =>
-      (
-        await http
-          .post('/assets/upload')
-          .set(as(sub))
-          .attach('file', buf, { filename: name, contentType: type })
-          .expect(201)
-      ).body;
+      presignedUpload(
+        http,
+        { accessToken: token(sub) },
+        purpose,
+        buf,
+        type,
+        name,
+      );
     let profileId: string;
 
     beforeAll(async () => {
@@ -127,9 +131,10 @@ describe('Profile page: author posts, summary, avatar (e2e)', () => {
       const pdf = (
         await upload(
           author,
-          Buffer.from('%PDF-1.4'),
+          PDF_BYTES,
           'x.pdf',
           'application/pdf',
+          'chat-attachment',
         )
       ).id;
       await http
@@ -253,6 +258,11 @@ describe('Profile page: author posts, summary, avatar (e2e)', () => {
         .expect(200);
       expect(res.body.total).toBe(3);
       expect(res.body.items.map((p: any) => p.content)).toEqual(['pub 0']);
+      expect(res.body).toMatchObject({ page: 2, limit: 2, hasMore: false });
+      const first = await http
+        .get(`/posts/author/${author}?page=1&limit=2`)
+        .expect(200);
+      expect(first.body).toMatchObject({ page: 1, limit: 2, hasMore: true });
     });
 
     it('rejects an oversized limit and bad ids', async () => {
@@ -297,13 +307,15 @@ describe('Profile page: author posts, summary, avatar (e2e)', () => {
       const comments = await http
         .get(`/comments/post/${publishedIds[0]}`)
         .expect(200);
-      expect(comments.body).toHaveLength(2);
-      for (const c of comments.body) {
+      expect(comments.body.items).toHaveLength(2);
+      expect(comments.body.hasMore).toBe(false);
+      for (const c of comments.body.items) {
         expect(c.author.userId).toBe(c.authorId);
       }
       const feed = await http.get('/posts/feed').set(as(author)).expect(200);
       expect(feed.body.items[0].author.userId).toBe(author);
       expect(typeof feed.body.items[0].commentCount).toBe('number');
+      expect(feed.body).toHaveProperty('nextCursor');
     });
   });
 
@@ -333,11 +345,59 @@ describe('Profile page: author posts, summary, avatar (e2e)', () => {
         .expect(200);
       expect(own.body.isFollowedByMe).toBe(false);
 
+      const followers = await http
+        .get(`/follows/${author}/followers`)
+        .set(as(viewer))
+        .expect(200);
+      expect(followers.body).toMatchObject({
+        page: 1,
+        limit: 50,
+        hasMore: false,
+      });
+      expect(followers.body.items).toHaveLength(1);
+      expect(followers.body.items[0]).toMatchObject({
+        followerId: viewer,
+        followingId: author,
+        isFollowedByMe: false,
+      });
+      const following = await http
+        .get(`/follows/${viewer}/following`)
+        .set(as(viewer))
+        .expect(200);
+      expect(following.body.items[0]).toMatchObject({
+        followingId: author,
+        isFollowedByMe: true,
+      });
+
       const anon = await http.get(`/profiles/by-user/${viewer}`).expect(200);
       expect(anon.body).toMatchObject({
         followingCount: 1,
         isFollowedByMe: false,
       });
+    });
+
+    it('lazy-creates a fresh profile idempotently under concurrent GET /profiles/me', async () => {
+      const fresh = randomUUID();
+      const responses = await Promise.all(
+        Array.from({ length: 5 }, () =>
+          http.get('/profiles/me').set(as(fresh)),
+        ),
+      );
+      try {
+        expect(responses.map((r) => r.status)).toEqual([
+          200, 200, 200, 200, 200,
+        ]);
+        expect(new Set(responses.map((r) => r.body.id)).size).toBe(1);
+        const [{ count }] = await rows<{ count: string }>(
+          'SELECT count(*)::int AS count FROM user_profiles WHERE "authUserId" = $1',
+          [fresh],
+        );
+        expect(Number(count)).toBe(1);
+      } finally {
+        await rows('DELETE FROM user_profiles WHERE "authUserId" = $1', [
+          fresh,
+        ]);
+      }
     });
 
     it('404s for an unknown user and keeps existing profile routes working', async () => {

@@ -41,7 +41,9 @@ export * from "./auth/access-token.verifier";
 // Redis key layout (auth sessions + token blacklists)
 export * from "./redis/redis-keys";
 
+// Observability (prom-client registry factory)
+export * from "./observability";
+
 // Filters (domain errors -> HTTP)
 export * from "./filters/domain-exception.filter";
-
-// Types/Enums (we will add these later)
+export * from "./filters/all-exceptions.filter";

@@ -1,6 +1,7 @@
 import type { RepositoryPort } from '@repo/shared';
 import type { Post, PostStatus } from '../entities/post.entity';
 import type { PostProps } from './post.props';
+import type { FeedCursor } from '../feed-cursor';
 
 /** Like count and whether the viewer has an active like on the item. */
 export interface LikeStats {
@@ -11,12 +12,17 @@ export interface LikeStats {
 export interface IPostRepository extends RepositoryPort<Post, PostProps> {
   /** The post by id without relations; null when missing or soft-deleted. */
   findById(id: string): Promise<Post | null>;
-  /** Published posts of the given authors, newest first, with author and assets (and each asset's file). */
-  getFeedForAuthors(
-    authorIds: string[],
-    page: number,
+  /**
+   * One keyset page of the viewer's feed: published posts by the viewer and
+   * the users they follow, ordered `createdAt DESC, id DESC`, strictly after
+   * `cursor` (first page when null). Posts carry author and assets (with
+   * each asset's file). `nextCursor` is null when this is the last page.
+   */
+  findFeedPage(
+    viewerId: string,
+    cursor: FeedCursor | null,
     limit: number,
-  ): Promise<[Post[], number]>;
+  ): Promise<{ posts: Post[]; nextCursor: string | null }>;
   /** Published posts whose content contains the keyword (case-insensitive). */
   searchPublishedPosts(
     keyword: string,

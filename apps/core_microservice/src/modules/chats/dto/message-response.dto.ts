@@ -3,11 +3,13 @@ import type {
   ChatType,
   IAttachment,
   IAttachmentUrl,
+  ICursorPage,
   IChatParticipant,
   IChatUser,
   IConversationDetail,
   IConversationSummary,
   IMessage,
+  IReadState,
   IUploadedAttachment,
   ParticipantRole,
   SystemEventType,
@@ -108,4 +110,23 @@ export class ConversationDetailDto
 {
   @ApiProperty({ type: [ChatParticipantDto] })
   participants!: ChatParticipantDto[];
+}
+
+export class ReadStateDto implements IReadState {
+  @ApiProperty() chatId!: string;
+  @ApiProperty() lastReadSeq!: number;
+  @ApiProperty() unreadCount!: number;
+}
+
+/** Documentation shape of `ICursorPage<MessageResponseDto>`. */
+export class MessagePageDto implements ICursorPage<MessageResponseDto> {
+  @ApiProperty({ type: [MessageResponseDto] }) items!: MessageResponseDto[];
+  @ApiProperty() hasMore!: boolean;
+}
+
+/** Documentation shape of `ICursorPage<IConversationSummary>`. */
+export class ConversationSummaryPageDto implements ICursorPage<ConversationSummaryDto> {
+  @ApiProperty({ type: [ConversationSummaryDto] })
+  items!: ConversationSummaryDto[];
+  @ApiProperty() hasMore!: boolean;
 }

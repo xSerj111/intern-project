@@ -1,28 +1,27 @@
-import type { IFeedResponse } from '@repo/contracts';
+import type { IFeedPage, IFeedQuery } from '@repo/contracts';
 
 import { coreApi } from './client';
 
-export interface FeedParams {
-  page?: number;
-  limit?: number;
+export interface FeedParams extends IFeedQuery {
   /** JWT for the personalized feed. */
   token?: string | null;
   signal?: AbortSignal;
 }
 
 /**
- * Fetch the authenticated user's personalized feed (`GET /posts/feed`).
- * The envelope uses `items` (not `data`).
+ * Fetch one page of the authenticated user's personalized feed
+ * (`GET /posts/feed`). Pass the previous page's `nextCursor` to continue;
+ * omit it for the first page. Never sends `page` (the server rejects it).
  */
 export function getFeed({
-  page = 1,
+  cursor,
   limit = 20,
   token,
   signal,
-}: FeedParams = {}): Promise<IFeedResponse> {
-  return coreApi<IFeedResponse>('/posts/feed', {
+}: FeedParams = {}): Promise<IFeedPage> {
+  return coreApi<IFeedPage>('/posts/feed', {
     token,
     signal,
-    query: { page, limit },
+    query: { cursor, limit },
   });
 }

@@ -35,7 +35,7 @@ export default function NotificationsPage() {
   const queryClient = useQueryClient();
 
   // Cache shape under notificationKeys.list(): InfiniteData<INotificationsPage>,
-  // newest first; the page cursor is the last item's `occurredAt` (`before`).
+  // newest first; the page cursor is the opaque `nextCursor` (`before`).
   const query = useInfiniteQuery<
     INotificationsPage,
     Error,
@@ -50,8 +50,7 @@ export default function NotificationsPage() {
         { before: pageParam, limit: PAGE_SIZE },
         { token: accessToken, signal },
       ),
-    getNextPageParam: (last) =>
-      last.hasMore ? last.items.at(-1)?.occurredAt : undefined,
+    getNextPageParam: (last) => last.nextCursor ?? undefined,
     enabled: isHydrated && Boolean(accessToken),
   });
 

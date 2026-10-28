@@ -43,9 +43,10 @@ export interface StoredActorSnapshot {
  */
 @Entity('notifications')
 @Unique('UQ_notifications_sourceEventId', ['sourceEventId'])
-@Index('IDX_notifications_recipientId_occurredAt', [
+@Index('IDX_notifications_recipientId_occurredAt_id', [
   'recipientId',
   'occurredAt',
+  'id',
 ])
 @Index('IDX_notifications_recipientId_unseen', ['recipientId'], {
   where: '"seenAt" IS NULL',

@@ -6,6 +6,7 @@ import { corePostgresConnection } from './../src/database/database.config';
 import { OutboxEvent } from './../src/common/messaging/outbox-event.entity';
 import { TypeOrmOutboxAdapter } from './../src/common/messaging/typeorm-outbox.adapter';
 import { UserProfile } from './../src/modules/profiles/domain/entities/user-profile.entity';
+import { UserProfileRepository } from './../src/modules/profiles/infrastructure/repository/user-profile.repository';
 import { Post } from './../src/modules/posts/domain/entities/post.entity';
 import { PostRepository } from './../src/modules/posts/infrastructure/repository/post.repository';
 import { Comment } from './../src/modules/comments/domain/entities/comment.entity';
@@ -46,6 +47,7 @@ describe('B14 repositories against real Postgres (e2e)', () => {
   let postLikeRepo: PostLikeRepository;
   let commentLikeRepo: CommentLikeRepository;
   let chatRepo: ChatRepository;
+  let profileRepo: UserProfileRepository;
 
   const tag = randomUUID().slice(0, 8);
   const userIds: string[] = [];
@@ -113,6 +115,7 @@ describe('B14 repositories against real Postgres (e2e)', () => {
     followRepo = new FollowRepository(db.getRepository(Follow));
     postLikeRepo = new PostLikeRepository(db.getRepository(PostLike));
     commentLikeRepo = new CommentLikeRepository(db.getRepository(CommentLike));
+    profileRepo = new UserProfileRepository(db.getRepository(UserProfile));
     chatRepo = new ChatRepository(
       db.getRepository(Chat),
       db.getRepository(ChatParticipant),
@@ -217,6 +220,32 @@ describe('B14 repositories against real Postgres (e2e)', () => {
       expect(result.row.deadLetteredAt).toBeNull();
       expect(result.row.publishedAt).toBeNull();
       expect(result.claimed).toContain(result.id);
+    });
+
+    it('pendingStats counts only pending rows and reports the age of the oldest', async () => {
+      const result = await inRolledBackTx(async (tx) => {
+        const before = await outbox.pendingStats(tx);
+        await insertRow(tx);
+        await insertRow(tx, { occurredAt: new Date(Date.now() - 5_000) });
+        await insertRow(tx, { publishedAt: new Date() });
+        await insertRow(tx, { deadLetteredAt: new Date() });
+        return { before, after: await outbox.pendingStats(tx) };
+      });
+
+      expect(result.after.count - result.before.count).toBe(2);
+      // The 1990 fixture row is the oldest pending row, so the age is decades.
+      expect(result.after.oldestSeconds).toBeGreaterThan(10 * 365 * 86_400);
+    });
+
+    it('pendingStats returns 0 oldest seconds when nothing is pending', async () => {
+      const stats = await inRolledBackTx(async (tx) => {
+        await tx.query(
+          'UPDATE outbox_events SET "deadLetteredAt" = now() WHERE "publishedAt" IS NULL AND "deadLetteredAt" IS NULL',
+        );
+        return outbox.pendingStats(tx);
+      });
+
+      expect(stats).toEqual({ count: 0, oldestSeconds: 0 });
     });
   });
 
@@ -587,6 +616,89 @@ describe('B14 repositories against real Postgres (e2e)', () => {
         }),
       ).rejects.toBeInstanceOf(Rollback);
       expect(await commentLikeRepo.count(rolledBack.id)).toBe(0);
+    });
+  });
+
+  describe('UserProfileRepository.searchByUsername', () => {
+    // Every username starts with `sq<tag>` so a search cannot see other data.
+    const base = `sq${tag}`;
+    const named = async (username: string): Promise<string> => {
+      const authUserId = randomUUID();
+      await db
+        .getRepository(UserProfile)
+        .save(UserProfile.create({ authUserId, username }));
+      userIds.push(authUserId);
+      return username;
+    };
+    const search = async (q: string, limit = 20): Promise<string[]> =>
+      (await profileRepo.searchByUsername(q, limit, randomUUID())).map(
+        (p) => p.username,
+      );
+
+    beforeAll(async () => {
+      for (const name of [
+        `${base}ab_c1`,
+        `${base}abXc2`,
+        `${base}a%d3`,
+        `${base}aZZd4`,
+        `${base}e\\f5`,
+        `${base}eXf6`,
+        `${base}Mixed7`,
+      ]) {
+        await named(name);
+      }
+    });
+
+    it('matches "_" literally, not as a single-character wildcard', async () => {
+      expect(await search(`${base}ab_c`)).toEqual([`${base}ab_c1`]);
+    });
+
+    it('matches "%" literally, not as a wildcard', async () => {
+      expect(await search(`${base}a%`)).toEqual([`${base}a%d3`]);
+      expect(await search(`${base}a%d`)).toEqual([`${base}a%d3`]);
+    });
+
+    it('matches a backslash literally', async () => {
+      expect(await search(`${base}e\\`)).toEqual([`${base}e\\f5`]);
+      expect(await search(`${base}e\\f`)).toEqual([`${base}e\\f5`]);
+    });
+
+    it('a query of only wildcards matches nothing instead of everything', async () => {
+      expect(await search(`${base}%`)).toEqual([]);
+      expect(await search(`${base}_`)).toEqual([]);
+    });
+
+    it('stays a case-insensitive prefix search, regardless of case', async () => {
+      expect(await search(`${base}MIXED`)).toEqual([`${base}Mixed7`]);
+      expect((await search(base.toUpperCase())).sort()).toEqual(
+        [
+          `${base}Mixed7`,
+          `${base}a%d3`,
+          `${base}aZZd4`,
+          `${base}ab_c1`,
+          `${base}abXc2`,
+          `${base}e\\f5`,
+          `${base}eXf6`,
+        ].sort(),
+      );
+      // a prefix only: a middle fragment does not match
+      expect(await search('ixed7')).toEqual([]);
+    });
+
+    it('applies the limit and excludes the requesting user', async () => {
+      expect(await search(base, 3)).toHaveLength(3);
+      const [{ authUserId, username }] = await profileRepo.searchByUsername(
+        `${base}Mixed`,
+        5,
+        randomUUID(),
+      );
+      const rest = await profileRepo.searchByUsername(
+        `${base}Mixed`,
+        5,
+        authUserId,
+      );
+      expect(username).toBe(`${base}Mixed7`);
+      expect(rest).toEqual([]);
     });
   });
 });

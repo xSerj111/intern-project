@@ -9,6 +9,7 @@ import { Post, PostStatus } from './domain/entities/post.entity';
 describe('PostsController', () => {
   let controller: PostsController;
   const postsService = {
+    createPost: jest.fn(),
     getPost: jest.fn(),
     getFeed: jest.fn(),
     searchPosts: jest.fn(),
@@ -41,6 +42,28 @@ describe('PostsController', () => {
 
   it('should be defined', () => {
     expect(controller).toBeDefined();
+  });
+
+  describe('createPost', () => {
+    it('responds with zero counts and no enrichment queries', async () => {
+      postsService.createPost.mockResolvedValue(post);
+
+      const response = await controller.createPost('viewer-1', {
+        content: 'hello',
+      });
+
+      expect(postsService.createPost).toHaveBeenCalledWith('viewer-1', {
+        content: 'hello',
+      });
+      expect(postsService.getLikeStats).not.toHaveBeenCalled();
+      expect(postsService.getCommentCounts).not.toHaveBeenCalled();
+      expect(response).toMatchObject({
+        id: post.id,
+        likeCount: 0,
+        commentCount: 0,
+        likedByMe: false,
+      });
+    });
   });
 
   describe('getPost', () => {
@@ -179,8 +202,28 @@ describe('PostsController', () => {
         [post.id],
         'viewer-1',
       );
-      expect(response).toMatchObject({ total: 9, page: 2, limit: 5 });
+      expect(response).toMatchObject({
+        total: 9,
+        page: 2,
+        limit: 5,
+        hasMore: false,
+      });
       expect(response.items[0]).toMatchObject({ commentCount: 7 });
+    });
+
+    it('sets hasMore when more rows exist past this page', async () => {
+      postsService.getPostsByAuthor.mockResolvedValue({
+        items: [post],
+        total: 11,
+      });
+
+      const response = await controller.getPostsByAuthor(undefined, AUTHOR, {
+        page: 2,
+        limit: 5,
+        status: 'published',
+      });
+
+      expect(response.hasMore).toBe(true);
     });
 
     it('works for an anonymous viewer', async () => {
@@ -210,19 +253,28 @@ describe('PostsController', () => {
   });
 
   describe('getFeed', () => {
-    it('adds like state to every item', async () => {
-      postsService.getFeed.mockResolvedValue({ items: [post], total: 1 });
+    it('passes cursor and limit and returns items with nextCursor', async () => {
+      postsService.getFeed.mockResolvedValue({
+        items: [post],
+        nextCursor: 'next-1',
+      });
 
       const response = await controller.getFeed('viewer-1', {
-        page: 1,
+        cursor: 'cur-1',
         limit: 10,
       });
 
+      expect(postsService.getFeed).toHaveBeenCalledWith(
+        'viewer-1',
+        'cur-1',
+        10,
+      );
       expect(response.items[0]).toMatchObject({
         likeCount: 4,
         likedByMe: true,
       });
-      expect(response.total).toBe(1);
+      expect(response.nextCursor).toBe('next-1');
+      expect(Object.keys(response).sort()).toEqual(['items', 'nextCursor']);
     });
   });
 

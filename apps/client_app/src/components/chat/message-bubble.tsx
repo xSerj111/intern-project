@@ -155,6 +155,7 @@ export function MessageBubble({
 
   return (
     <div
+      data-testid="message-bubble"
       className={cx(
         styles.row,
         own && styles.rowOwn,

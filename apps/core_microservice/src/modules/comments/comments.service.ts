@@ -1,5 +1,5 @@
 import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
-import type { IChatUser } from '@repo/contracts';
+import type { IChatUser, IOffsetPage } from '@repo/contracts';
 import {
   type ActorSnapshot,
   CreateCommentDto,
@@ -81,7 +81,8 @@ export class CommentsService {
     this.logger.debug('Comment created', {
       props: { commentId: savedComment.id },
     });
-    return savedComment;
+    // Reload so the response carries the joined author (a saved row has none).
+    return this.commentRepository.findOneByIdOrThrow(savedComment.id);
   }
 
   async updateComment(
@@ -107,13 +108,28 @@ export class CommentsService {
     return updatedComment;
   }
 
-  // We return an array of comments here (newest first, with author joined)
-  async getCommentsByPost(postId: string): Promise<Comment[]> {
-    const comments = await this.commentRepository.findByPost(postId);
-    this.logger.debug('Comments retrieved', {
-      props: { postId, count: comments.length },
+  /**
+   * One page of a post's comments: the page's root comments (newest first)
+   * followed by all their replies (oldest first). `page`/`limit` and `hasMore`
+   * count roots only.
+   */
+  async getCommentsByPost(
+    postId: string,
+    { page, limit }: { page: number; limit: number },
+  ): Promise<IOffsetPage<Comment>> {
+    const fetched = await this.commentRepository.findRootPage(postId, {
+      offset: (page - 1) * limit,
+      limit,
     });
-    return comments;
+    const hasMore = fetched.length > limit;
+    const roots = fetched.slice(0, limit);
+    const replies = await this.commentRepository.findRepliesOf(
+      roots.map((root) => root.id),
+    );
+    this.logger.debug('Comments retrieved', {
+      props: { postId, page, roots: roots.length, replies: replies.length },
+    });
+    return { items: [...roots, ...replies], page, limit, hasMore };
   }
 
   /** Like count and the viewer's own like per comment (one query); viewer optional. */
@@ -125,13 +141,21 @@ export class CommentsService {
   }
 
   /**
-   * Author identities for a set of comments (one `IN` query, de-duplicated);
-   * authors without a profile are absent from the map.
+   * Author identities read off the comments' joined `author` relation (the
+   * repository loads it); no extra query. Authors without a profile are absent.
    */
-  async getAuthors(comments: Comment[]): Promise<Map<string, IChatUser>> {
-    return this.userDirectory.getUsers([
-      ...new Set(comments.map((c) => c.authorId)),
-    ]);
+  getAuthors(comments: Comment[]): Map<string, IChatUser> {
+    const authors = new Map<string, IChatUser>();
+    for (const { authorId, author } of comments) {
+      if (!author || authors.has(authorId)) continue;
+      authors.set(authorId, {
+        userId: author.authUserId,
+        username: author.username,
+        displayName: author.displayName,
+        avatarUrl: author.avatarUrl ?? null,
+      });
+    }
+    return authors;
   }
 
   async softDeleteComment(userId: string, id: string): Promise<void> {

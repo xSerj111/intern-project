@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { IsNull, LessThan, type EntityManager, type Repository } from 'typeorm';
+import { IsNull, type EntityManager, type Repository } from 'typeorm';
 import { Notification } from '../../domain/entities/notification.entity';
 import type {
   INotificationRepository,
+  NotificationCursor,
   NotificationPage,
   TransactionContext,
 } from '../../domain/interfaces/notification-repository.port';
@@ -39,19 +40,34 @@ export class NotificationRepository implements INotificationRepository {
     return this.repository.findOne({ where: { sourceEventId: eventId } });
   }
 
+  /**
+   * Keyset on `(occurredAt, id)`, served by
+   * `IDX_notifications_recipientId_occurredAt_id`. The row-value comparison
+   * keeps rows that share an `occurredAt` from being skipped or repeated.
+   */
   async page(
     recipientId: string,
-    options: { before?: Date; limit: number },
+    options: { before?: NotificationCursor; limit: number },
   ): Promise<NotificationPage> {
-    const rows = await this.repository.find({
-      where: {
-        recipientId,
-        ...(options.before ? { occurredAt: LessThan(options.before) } : {}),
-      },
-      // `id` keeps the order stable for equal timestamps.
-      order: { occurredAt: 'DESC', id: 'DESC' },
-      take: options.limit + 1,
-    });
+    const query = this.repository
+      .createQueryBuilder('n')
+      .where('n."recipientId" = :recipientId', { recipientId });
+    const before = options.before;
+    if (before?.id) {
+      query.andWhere('(n."occurredAt", n.id) < (:beforeAt, :beforeId)', {
+        beforeAt: before.occurredAt,
+        beforeId: before.id,
+      });
+    } else if (before) {
+      query.andWhere('n."occurredAt" < :beforeAt', {
+        beforeAt: before.occurredAt,
+      });
+    }
+    const rows = await query
+      .orderBy('n.occurredAt', 'DESC')
+      .addOrderBy('n.id', 'DESC')
+      .limit(options.limit + 1)
+      .getMany();
     return {
       items: rows.slice(0, options.limit),
       hasMore: rows.length > options.limit,

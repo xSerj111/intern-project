@@ -1,9 +1,10 @@
 import { Global, Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { AppConfigService } from './app-config.service';
+import { validate } from './env.validation';
 
 /**
- * Loads `.env` and exposes typed config via {@link AppConfigService}.
+ * Loads `.env`, validates it at startup and exposes typed config via {@link AppConfigService}.
  * Global, so any module/provider can inject AppConfigService.
  */
 @Global()
@@ -12,6 +13,7 @@ import { AppConfigService } from './app-config.service';
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: ['.env', '../../.env'],
+      validate,
     }),
   ],
   providers: [AppConfigService],

@@ -10,6 +10,10 @@ import {
   CHAT_REALTIME_PORT,
   type IChatRealtimePort,
 } from './../src/modules/chats/domain/interfaces/chat-realtime.port';
+import {
+  ChatsGateway,
+  chatRoom,
+} from './../src/modules/chats/infrastructure/realtime/chats.gateway';
 import { cleanupE2eData } from './helpers/cleanup.helpers';
 import {
   type ConnectResult,
@@ -20,7 +24,9 @@ import {
   logout,
   registerAndLogin,
   registerMany,
+  retryTransient,
   sleep,
+  warmUpDb,
   waitFor,
 } from './helpers/realtime.helpers';
 
@@ -68,6 +74,7 @@ describe('Realtime chat, US1 (e2e)', () => {
     baseUrl = baseUrl.replace('[::1]', 'localhost');
     http = request(app.getHttpServer());
     db = app.get(DataSource);
+    await warmUpDb(db);
 
     [a, b, c] = await Promise.all([
       registerAndLogin('a'),
@@ -77,15 +84,20 @@ describe('Realtime chat, US1 (e2e)', () => {
     // Profiles are created lazily on first use (auth's event targets a core
     // instance that is not running here).
     for (const s of [a, b, c]) {
-      await http.get('/profiles/me').set(authed(s)).expect(200);
+      await retryTransient(() =>
+        http.get('/profiles/me').set(authed(s)).expect(200),
+      );
     }
   });
 
   afterAll(async () => {
     sockets.forEach((s) => s.socket.close());
-    // Removes the users, profiles and chats this file created.
-    if (db) await cleanupE2eData(db);
-    await app?.close();
+    try {
+      // Removes the users, profiles and chats this file created.
+      if (db) await cleanupE2eData(db);
+    } finally {
+      await app?.close();
+    }
   });
 
   it('refuses a handshake without a token or with a garbage token', async () => {
@@ -286,6 +298,19 @@ describe('Realtime chat, US1 (e2e)', () => {
         track(c.accessToken),
       ]);
       expect([sA1.ok, sA2.ok, sB.ok, sC.ok]).toEqual([true, true, true, true]);
+
+      // The client sees `connect` before handleConnection has joined the chat
+      // rooms; typing from a socket outside the room is dropped, so wait.
+      const room = app.get(ChatsGateway).server.in(chatRoom(chatId));
+      const ids = [sA1, sA2, sB].map((s) => s.socket.id as string);
+      let inRoom: string[] = [];
+      const deadline = Date.now() + 3000;
+      while (Date.now() < deadline) {
+        inRoom = (await room.fetchSockets()).map((s) => s.id);
+        if (ids.every((id) => inRoom.includes(id))) break;
+        await sleep(25);
+      }
+      expect(inRoom).toEqual(expect.arrayContaining(ids));
     });
 
     it('relays typing:start to the other participant, never to the sender or an outsider', async () => {
@@ -733,14 +758,21 @@ describe('Realtime chat, US1 (e2e)', () => {
     const membersOf = async (s: Session) =>
       (await http.get(`/chats/${gid}`).set(authed(s)).expect(200)).body;
     const systemCount = async (s: Session) => {
-      const res = await http
-        .get(`/chats/${gid}/messages`)
-        .query({ limit: 100 })
-        .set(authed(s))
-        .expect(200);
-      return (res.body.items as Array<{ kind: string }>).filter(
-        (m) => m.kind === 'SYSTEM',
-      ).length;
+      let count = 0;
+      let beforeSeq: number | undefined;
+      for (;;) {
+        const res = await http
+          .get(`/chats/${gid}/messages`)
+          .query(
+            beforeSeq === undefined ? { limit: 50 } : { limit: 50, beforeSeq },
+          )
+          .set(authed(s))
+          .expect(200);
+        const items = res.body.items as Array<{ kind: string; seq: number }>;
+        count += items.filter((m) => m.kind === 'SYSTEM').length;
+        if (!res.body.hasMore || items.length === 0) return count;
+        beforeSeq = items[items.length - 1].seq; // page is newest first
+      }
     };
 
     beforeAll(async () => {

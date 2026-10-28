@@ -22,12 +22,7 @@
     "noImplicitAny": false,
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false,
-    "strictPropertyInitialization": true,
-
-    "paths": {
-      "@repo/shared/*": ["../shared/src/"],
-      "@repo/shared": ["../shared/src/index.ts"]
-    }
+    "strictPropertyInitialization": true
   },
   "include": ["src/**/*", "test/**/*"],
   "exclude": ["node_modules", "dist"]

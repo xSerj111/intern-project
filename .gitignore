@@ -29,6 +29,7 @@ tsconfig.tsbuildinfo
 .env.development.local
 .env.test.local
 .env.production.local
+.env.production
 
 # Claude Code personal settings (shared .claude/settings.json stays tracked)
 .claude/settings.local.json
@@ -107,8 +108,6 @@ temp/
 *.db
 *.sqlite
 
-# Docker
-.dockerignore
 
 # Initialization script
 init-script.sh
@@ -121,3 +120,21 @@ packages/shared/generated
 packages/shared/src/prisma/generated/
 
 /prisma/libs/prisma/prisma
+
+# Client e2e (Playwright) artifacts
+apps/client_app/e2e/.artifacts/
+apps/client_app/playwright-report/
+apps/client_app/test-results/
+
+# Load test reports: ignore generated runs, keep the committed baseline and final reports
+apps/core_microservice/test/load/reports/*.json
+!apps/core_microservice/test/load/reports/baseline.json
+!apps/core_microservice/test/load/reports/final.json
+
+# Per-workspace lockfiles (the root package-lock.json is the only lockfile)
+apps/*/package-lock.json
+packages/*/package-lock.json
+
+# Batch implementation (/impl-batch) gate output and per-lane run evidence
+specs/*/impl/baseline/
+specs/*/impl/run/

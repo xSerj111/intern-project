@@ -2,9 +2,12 @@ import { Injectable } from '@nestjs/common';
 import { TypeormRepositoryBase } from '@repo/shared';
 import { Follow } from '../../domain/entities/follow.entity';
 import { FollowProps } from '../../domain/interfaces/follow.props';
-import { IFollowRepository } from '../../domain/interfaces/follow-repository.port';
+import {
+  FollowPaging,
+  IFollowRepository,
+} from '../../domain/interfaces/follow-repository.port';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, Repository } from 'typeorm';
+import { EntityManager, FindOptionsWhere, Repository } from 'typeorm';
 
 @Injectable()
 export class FollowRepository
@@ -28,12 +31,39 @@ export class FollowRepository
     return this.repository.findOne({ where: { followerId, followingId } });
   }
 
-  async findFollowers(userId: string): Promise<Follow[]> {
-    return this.repository.find({ where: { followingId: userId } });
+  async findFollowers(userId: string, paging: FollowPaging): Promise<Follow[]> {
+    return this.findOrdered({ followingId: userId }, paging);
   }
 
-  async findFollowing(userId: string): Promise<Follow[]> {
-    return this.repository.find({ where: { followerId: userId } });
+  async findFollowing(userId: string, paging: FollowPaging): Promise<Follow[]> {
+    return this.findOrdered({ followerId: userId }, paging);
+  }
+
+  async findFollowedAmong(
+    viewerId: string,
+    userIds: string[],
+  ): Promise<Set<string>> {
+    if (userIds.length === 0) return new Set();
+    const rows = await this.repository
+      .createQueryBuilder('f')
+      .select('f.followingId', 'followingId')
+      .where('f.followerId = :viewerId', { viewerId })
+      .andWhere('f.followingId IN (:...userIds)', { userIds })
+      .getRawMany<{ followingId: string }>();
+    return new Set(rows.map((r) => r.followingId));
+  }
+
+  /** Takes `limit + 1` rows (hasMore without a COUNT). */
+  private findOrdered(
+    where: FindOptionsWhere<Follow>,
+    paging: FollowPaging,
+  ): Promise<Follow[]> {
+    return this.repository.find({
+      where,
+      order: { createdAt: 'DESC', id: 'DESC' },
+      skip: paging.offset,
+      take: paging.limit + 1,
+    });
   }
 
   /**

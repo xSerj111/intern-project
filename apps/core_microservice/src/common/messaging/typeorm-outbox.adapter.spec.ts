@@ -1,4 +1,5 @@
 import type { EntityManager, Repository } from 'typeorm';
+import { runWithRequestContext } from '@repo/shared';
 import { OutboxEvent } from './outbox-event.entity';
 import { TypeOrmOutboxAdapter } from './typeorm-outbox.adapter';
 
@@ -50,6 +51,30 @@ describe('TypeOrmOutboxAdapter', () => {
     expect(save).toHaveBeenCalledTimes(1);
     expect(row.id).toBe('row-1');
     expect(defaultRepo.delete).not.toHaveBeenCalled();
+  });
+
+  it('stores the current request id as correlationId', async () => {
+    const { tx, create } = fakeTx(true);
+
+    await runWithRequestContext('req-42', () =>
+      adapter.add('social.post.liked', {}, tx),
+    );
+
+    expect(create).toHaveBeenCalledWith(
+      OutboxEvent,
+      expect.objectContaining({ correlationId: 'req-42' }),
+    );
+  });
+
+  it('stores a null correlationId outside a request context', async () => {
+    const { tx, create } = fakeTx(true);
+
+    await adapter.add('social.post.liked', {}, tx);
+
+    expect(create).toHaveBeenCalledWith(
+      OutboxEvent,
+      expect.objectContaining({ correlationId: null }),
+    );
   });
 
   it('wakes listeners only after a short delay when inside a transaction', async () => {

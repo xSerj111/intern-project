@@ -12,7 +12,7 @@ import {
   type FormEvent,
 } from 'react';
 
-import { uploadAsset } from '../../lib/api/assets';
+import { uploadFile } from '../../lib/api/uploads';
 import { createPost, postKeys, publishPost } from '../../lib/api/posts';
 import { getMyProfile, profileKeys } from '../../lib/api/profile';
 import { useAuth } from '../../lib/auth/auth-context';
@@ -104,7 +104,7 @@ function Composer({ onClose }: { onClose: () => void }) {
     (id: string, file: File) => {
       const controller = new AbortController();
       aborters.current.set(id, controller);
-      uploadAsset(file, {
+      uploadFile(file, 'post-image', {
         token: getAccessToken(),
         signal: controller.signal,
       })

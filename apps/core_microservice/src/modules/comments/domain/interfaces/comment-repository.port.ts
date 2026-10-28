@@ -11,8 +11,20 @@ export interface ICommentRepository extends RepositoryPort<
   Comment,
   CommentProps
 > {
-  /** Comments for a post, newest first, with the author profile joined. */
-  findByPost(postId: string): Promise<Comment[]>;
+  /**
+   * Root comments (`parentId IS NULL`) of a post, newest first
+   * (`createdAt DESC, id DESC`), author joined. Returns up to `limit + 1` rows:
+   * the extra row only signals that another page exists (no COUNT).
+   */
+  findRootPage(
+    postId: string,
+    page: { offset: number; limit: number },
+  ): Promise<Comment[]>;
+  /**
+   * Every reply under the given roots at any depth (`createdAt ASC, id ASC`),
+   * author joined. Empty `rootIds` returns `[]` without a query.
+   */
+  findRepliesOf(rootIds: string[]): Promise<Comment[]>;
   /**
    * Like stats for each requested comment (every id gets an entry);
    * `viewerId` is undefined for anonymous requests (`likedByMe: false`).

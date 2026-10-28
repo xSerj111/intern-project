@@ -415,7 +415,7 @@ describe('Notifications service (e2e)', () => {
 
       const second = await notifications.page(recipient, {
         limit: 2,
-        before: first.items[1].occurredAt,
+        before: { occurredAt: first.items[1].occurredAt },
       });
       expect(second.hasMore).toBe(true);
       expect(second.items.map((n) => n.occurredAt.getTime())).toEqual([
@@ -425,7 +425,7 @@ describe('Notifications service (e2e)', () => {
 
       const last = await notifications.page(recipient, {
         limit: 2,
-        before: second.items[1].occurredAt,
+        before: { occurredAt: second.items[1].occurredAt },
       });
       expect(last.hasMore).toBe(false);
       expect(last.items.map((n) => n.occurredAt.getTime())).toEqual([
@@ -439,6 +439,33 @@ describe('Notifications service (e2e)', () => {
       expect((await notifications.page(newUser(), { limit: 5 })).items).toEqual(
         [],
       );
+    });
+
+    it('page keysets on (occurredAt, id): rows sharing occurredAt are neither skipped nor repeated', async () => {
+      const recipient = newUser();
+      const tied = new Date(Date.now() - 3_000_000);
+      const older = new Date(tied.getTime() - 1000);
+      for (const occurredAt of [tied, tied, tied, tied, older]) {
+        await insertOne(
+          entityOf(followed(recipient, newUser(), { occurredAt })),
+        );
+      }
+      const expected = (await notifications.page(recipient, { limit: 50 }))
+        .items;
+      expect(expected).toHaveLength(5);
+
+      for (const limit of [1, 2]) {
+        const seen: string[] = [];
+        let before: { occurredAt: Date; id: string } | undefined;
+        for (;;) {
+          const page = await notifications.page(recipient, { limit, before });
+          seen.push(...page.items.map((n) => n.id));
+          if (!page.hasMore) break;
+          const last = page.items[page.items.length - 1];
+          before = { occurredAt: last.occurredAt, id: last.id };
+        }
+        expect(seen).toEqual(expected.map((n) => n.id));
+      }
     });
 
     it('unseenCount and markSeenUpTo are scoped to the recipient and to occurredAt <= upTo', async () => {
@@ -933,6 +960,68 @@ describe('Notifications service (e2e)', () => {
       expect(page2.body.items[0].occurredAt).toBe(aTimes[0].toISOString());
     });
 
+    it('GET /notifications pages ties via nextCursor without duplicates or skips', async () => {
+      const c = newUser();
+      const tied = new Date(Date.now() - 2_000_000);
+      const times = [tied, tied, tied, new Date(tied.getTime() - 1000), tied];
+      for (const occurredAt of times) {
+        await insertOne(entityOf(followed(c, newUser(), { occurredAt })));
+      }
+      const all = await http
+        .get('/notifications?limit=50')
+        .set(authed(c))
+        .expect(200);
+      expect(all.body.nextCursor).toBeNull();
+      const ids: string[] = all.body.items.map((i: any) => i.id);
+      expect(new Set(ids).size).toBe(5);
+      // occurredAt DESC, id DESC (Postgres orders uuids like lowercase hex strings)
+      const desc = (x: string, y: string) => (x < y ? 1 : x > y ? -1 : 0);
+      const sorted = [...all.body.items].sort(
+        (x: any, y: any) =>
+          desc(x.occurredAt, y.occurredAt) || desc(x.id, y.id),
+      );
+      expect(ids).toEqual(sorted.map((i: any) => i.id));
+
+      for (const limit of [1, 2]) {
+        const seen: string[] = [];
+        let before: string | undefined;
+        for (let guard = 0; guard < 10; guard++) {
+          const res = await http
+            .get('/notifications')
+            .query(before ? { limit, before } : { limit })
+            .set(authed(c))
+            .expect(200);
+          seen.push(...res.body.items.map((i: any) => i.id));
+          if (!res.body.hasMore) {
+            expect(res.body.nextCursor).toBeNull();
+            break;
+          }
+          expect(typeof res.body.nextCursor).toBe('string');
+          before = res.body.nextCursor;
+        }
+        expect(seen).toEqual(ids);
+      }
+    });
+
+    it('GET /notifications rejects a malformed cursor with 400', async () => {
+      for (const before of [
+        'nope',
+        Buffer.from('not json').toString('base64url'),
+        Buffer.from(JSON.stringify(['2026-01-01T00:00:00.000Z'])).toString(
+          'base64url',
+        ),
+        Buffer.from(
+          JSON.stringify(['2026-01-01T00:00:00.000Z', 'not-a-uuid']),
+        ).toString('base64url'),
+      ]) {
+        await http
+          .get('/notifications')
+          .query({ before })
+          .set(authed(a))
+          .expect(400);
+      }
+    });
+
     it('GET /notifications validates its query with 400', async () => {
       await http.get('/notifications?limit=51').set(authed(a)).expect(400);
       await http.get('/notifications?limit=0').set(authed(a)).expect(400);
@@ -940,6 +1029,15 @@ describe('Notifications service (e2e)', () => {
         .get('/notifications?before=yesterday')
         .set(authed(a))
         .expect(400);
+    });
+
+    it('GET /notifications accepts the maximum page size limit=50', async () => {
+      const res = await http
+        .get('/notifications?limit=50')
+        .set(authed(a))
+        .expect(200);
+      expect(res.body.items).toHaveLength(3);
+      expect(res.body.hasMore).toBe(false);
     });
 
     it('GET /notifications/unseen-count is scoped to the caller', async () => {

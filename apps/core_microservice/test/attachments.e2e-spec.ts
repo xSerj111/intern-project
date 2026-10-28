@@ -16,6 +16,9 @@ import {
   PDF_BYTES,
   PNG_BYTES,
   TXT_BYTES,
+  postToStorage,
+  presignedUpload,
+  requestUploadTicket,
   uniqueBytes,
 } from './helpers/attachment.helpers';
 import {
@@ -55,26 +58,19 @@ describe('Chat attachments, US5 (e2e)', () => {
 
   const authed = (s: Session) => ({ Authorization: `Bearer ${s.accessToken}` });
 
-  const upload = (
+  const uploadOk = (
     s: Session,
     bytes: Buffer,
     filename: string,
     contentType: string,
-  ) =>
-    http
-      .post('/chats/attachments')
-      .set(authed(s))
-      .attach('file', bytes, { filename, contentType });
+  ): Promise<Uploaded> =>
+    presignedUpload(http, s, 'chat-attachment', bytes, contentType, filename);
 
-  const uploadOk = async (
-    s: Session,
-    bytes: Buffer,
-    filename: string,
-    contentType: string,
-  ): Promise<Uploaded> => {
-    const res = await upload(s, bytes, filename, contentType).expect(201);
-    return res.body;
-  };
+  const ticket = (s: Session, body: Record<string, unknown>) =>
+    http
+      .post('/uploads')
+      .set(authed(s))
+      .send({ purpose: 'chat-attachment', ...body });
 
   const png = (s: Session, tag = randomUUID()) =>
     uploadOk(s, uniqueBytes(PNG_BYTES, tag), `${tag}.png`, 'image/png');
@@ -211,40 +207,54 @@ describe('Chat attachments, US5 (e2e)', () => {
 
     it('requires authentication', async () => {
       await http
-        .post('/chats/attachments')
-        .attach('file', PNG_BYTES, {
-          filename: 'pixel.png',
+        .post('/uploads')
+        .send({
+          purpose: 'chat-attachment',
           contentType: 'image/png',
+          size: PNG_BYTES.length,
         })
         .expect(401);
     });
 
-    it('rejects a missing file part with 400', async () => {
-      await http.post('/chats/attachments').set(authed(a)).expect(400);
+    it('rejects a ticket without a type or size with 400', async () => {
+      await ticket(a, {}).expect(400);
+      await ticket(a, { contentType: 'text/plain' }).expect(400);
     });
 
     it('rejects an 11 MB file as too large', async () => {
-      const big = Buffer.alloc(11 * 1024 * 1024, 'a');
-      const res = await upload(a, big, 'big.txt', 'text/plain');
-      expect([400, 413]).toContain(res.status);
-      expect(JSON.stringify(res.body)).toMatch(/too large|size|exceed/i);
+      const res = await ticket(a, {
+        contentType: 'text/plain',
+        size: 11 * 1024 * 1024,
+        fileName: 'big.txt',
+      });
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(res.body)).toMatch(/size|exceed|10485760/i);
     });
 
-    it('rejects an .exe renamed to .pdf, naming the detected type', async () => {
-      const res = await upload(a, EXE_BYTES, 'notes.pdf', 'application/pdf');
-      expect(res.status).toBe(400);
+    it('rejects an .exe renamed to .pdf on confirm', async () => {
+      const t = await requestUploadTicket(http, a, {
+        purpose: 'chat-attachment',
+        contentType: 'application/pdf',
+        size: EXE_BYTES.length,
+        fileName: 'notes.pdf',
+      });
+      expect((await postToStorage(t, EXE_BYTES)).status).toBe(204);
+      const res = await http
+        .post(`/uploads/${t.uploadId}/confirm`)
+        .set(authed(a))
+        .expect(400);
+      expect(res.body.error).toBe('UploadContentRejectedError');
       expect(JSON.stringify(res.body.message)).toContain(
-        'File type application/x-msdownload not allowed',
+        'File content is not an allowed type',
       );
     });
 
     it('rejects a type outside the allow-list', async () => {
-      const res = await upload(
-        a,
-        Buffer.from('<html></html>'),
-        'page.html',
-        'text/html',
-      );
+      const res = await ticket(a, {
+        contentType: 'text/html',
+        size: 13,
+        fileName: 'page.html',
+      });
       expect(res.status).toBe(400);
       expect(JSON.stringify(res.body.message)).toContain('not allowed');
     });

@@ -11,7 +11,7 @@ export class AuthUserRepository
   protected relations: string[] = [];
 
   constructor(dataSource: DataSource) {
-    // Inicjalizujemy bazową klasę ze współdzielonej paczki przekazując jej natywne repozytorium TypeORM
+    // Initialize the base class from the shared package, passing it the native TypeORM repository
     super(dataSource.getRepository(AuthUser));
   }
 

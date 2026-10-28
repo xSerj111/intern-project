@@ -8,6 +8,14 @@ import type { UserProfileProps } from '../../domain/interfaces/user-profile.prop
 import type { IUserProfileRepository } from '../../domain/interfaces/user-profile-repository.port';
 
 /**
+ * Escapes LIKE metacharacters so `value` is matched literally with
+ * `ESCAPE '\'`. The backslash is escaped first, then `%` and `_`.
+ */
+export function escapeLikePattern(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
+}
+
+/**
  * TypeORM adapter for the profile repository port. Inherits the full data-access
  * surface (find/save/softDelete/paginate/...) from {@link TypeormRepositoryBase}
  * and adds profile-specific finders.
@@ -45,12 +53,12 @@ export class UserProfileRepository
     limit: number,
     excludeAuthUserId: string,
   ): Promise<UserProfile[]> {
-    // Escape LIKE wildcards so the prefix is matched literally.
-    const escaped = prefix.replace(/[\\%_]/g, '\\$&');
+    // lower(username) LIKE lower(:q) || '%' matches the expression index
+    // IDX_user_profiles_username_lower (text_pattern_ops) for prefix scans.
     return this.repository
       .createQueryBuilder('p')
-      .where("p.username ILIKE :pattern ESCAPE '\\'", {
-        pattern: `${escaped}%`,
+      .where("lower(p.username) LIKE (lower(:q) || '%') ESCAPE '\\'", {
+        q: escapeLikePattern(prefix),
       })
       .andWhere('p.authUserId != :excludeAuthUserId', { excludeAuthUserId })
       .orderBy('p.username', 'ASC')

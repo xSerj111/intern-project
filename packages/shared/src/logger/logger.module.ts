@@ -5,8 +5,8 @@ import { WinstonLogger } from "./winston.logger";
 @Module({})
 export class LoggerModule {
   /**
-   * Tworzy dynamiczny moduł logera z określonym kontekstem.
-   * @param contextName Nazwa klasy/serwisu (np. 'PostsService')
+   * Creates a dynamic logger module with the given context.
+   * @param contextName Class/service name (e.g. 'PostsService')
    */
   
   static forFeature(contextName: string): DynamicModule {
@@ -19,7 +19,7 @@ export class LoggerModule {
           useFactory: () => new WinstonLogger(contextName),
         },
       ],
-      // Eksportujemy symbol, by serwisy mogły go wstrzyknąć
+      // Export the symbol so services can inject it
       exports: [LoggerKey],
     };
   }

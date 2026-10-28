@@ -6,23 +6,51 @@ import {
   UniqueConstraintViolationError,
   DatabaseQueryError,
   UnauthorizedError,
+  recordError,
+  type ErrorsCounterLike,
+  type WinstonLogger,
 } from '@repo/shared';
-import { NextFunction, Request, Response } from 'express';
+import { ErrorRequestHandler, NextFunction, Request, Response } from 'express';
 
-export function errorHandler(
-  err: Error,
-  req: Request,
-  res: Response,
-  // Express identifies error middleware by its 4-argument arity, so `next` must stay.
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- required for Express arity
-  next: NextFunction,
-): void {
-  if (!(err instanceof DomainError)) {
-    console.error('Unhandled Server Error:', err);
-    res.status(500).json({ statusCode: 500, message: 'Internal Server Error' });
-    return;
-  }
+export function createErrorHandler(
+  logger: WinstonLogger,
+  errorsCounter?: ErrorsCounterLike,
+): ErrorRequestHandler {
+  return (
+    err: Error,
+    req: Request,
+    res: Response,
+    // Express identifies error middleware by its 4-argument arity, so `next` must stay.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars -- required for Express arity
+    next: NextFunction,
+  ): void => {
+    // Every error response counts as errors_total{source="http",type=<class>}.
+    recordError(errorsCounter, 'http', err);
 
+    if (isMalformedJson(err)) {
+      // Client error: not logged, and the body is never echoed.
+      res.status(400).json({ message: 'Malformed JSON body' });
+      return;
+    }
+
+    if (!(err instanceof DomainError)) {
+      // Message + stack only: never the raw error object or the request body.
+      // Nest-style (message, stack, context) puts the stack in its own field.
+      logger.error(`Unhandled Server Error: ${err?.message}`, err?.stack, 'ErrorHandler');
+      res.status(500).json({ statusCode: 500, message: 'Internal Server Error' });
+      return;
+    }
+
+    sendDomainError(err, res);
+  };
+}
+
+/** body-parser (`express.json()`) tags unparseable bodies with this type. */
+function isMalformedJson(err: unknown): boolean {
+  return (err as { type?: unknown } | null)?.type === 'entity.parse.failed';
+}
+
+function sendDomainError(err: DomainError, res: Response): void {
   let status = 400;
   if (err instanceof EntityNotFoundError || err instanceof EntityByIdNotFoundError)
     status = 404;

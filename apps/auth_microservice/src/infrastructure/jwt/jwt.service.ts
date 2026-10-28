@@ -21,8 +21,8 @@ export class JwtService implements IJwtService {
   }
 
   verifyAccessToken(token: string): JwtPayload {
-    // Funkcja jwt.verify rzuci błędem (np. TokenExpiredError), jeśli token jest nieważny.
-    // Złapiemy ten błąd później w naszym middleware.
+    // jwt.verify throws (e.g. TokenExpiredError) if the token is invalid.
+    // The error is caught later, in our middleware.
     const decoded = jwt.verify(token, env.jwt.accessTokenSecret) as JwtPayload;
     return decoded;
   }
@@ -54,7 +54,7 @@ export class JwtService implements IJwtService {
 
   parseExpiryToSeconds(expiry: string): number {
     const match = expiry.match(/^(\d+)([smhd])$/);
-    if (!match) return 604800; // Domyślnie 7 dni w sekundach
+    if (!match) return 604800; // Defaults to 7 days, in seconds
 
     const value = parseInt(match[1], 10);
     const unit = match[2];

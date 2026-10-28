@@ -1,34 +1,11 @@
 import { Router } from 'express';
 import { UsersService } from '../services/users.service';
 import { validateBody } from '../middleware/validate.middleware';
-import { CreateUserDto } from '@repo/shared'; // Twój import DTO
+import { CreateUserDto } from '@repo/shared'; // DTO import
 
 export function createUsersRouter(usersService: UsersService): Router {
   const router = Router();
 
-  /**
-   * @openapi
-   * /users/register:
-   *   post:
-   *     summary: Register a new user
-   *     tags: [Users]
-   *     requestBody:
-   *       required: true
-   *       content:
-   *         application/json:
-   *           schema:
-   *             type: object
-   *             properties:
-   *               email:
-   *                 type: string
-   *               password:
-   *                 type: string
-   *     responses:
-   *       201:
-   *         description: User created successfully
-   *       409:
-   *         description: Email already in use
-   */
   router.post('/register', validateBody(CreateUserDto), async (req, res, next) => {
     try {
       const { email, password } = req.body as CreateUserDto;

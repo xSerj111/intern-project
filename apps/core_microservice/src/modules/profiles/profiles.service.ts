@@ -14,6 +14,7 @@ import {
   AVATAR_ASSET_PORT,
   type IAvatarAssetPort,
 } from './domain/interfaces/avatar-asset.port';
+import { ProfileSummaryCache } from '../../common/cache/profile-summary-cache';
 import { AvatarAssetNotFoundError } from './domain/errors/user-profile.errors';
 
 /** Max attempts to allocate a non-colliding username before giving up. */
@@ -33,6 +34,7 @@ export class ProfilesService {
     private readonly userProfileRepository: UserProfileRepository,
     @Inject(AVATAR_ASSET_PORT)
     private readonly avatarAssets: IAvatarAssetPort,
+    private readonly profileCache: ProfileSummaryCache,
   ) {}
 
   // Temporary: Used for testing until Event-Driven architecture is wired up
@@ -54,11 +56,18 @@ export class ProfilesService {
 
     try {
       const savedProfile = await this.userProfileRepository.save(profile);
+      await this.profileCache.invalidateProfile(authUserId);
       this.logger.debug('Profile created', {
         props: { profileId: savedProfile.id },
       });
       return savedProfile;
     } catch (error) {
+      // Concurrent first calls (lazy-init) race on the unique insert; the
+      // loser re-reads the winner's row instead of surfacing a 409.
+      const raced = await this.findAfterUniqueViolation(error, authUserId);
+      if (raced) {
+        return raced;
+      }
       if (!this.isUsernameCollision(error)) {
         throw error;
       }
@@ -75,6 +84,7 @@ export class ProfilesService {
         try {
           const savedProfile =
             await this.userProfileRepository.save(retryProfile);
+          await this.profileCache.invalidateProfile(authUserId);
           this.logger.debug('Profile created with de-duplicated handle', {
             props: {
               profileId: savedProfile.id,
@@ -83,6 +93,13 @@ export class ProfilesService {
           });
           return savedProfile;
         } catch (retryError) {
+          const raced = await this.findAfterUniqueViolation(
+            retryError,
+            authUserId,
+          );
+          if (raced) {
+            return raced;
+          }
           if (!this.isUsernameCollision(retryError)) {
             throw retryError;
           }
@@ -177,10 +194,25 @@ export class ProfilesService {
     }
 
     const updatedProfile = await this.userProfileRepository.save(profile);
+    await this.profileCache.invalidateProfile(updatedProfile.authUserId);
     this.logger.debug('Profile updated', {
       props: { profileId: updatedProfile.id },
     });
     return updatedProfile;
+  }
+
+  /**
+   * After a unique violation, returns the profile another request created for
+   * this auth user in the meantime (null when the violation is unrelated).
+   */
+  private async findAfterUniqueViolation(
+    error: unknown,
+    authUserId: string,
+  ): Promise<UserProfile | null> {
+    if (!(error instanceof UniqueConstraintViolationError)) {
+      return null;
+    }
+    return this.userProfileRepository.findByAuthUserId(authUserId);
   }
 
   private isUsernameCollision(error: unknown): boolean {

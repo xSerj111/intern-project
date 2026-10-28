@@ -12,13 +12,26 @@ import type {
 import type { Channel, ConsumeMessage, Options } from 'amqplib';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
+import type { Registry } from 'prom-client';
 import {
+  CORRELATION_ID_HEADER,
   EXCHANGE_NAME,
   NotificationCreatedPayload,
   NotificationSeenPayload,
   RoutingKeys,
+  createAmqpMetrics,
+  createErrorsCounter,
+  currentRequestId,
+  observeAmqpHandler,
+  recordAmqpOutcome,
+  recordError,
+  resolveRequestId,
+  runWithRequestContext,
+  type AmqpMetrics,
+  type ErrorsCounter,
 } from '@repo/shared';
 import { AMQP_CONNECTION } from '../../common/messaging/amqp-connection.provider';
+import { METRICS_REGISTRY } from '../../common/observability/metrics.tokens';
 import {
   CHAT_REALTIME_PORT,
   type IChatRealtimePort,
@@ -66,11 +79,17 @@ export class NotificationsRelayConsumer
   private readonly logger = new Logger(NotificationsRelayConsumer.name);
   private channel?: ChannelWrapper;
   private closing = false;
+  private readonly errors: ErrorsCounter;
+  private readonly metrics: AmqpMetrics;
 
   constructor(
     @Inject(AMQP_CONNECTION) private readonly connection: AmqpConnectionManager,
     @Inject(CHAT_REALTIME_PORT) private readonly realtime: IChatRealtimePort,
-  ) {}
+    @Inject(METRICS_REGISTRY) registry: Registry,
+  ) {
+    this.errors = createErrorsCounter(registry);
+    this.metrics = createAmqpMetrics(registry);
+  }
 
   onModuleInit(): void {
     const queue = resolveQueue();
@@ -102,9 +121,18 @@ export class NotificationsRelayConsumer
     this.channel = channel;
   }
 
+  /**
+   * Handles one delivery inside a request context whose id is the message's
+   * `x-correlation-id` header (or a fresh UUID), so its logs correlate.
+   */
   async onMessage(msg: ConsumeMessage): Promise<void> {
-    const outcome = await this.process(msg);
-    this.settle(msg, outcome);
+    const correlationId = resolveRequestId(
+      msg.properties.headers?.[CORRELATION_ID_HEADER],
+    );
+    await runWithRequestContext(correlationId, async () => {
+      const outcome = await this.process(msg);
+      this.settle(msg, outcome);
+    });
   }
 
   /** Acks or nacks unless the channel is going away; never throws. */
@@ -123,8 +151,11 @@ export class NotificationsRelayConsumer
 
   /**
    * Decides the fate of one delivery. Invalid payloads are dropped (ack) with
-   * a warning. A handler failure is requeued once; if the message is already
-   * a redelivery it is dropped with a warning instead.
+   * a warning. A handler failure counts in `errors_total{source="amqp"}` and
+   * is requeued once; if the message is already a redelivery it is dropped
+   * with a warning instead. Outcomes count in `amqp_messages_total` (there is
+   * no retry queue or DLQ here: every discard is `drop`, a requeue counts
+   * nothing until the redelivery is processed).
    */
   async process(msg: ConsumeMessage): Promise<RelayOutcome> {
     const routingKey = msg.fields.routingKey;
@@ -132,43 +163,76 @@ export class NotificationsRelayConsumer
       const payload = this.parseEnvelopePayload(msg);
       if (payload === undefined) {
         this.logger.warn(`Dropping malformed envelope for "${routingKey}"`);
-        return 'ack';
+        return this.dropped();
       }
 
-      switch (routingKey) {
-        case RoutingKeys.NOTIFICATION_CREATED: {
-          const event = plainToInstance(NotificationCreatedPayload, payload);
-          if (!(await this.isValid(event, routingKey))) return 'ack';
-          this.realtime.emitToUser(event.recipientId, 'notification:new', {
-            notification: event.notification,
-            unseenCount: event.unseenCount,
-          });
-          return 'ack';
-        }
-        case RoutingKeys.NOTIFICATION_SEEN: {
-          const event = plainToInstance(NotificationSeenPayload, payload);
-          if (!(await this.isValid(event, routingKey))) return 'ack';
-          this.realtime.emitToUser(event.userId, 'notifications:seen', {
-            unseenCount: 0,
-          });
-          return 'ack';
-        }
-        default:
-          this.logger.warn(`Dropping unknown routing key "${routingKey}"`);
-          return 'ack';
-      }
+      const handled = await this.timed(() =>
+        this.dispatch(routingKey, payload),
+      );
+      if (!handled) return this.dropped();
+      recordAmqpOutcome(this.metrics, RELAY_QUEUE, 'ack');
+      this.logger.debug(
+        `Relayed ${RELAY_QUEUE} message ${routingKey} (correlationId=${currentRequestId()})`,
+      );
+      return 'ack';
     } catch (err) {
+      recordError(this.errors, 'amqp', err);
       const reason = (err as Error).message;
       if (msg.fields.redelivered) {
         this.logger.warn(
           `Dropping "${routingKey}" after a failed retry: ${reason}`,
         );
-        return 'ack';
+        return this.dropped();
       }
       this.logger.warn(
         `Requeueing "${routingKey}" once after error: ${reason}`,
       );
       return 'requeue';
+    }
+  }
+
+  private dropped(): RelayOutcome {
+    recordAmqpOutcome(this.metrics, RELAY_QUEUE, 'drop');
+    return 'ack';
+  }
+
+  /** `amqp_handler_duration_seconds` covers validation and emit, not parsing. */
+  private async timed<T>(work: () => Promise<T>): Promise<T> {
+    const start = process.hrtime.bigint();
+    try {
+      return await work();
+    } finally {
+      const seconds = Number(process.hrtime.bigint() - start) / 1e9;
+      observeAmqpHandler(this.metrics, RELAY_QUEUE, seconds);
+    }
+  }
+
+  /** Emits to the recipient; false when the message was discarded. */
+  private async dispatch(
+    routingKey: string,
+    payload: object,
+  ): Promise<boolean> {
+    switch (routingKey) {
+      case RoutingKeys.NOTIFICATION_CREATED: {
+        const event = plainToInstance(NotificationCreatedPayload, payload);
+        if (!(await this.isValid(event, routingKey))) return false;
+        this.realtime.emitToUser(event.recipientId, 'notification:new', {
+          notification: event.notification,
+          unseenCount: event.unseenCount,
+        });
+        return true;
+      }
+      case RoutingKeys.NOTIFICATION_SEEN: {
+        const event = plainToInstance(NotificationSeenPayload, payload);
+        if (!(await this.isValid(event, routingKey))) return false;
+        this.realtime.emitToUser(event.userId, 'notifications:seen', {
+          unseenCount: 0,
+        });
+        return true;
+      }
+      default:
+        this.logger.warn(`Dropping unknown routing key "${routingKey}"`);
+        return false;
     }
   }
 

@@ -11,3 +11,5 @@ export * from './comments';
 export * from './likes';
 export * from './realtime';
 export * from './assets';
+export * from './uploads';
+export * from './observability';

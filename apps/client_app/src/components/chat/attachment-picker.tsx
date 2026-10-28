@@ -15,8 +15,8 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { ApiError } from '../../lib/api/client';
-import { uploadAttachment } from '../../lib/api/chats';
 import { getAccessToken } from '../../lib/auth/refresh';
+import { uploadFile } from '../../lib/api/uploads';
 import { IconButton } from '../ui/button';
 
 import styles from './attachment-picker.module.css';
@@ -71,7 +71,7 @@ export function useAttachmentUploads(chatId: string) {
     (key: string, file: File) => {
       const controller = new AbortController();
       controllers.current.set(key, controller);
-      uploadAttachment(file, {
+      uploadFile(file, 'chat-attachment', {
         token: getAccessToken() ?? undefined,
         signal: controller.signal,
         onProgress: (progress) => patch(key, { progress }),

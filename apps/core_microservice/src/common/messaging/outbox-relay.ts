@@ -7,8 +7,11 @@ import {
 } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import type { DataSource } from 'typeorm';
+import { Counter, Gauge } from 'prom-client';
+import type { Registry } from 'prom-client';
 import type { EventEnvelope } from '@repo/shared';
 import { AppConfigService } from '../../config/app-config.service';
+import { METRICS_REGISTRY } from '../observability/metrics.tokens';
 import { EVENT_BUS, EventRejectedError } from './event-bus.port';
 import type { EventBusPort } from './event-bus.port';
 import type { OutboxEvent } from './outbox-event.entity';
@@ -22,6 +25,8 @@ export const OUTBOX_BACKOFF_BASE_MS = 1_000;
 export const OUTBOX_BACKOFF_MAX_MS = 30_000;
 export const OUTBOX_PURGE_INTERVAL_MS = 60 * 60 * 1000;
 export const OUTBOX_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+/** How often the backlog gauges are refreshed in the background. */
+export const OUTBOX_STATS_INTERVAL_MS = 15_000;
 const LAST_ERROR_MAX_LENGTH = 1_000;
 
 /**
@@ -35,27 +40,89 @@ const LAST_ERROR_MAX_LENGTH = 1_000;
  * limit. Broker-side failures (broker down, nack, confirm timeout, closed
  * channel) only record `lastError` and back off, so an outage of any length
  * never dead-letters healthy rows.
+ *
+ * The backlog gauges are refreshed by a background query every 15 s and set
+ * from the live relay, so a `/metrics` scrape never touches the database.
  */
 @Injectable()
 export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(OutboxRelay.name);
   private pollTimer?: NodeJS.Timeout;
   private purgeTimer?: NodeJS.Timeout;
+  private statsTimer?: NodeJS.Timeout;
   private unsubscribe?: () => void;
   private inFlight: Promise<void> | null = null;
   private redrainRequested = false;
   private stopped = false;
   private consecutiveFailures = 0;
   private retryAt = 0;
+  private statsInFlight: Promise<void> | null = null;
+  private statsFailing = false;
   private readonly maxAttempts: number;
+  private readonly publishedTotal: Counter;
+  private readonly failedTotal: Counter;
+  private readonly deadTotal: Counter;
+  private readonly pendingGauge: Gauge;
+  private readonly oldestPendingGauge: Gauge;
 
   constructor(
     @InjectDataSource() private readonly dataSource: DataSource,
     @Inject(OUTBOX_PORT) private readonly outbox: IOutboxPort,
     @Inject(EVENT_BUS) private readonly eventBus: EventBusPort,
     config: AppConfigService,
+    @Inject(METRICS_REGISTRY) registry: Registry,
   ) {
     this.maxAttempts = config.outbox.maxAttempts;
+    this.publishedTotal = getOrCreate(
+      registry,
+      'outbox_published_total',
+      () =>
+        new Counter({
+          name: 'outbox_published_total',
+          help: 'Outbox events confirmed by the broker',
+          registers: [registry],
+        }),
+    );
+    this.failedTotal = getOrCreate(
+      registry,
+      'outbox_failed_total',
+      () =>
+        new Counter({
+          name: 'outbox_failed_total',
+          help: 'Outbox publish attempts that failed (including dead-lettered)',
+          registers: [registry],
+        }),
+    );
+    this.deadTotal = getOrCreate(
+      registry,
+      'outbox_dead_total',
+      () =>
+        new Counter({
+          name: 'outbox_dead_total',
+          help: 'Outbox events dead-lettered after reaching the max attempts',
+          registers: [registry],
+        }),
+    );
+    this.pendingGauge = getOrCreate(
+      registry,
+      'outbox_pending',
+      () =>
+        new Gauge({
+          name: 'outbox_pending',
+          help: 'Outbox events neither published nor dead-lettered',
+          registers: [registry],
+        }),
+    );
+    this.oldestPendingGauge = getOrCreate(
+      registry,
+      'outbox_oldest_pending_seconds',
+      () =>
+        new Gauge({
+          name: 'outbox_oldest_pending_seconds',
+          help: 'Age of the oldest pending outbox event (0 when none)',
+          registers: [registry],
+        }),
+    );
   }
 
   onModuleInit(): void {
@@ -68,6 +135,12 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
       OUTBOX_PURGE_INTERVAL_MS,
     );
     this.purgeTimer.unref();
+    this.statsTimer = setInterval(
+      () => this.refreshStats(),
+      OUTBOX_STATS_INTERVAL_MS,
+    );
+    this.statsTimer.unref();
+    this.refreshStats();
     this.logger.log('Outbox relay started');
     this.trigger();
   }
@@ -75,12 +148,14 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
   /**
    * Called before the global MessagingModule closes the AMQP connection (see
    * messaging.module.ts), so the in-flight publish can still be confirmed.
+   * A running stats query is not awaited: its result is dropped once stopped.
    */
   async onModuleDestroy(): Promise<void> {
     this.stopped = true;
     clearInterval(this.pollTimer);
     clearInterval(this.purgeTimer);
-    this.pollTimer = this.purgeTimer = undefined;
+    clearInterval(this.statsTimer);
+    this.pollTimer = this.purgeTimer = this.statsTimer = undefined;
     this.unsubscribe?.();
     this.unsubscribe = undefined;
     await this.inFlight;
@@ -96,6 +171,34 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
       this.inFlight = null;
     });
     return this.inFlight;
+  }
+
+  /**
+   * Runs on the stats timer: one aggregate query, skipped while the previous
+   * one is still running. The gauges keep their last value on error, which is
+   * warned once per failure streak.
+   */
+  private refreshStats(): void {
+    if (this.stopped || this.statsInFlight) return;
+    this.statsInFlight = this.queryStats().finally(() => {
+      this.statsInFlight = null;
+    });
+  }
+
+  private async queryStats(): Promise<void> {
+    try {
+      const stats = await this.outbox.pendingStats();
+      if (this.stopped) return;
+      this.pendingGauge.set(stats.count);
+      this.oldestPendingGauge.set(stats.count > 0 ? stats.oldestSeconds : 0);
+      this.statsFailing = false;
+    } catch (err) {
+      if (this.stopped) return;
+      if (!this.statsFailing) {
+        this.logger.warn(`Outbox stats refresh failed: ${errorMessage(err)}`);
+      }
+      this.statsFailing = true;
+    }
   }
 
   private trigger(): void {
@@ -131,14 +234,18 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
       for (const row of rows) {
         if (this.stopped) break;
         try {
-          await this.eventBus.publish(toEnvelope(row));
+          await this.eventBus.publish(toEnvelope(row), {
+            correlationId: row.correlationId ?? undefined,
+          });
         } catch (err) {
           const message = errorMessage(err).slice(0, LAST_ERROR_MAX_LENGTH);
+          this.failedTotal.inc();
           if (!(err instanceof EventRejectedError)) {
             // Broker-side: transient, never counts toward dead-lettering.
             await this.outbox.recordError(row.id, message, tx);
           } else if (row.attempts + 1 >= this.maxAttempts) {
             await this.outbox.markDead(row.id, message, tx);
+            this.deadTotal.inc();
             this.logger.error(
               `Outbox event ${row.routingKey} ${row.id} dead-lettered after ${row.attempts + 1} failed attempts: ${message}`,
             );
@@ -152,6 +259,7 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
           return -1;
         }
         await this.outbox.markPublished(row.id, tx);
+        this.publishedTotal.inc();
       }
       return rows.length;
     });
@@ -179,6 +287,14 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(`Outbox purge failed: ${errorMessage(err)}`);
     }
   }
+}
+
+function getOrCreate<M extends Counter | Gauge>(
+  registry: Registry,
+  name: string,
+  create: () => M,
+): M {
+  return (registry.getSingleMetric(name) as M | undefined) ?? create();
 }
 
 function toEnvelope(row: OutboxEvent): EventEnvelope<object> {

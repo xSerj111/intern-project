@@ -13,7 +13,9 @@
     "dev": "nest start --watch --preserveWatchOutput",
     "start:debug": "nest start --debug --watch",
     "start:prod": "node dist/main",
+    "migrate:prod": "node dist/migrate.js",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
+    "lint:check": "eslint \"{src,apps,libs,test}/**/*.ts\"",
     "test": "jest",
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
@@ -21,7 +23,9 @@
     "test:e2e": "jest --config ./test/jest-e2e.json",
     "migration:generate": "npx typeorm-ts-node-commonjs migration:generate -d ./data-source.ts",
     "migration:run": "npx typeorm-ts-node-commonjs migration:run -d ./data-source.ts",
-    "migration:revert": "npx typeorm-ts-node-commonjs migration:revert -d ./data-source.ts"
+    "migration:revert": "npx typeorm-ts-node-commonjs migration:revert -d ./data-source.ts",
+    "db:migrate": "npm run migration:run",
+    "type-check": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",
@@ -31,11 +35,13 @@
     "@nestjs/platform-express": "^11.0.1",
     "@nestjs/swagger": "^11.4.4",
     "@nestjs/typeorm": "^11.0.2",
+    "@repo/contracts": "*",
     "@repo/shared": "*",
     "amqp-connection-manager": "^5.0.0",
     "amqplib": "^2.2.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
+    "dotenv": "^17.4.2",
     "ioredis": "^5.11.1",
     "jsonwebtoken": "^9.0.3",
     "nodemailer": "^10.1.0",
@@ -83,9 +89,29 @@
       "^.+\\.(t|j)s$": "ts-jest"
     },
     "collectCoverageFrom": [
-      "**/*.(t|j)s"
+      "**/*.(t|j)s",
+      "!main.ts",
+      "!migrate.ts",
+      "!**/*.module.ts",
+      "!migrations/**",
+      "!**/index.ts",
+      "!**/*.d.ts"
     ],
     "coverageDirectory": "../coverage",
+    "coverageReporters": [
+      "text-summary",
+      "lcov",
+      "json-summary"
+    ],
+    "coverageThreshold": {
+      "global": {
+        "lines": 70,
+        "branches": 60
+      }
+    },
+    "setupFiles": [
+      "<rootDir>/../test/setup-env.ts"
+    ],
     "testEnvironment": "node"
   }
 }

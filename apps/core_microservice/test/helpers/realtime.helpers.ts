@@ -14,6 +14,31 @@ export interface Session {
 export const sleep = (ms: number) =>
   new Promise<void>((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Retries an idempotent setup step that can fail transiently (a DB or auth
+ * hiccup right after an infra pause leaves the first calls erroring or stalled).
+ * Use for suite setup only, never around the behaviour under test.
+ */
+export async function retryTransient<T>(
+  fn: () => Promise<T>,
+  attempts = 5,
+  delayMs = 500,
+): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      if (attempt < attempts) await sleep(delayMs * attempt);
+    }
+  }
+  throw lastError;
+}
+
+/** Thrown for 5xx / network failures so `retryTransient` can retry them. */
+class TransientAuthError extends Error {}
+
 async function postAuth(
   path: string,
   body: unknown,
@@ -26,6 +51,7 @@ async function postAuth(
       ...(token ? { authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15000),
   });
   const text = await res.text();
   let json: unknown = text;
@@ -46,9 +72,13 @@ const subOf = (token: string): string =>
 
 /** Logs an existing user in through auth (each call is a new session). */
 export async function login(email: string): Promise<Session> {
-  const res = await postAuth('/auth/login', {
-    email,
-    password: TEST_PASSWORD,
+  const res = await retryTransient(async () => {
+    const r = await postAuth('/auth/login', {
+      email,
+      password: TEST_PASSWORD,
+    });
+    if (r.status >= 500) throw new TransientAuthError(`login ${r.status}`);
+    return r;
   });
   if (res.status !== 200) {
     throw new Error(`login failed: ${res.status} ${JSON.stringify(res.json)}`);
@@ -69,11 +99,17 @@ export const registeredUserIds: string[] = [];
 /** Registers a throwaway user through auth, then signs in. */
 export async function registerAndLogin(label: string): Promise<Session> {
   const email = `e2e-${label}+${Date.now()}-${Math.random().toString(36).slice(2, 8)}@test.local`;
-  const reg = await postAuth('/users/register', {
-    email,
-    password: TEST_PASSWORD,
+  // A 5xx may still have created the user; the retry reuses the same email and
+  // treats the resulting 409 as "already registered" (login then proves it).
+  const reg = await retryTransient(async () => {
+    const r = await postAuth('/users/register', {
+      email,
+      password: TEST_PASSWORD,
+    });
+    if (r.status >= 500) throw new TransientAuthError(`register ${r.status}`);
+    return r;
   });
-  if (reg.status >= 300) {
+  if (reg.status >= 300 && reg.status !== 409) {
     throw new Error(
       `register failed: ${reg.status} ${JSON.stringify(reg.json)}`,
     );
@@ -152,6 +188,17 @@ export function connectSocket(
       resolve({ ok: false, error: err.message, ...ts });
     });
   });
+}
+
+/**
+ * Blocks until the database answers a trivial query. Run first in `beforeAll`
+ * so a stale or stalled pool connection surfaces here, not as dozens of
+ * failing tests.
+ */
+export async function warmUpDb(db: {
+  query: (sql: string) => Promise<unknown>;
+}): Promise<void> {
+  await retryTransient(() => db.query('SELECT 1'));
 }
 
 /** Polls `predicate` until it holds or `timeoutMs` passes. */

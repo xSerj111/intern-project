@@ -1,5 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { LoggerKey, RoutingKeys } from '@repo/shared';
+import { QueryFailedError } from 'typeorm';
+import {
+  DatabaseQueryError,
+  LoggerKey,
+  PostgresErrorCode,
+  RoutingKeys,
+  UniqueConstraintViolationError,
+} from '@repo/shared';
+import { ProfileSummaryCache } from '../../common/cache/profile-summary-cache';
 import { OUTBOX_PORT } from '../../common/messaging/outbox.port';
 import { USER_DIRECTORY_PORT } from '../profiles/domain/interfaces/user-directory.port';
 import { Follow } from './domain/entities/follow.entity';
@@ -13,6 +21,10 @@ describe('FollowsService', () => {
   let service: FollowsService;
   let repo: {
     findByFollowerAndFollowing: jest.Mock;
+    findFollowers: jest.Mock;
+    findFollowing: jest.Mock;
+    findFollowedAmong: jest.Mock;
+    delete: jest.Mock;
     save: jest.Mock;
     runInTransaction: jest.Mock;
   };
@@ -20,6 +32,8 @@ describe('FollowsService', () => {
   let txSave: jest.Mock;
   let outbox: { add: jest.Mock };
   let directory: { getUsers: jest.Mock };
+  let cache: { invalidateCounts: jest.Mock };
+  let logger: { debug: jest.Mock; warn: jest.Mock; error: jest.Mock };
 
   beforeEach(async () => {
     txSave = jest.fn((f: Follow) =>
@@ -27,11 +41,17 @@ describe('FollowsService', () => {
     );
     repo = {
       findByFollowerAndFollowing: jest.fn(() => Promise.resolve(null)),
+      findFollowers: jest.fn(() => Promise.resolve([])),
+      findFollowing: jest.fn(() => Promise.resolve([])),
+      findFollowedAmong: jest.fn(() => Promise.resolve(new Set<string>())),
+      delete: jest.fn(() => Promise.resolve()),
       save: txSave,
       runInTransaction: jest.fn((work: (m: typeof tx) => Promise<unknown>) =>
         work(tx),
       ),
     };
+    logger = { debug: jest.fn(), warn: jest.fn(), error: jest.fn() };
+    cache = { invalidateCounts: jest.fn(() => Promise.resolve()) };
     outbox = { add: jest.fn(() => Promise.resolve({})) };
     directory = {
       getUsers: jest.fn((ids: string[]) =>
@@ -54,13 +74,11 @@ describe('FollowsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         FollowsService,
-        {
-          provide: LoggerKey,
-          useValue: { debug: jest.fn(), warn: jest.fn(), error: jest.fn() },
-        },
+        { provide: LoggerKey, useValue: logger },
         { provide: FollowRepositoryKey, useValue: repo },
         { provide: OUTBOX_PORT, useValue: outbox },
         { provide: USER_DIRECTORY_PORT, useValue: directory },
+        { provide: ProfileSummaryCache, useValue: cache },
       ],
     }).compile();
 
@@ -96,6 +114,48 @@ describe('FollowsService', () => {
     expect(outbox.add).not.toHaveBeenCalled();
   });
 
+  it('invalidates both users counts after the follow transaction resolves', async () => {
+    let txDone = false;
+    repo.runInTransaction.mockImplementationOnce(
+      async (work: (m: typeof tx) => Promise<unknown>) => {
+        const result = await work(tx);
+        txDone = true;
+        return result;
+      },
+    );
+    cache.invalidateCounts.mockImplementationOnce(() => {
+      expect(txDone).toBe(true);
+      return Promise.resolve();
+    });
+
+    await service.follow(FOLLOWER, FOLLOWED);
+
+    expect(cache.invalidateCounts).toHaveBeenCalledWith(FOLLOWER, FOLLOWED);
+  });
+
+  it('does not invalidate when the follow transaction fails', async () => {
+    repo.runInTransaction.mockRejectedValueOnce(new Error('boom'));
+
+    await expect(service.follow(FOLLOWER, FOLLOWED)).rejects.toBeDefined();
+    expect(cache.invalidateCounts).not.toHaveBeenCalled();
+  });
+
+  it('invalidates both users counts after an unfollow', async () => {
+    repo.findByFollowerAndFollowing.mockResolvedValueOnce(
+      Object.assign(
+        Follow.create({ followerId: FOLLOWER, followingId: FOLLOWED }),
+        {
+          id: 'f-1',
+        },
+      ),
+    );
+
+    await service.unfollow(FOLLOWER, FOLLOWED);
+
+    expect(repo.delete).toHaveBeenCalledTimes(1);
+    expect(cache.invalidateCounts).toHaveBeenCalledWith(FOLLOWER, FOLLOWED);
+  });
+
   it('saves a self-follow without an event', async () => {
     await service.follow(FOLLOWER, FOLLOWER);
 
@@ -110,5 +170,158 @@ describe('FollowsService', () => {
 
     expect(txSave).toHaveBeenCalledTimes(1);
     expect(outbox.add).not.toHaveBeenCalled();
+  });
+
+  it('returns the existing follow without invalidating the cache', async () => {
+    const existing = Follow.create({
+      followerId: FOLLOWER,
+      followingId: FOLLOWED,
+    });
+    repo.findByFollowerAndFollowing.mockResolvedValueOnce(existing);
+
+    await expect(service.follow(FOLLOWER, FOLLOWED)).resolves.toBe(existing);
+    expect(cache.invalidateCounts).not.toHaveBeenCalled();
+  });
+
+  it('does nothing when unfollowing a user that is not followed', async () => {
+    await service.unfollow(FOLLOWER, FOLLOWED);
+
+    expect(repo.delete).not.toHaveBeenCalled();
+    expect(cache.invalidateCounts).not.toHaveBeenCalled();
+  });
+
+  describe('transaction failures', () => {
+    const queryFailed = (code: string, detail?: string) =>
+      new QueryFailedError('INSERT', [], {
+        code,
+        detail,
+      } as unknown as Error);
+
+    it('maps a unique violation (concurrent follow) to UniqueConstraintViolationError', async () => {
+      repo.runInTransaction.mockRejectedValueOnce(
+        queryFailed(PostgresErrorCode.UniqueViolation, 'Key already exists'),
+      );
+
+      await expect(service.follow(FOLLOWER, FOLLOWED)).rejects.toThrow(
+        UniqueConstraintViolationError,
+      );
+    });
+
+    it('maps a unique violation without detail to UniqueConstraintViolationError', async () => {
+      repo.runInTransaction.mockRejectedValueOnce(
+        queryFailed(PostgresErrorCode.UniqueViolation),
+      );
+
+      await expect(service.follow(FOLLOWER, FOLLOWED)).rejects.toThrow(
+        UniqueConstraintViolationError,
+      );
+    });
+
+    it('maps other database errors to DatabaseQueryError and logs the message', async () => {
+      repo.runInTransaction.mockRejectedValueOnce(
+        queryFailed(PostgresErrorCode.ForeignKeyViolation),
+      );
+
+      await expect(service.follow(FOLLOWER, FOLLOWED)).rejects.toThrow(
+        DatabaseQueryError,
+      );
+      expect(logger.error).toHaveBeenCalledTimes(1);
+    });
+
+    it('maps a non-Error rejection to DatabaseQueryError', async () => {
+      repo.runInTransaction.mockRejectedValueOnce('boom');
+
+      await expect(service.follow(FOLLOWER, FOLLOWED)).rejects.toThrow(
+        DatabaseQueryError,
+      );
+      expect(logger.error).toHaveBeenCalledWith('boom');
+    });
+
+    it('rethrows a domain error untouched', async () => {
+      const error = new DatabaseQueryError();
+      repo.runInTransaction.mockRejectedValueOnce(error);
+
+      await expect(service.follow(FOLLOWER, FOLLOWED)).rejects.toBe(error);
+      expect(logger.error).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('list pages', () => {
+    const edge = (n: number, followerId: string, followingId: string) =>
+      Object.assign(Follow.create({ followerId, followingId }), {
+        id: `f-${n}`,
+        createdAt: new Date('2026-01-01T00:00:00Z'),
+      });
+
+    it('asks for offset (page-1)*limit and drops the extra row into hasMore', async () => {
+      repo.findFollowers.mockResolvedValueOnce([
+        edge(1, 'a', FOLLOWED),
+        edge(2, 'b', FOLLOWED),
+        edge(3, 'c', FOLLOWED),
+      ]);
+
+      const page = await service.getFollowers(
+        FOLLOWED,
+        { page: 3, limit: 2 },
+        FOLLOWER,
+      );
+
+      expect(repo.findFollowers).toHaveBeenCalledWith(FOLLOWED, {
+        offset: 4,
+        limit: 2,
+      });
+      expect(page).toMatchObject({ page: 3, limit: 2, hasMore: true });
+      expect(page.items.map((i) => i.id)).toEqual(['f-1', 'f-2']);
+    });
+
+    it('reports hasMore false on a short page', async () => {
+      repo.findFollowing.mockResolvedValueOnce([edge(1, FOLLOWED, 'x')]);
+
+      const page = await service.getFollowing(FOLLOWED, {}, FOLLOWER);
+
+      expect(repo.findFollowing).toHaveBeenCalledWith(FOLLOWED, {
+        offset: 0,
+        limit: 50,
+      });
+      expect(page.hasMore).toBe(false);
+    });
+
+    it('marks followers the viewer follows, with one batched lookup', async () => {
+      repo.findFollowers.mockResolvedValueOnce([
+        edge(1, 'a', FOLLOWED),
+        edge(2, 'b', FOLLOWED),
+      ]);
+      repo.findFollowedAmong.mockResolvedValueOnce(new Set(['b']));
+
+      const page = await service.getFollowers(FOLLOWED, {}, FOLLOWER);
+
+      expect(repo.findFollowedAmong).toHaveBeenCalledTimes(1);
+      expect(repo.findFollowedAmong).toHaveBeenCalledWith(FOLLOWER, ['a', 'b']);
+      expect(page.items.map((i) => i.isFollowedByMe)).toEqual([false, true]);
+    });
+
+    it('checks the followed side for the following list', async () => {
+      repo.findFollowing.mockResolvedValueOnce([edge(1, FOLLOWED, 'x')]);
+      repo.findFollowedAmong.mockResolvedValueOnce(new Set(['x']));
+
+      const page = await service.getFollowing(FOLLOWED, {}, FOLLOWER);
+
+      expect(repo.findFollowedAmong).toHaveBeenCalledWith(FOLLOWER, ['x']);
+      expect(page.items[0].isFollowedByMe).toBe(true);
+    });
+
+    it('skips the lookup and returns false for anonymous viewers', async () => {
+      repo.findFollowers.mockResolvedValueOnce([edge(1, 'a', FOLLOWED)]);
+
+      const page = await service.getFollowers(FOLLOWED, {});
+
+      expect(repo.findFollowedAmong).not.toHaveBeenCalled();
+      expect(page.items[0]).toMatchObject({
+        followerId: 'a',
+        followingId: FOLLOWED,
+        createdAt: '2026-01-01T00:00:00.000Z',
+        isFollowedByMe: false,
+      });
+    });
   });
 });

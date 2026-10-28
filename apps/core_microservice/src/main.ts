@@ -1,59 +1,99 @@
 import { ValidationPipe } from '@nestjs/common';
-import { NestFactory } from '@nestjs/core';
+import { BaseExceptionFilter, NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
-import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import { DomainExceptionFilter, WinstonLogger } from '@repo/shared';
+import { DataSource } from 'typeorm';
+import {
+  AllExceptionsFilter,
+  CORS_ALLOWED_HEADERS,
+  CORS_EXPOSED_HEADERS,
+  WinstonLogger,
+  accessLogMiddleware,
+  createErrorsCounter,
+  httpMetricsMiddleware,
+  registerDbPoolGauge,
+  requestIdMiddleware,
+} from '@repo/shared';
+import type { Registry } from 'prom-client';
+import { METRICS_REGISTRY } from './common/observability/metrics.tokens';
 import { AppConfigService } from './config/app-config.service';
+import { setupSwagger } from './swagger';
 import 'reflect-metadata';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 
-async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
-    logger: new WinstonLogger('CoreSystem'),
-  });
+interface PgPoolStats {
+  totalCount: number;
+  idleCount: number;
+  waitingCount: number;
+}
 
-  // 1. HELMET - Ustawia bezpieczne nagłówki HTTP (np. ukrywa X-Powered-By)
+async function bootstrap() {
+  const logger = new WinstonLogger('CoreSystem');
+  const app = await NestFactory.create(AppModule, { logger });
+
+  // 0. REQUEST ID + ACCESS LOG - first, so every later log line carries the id
+  app.use(requestIdMiddleware());
+  app.use(accessLogMiddleware(new WinstonLogger('Http')));
+
+  // 1. HELMET - sets secure HTTP headers (e.g. hides X-Powered-By)
   app.use(helmet());
 
-  // 2. COOKIE PARSER - Umożliwia odczytywanie refresh_token z ciasteczek
+  // 1b. HTTP METRICS - before routing; the route is only read on `finish`
+  const registry = app.get<Registry>(METRICS_REGISTRY);
+  app.use(httpMetricsMiddleware(registry));
+
+  // 2. COOKIE PARSER - makes the refresh_token cookie readable
   app.use(cookieParser());
 
-  // 3. CORS - Konfiguracja pozwalająca frontendowi na dostęp
-  app.enableCors({
-    origin: process.env.CLIENT_URL || 'http://localhost:3000',
+  const appConfig = app.get(AppConfigService);
 
-    // Pozwala na przesyłanie ciasteczek między domenami
+  // 3. CORS - lets the frontend access the API
+  app.enableCors({
+    origin: appConfig.clientUrl,
+
+    // Allows cookies to be sent across origins
     credentials: true,
 
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+    // The request id header is allowed and exposed, so the client can quote it in error reports.
+    allowedHeaders: [...CORS_ALLOWED_HEADERS],
+    exposedHeaders: [...CORS_EXPOSED_HEADERS],
   });
 
-  const appConfig = app.get(AppConfigService);
+  appConfig.assertSafeForEnvironment();
+  appConfig.assertInternalApiToken();
+
+  // Pool gauge is read on each scrape; `master` is the pg Pool of the TypeORM driver.
+  const dataSource = app.get(DataSource);
+  registerDbPoolGauge(registry, () => {
+    const pool = (dataSource.driver as { master?: PgPoolStats }).master;
+    return (
+      pool && {
+        totalCount: pool.totalCount,
+        idleCount: pool.idleCount,
+        waitingCount: pool.waitingCount,
+      }
+    );
+  });
 
   // Validate & sanitize all incoming DTOs (strips unknown props, coerces types).
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 
-  // Map framework-agnostic domain errors (entities/repositories) to HTTP responses.
-  app.useGlobalFilters(new DomainExceptionFilter());
+  // Map framework-agnostic domain errors (entities/repositories) to HTTP responses;
+  // everything else keeps Nest's default response. Every error response is counted.
+  app.useGlobalFilters(
+    new AllExceptionsFilter(
+      new BaseExceptionFilter(app.getHttpAdapter()),
+      createErrorsCounter(registry),
+    ),
+  );
 
-  const config = new DocumentBuilder()
-    .setTitle('Innogram Core API')
-    .setDescription('The social graph, content, and interactions layer')
-    .setVersion('1.0')
-    .addTag('Profiles')
-    .addTag('Posts')
-    .addTag('Comments')
-    .build();
-
-  const document = SwaggerModule.createDocument(app, config);
-  // This hosts the UI at http://localhost:3002/api
-  SwaggerModule.setup('api', app, document);
+  // Swagger UI at /api (http://localhost:3001/api); off by default in production.
+  if (appConfig.swaggerEnabled) setupSwagger(app);
 
   app.enableShutdownHooks();
   await app.listen(appConfig.port);
-  console.log(`Core microservice runs on ${appConfig.port}`);
+  logger.info(`Core microservice runs on ${appConfig.port}`);
 }
 void bootstrap();

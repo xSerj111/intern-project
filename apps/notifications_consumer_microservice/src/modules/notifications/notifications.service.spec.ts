@@ -2,6 +2,8 @@ import { RoutingKeys } from '@repo/shared';
 import { Notification } from './domain/entities/notification.entity';
 import type { IEventBus } from './domain/interfaces/event-bus.port';
 import type { INotificationRepository } from './domain/interfaces/notification-repository.port';
+import { InvalidNotificationCursorError } from './domain/errors/notification.errors';
+import { encodeNotificationCursor } from './dto/notification-cursor';
 import { NotificationsService } from './notifications.service';
 
 const USER = '11111111-1111-4111-8111-111111111111';
@@ -57,6 +59,9 @@ describe('NotificationsService', () => {
       });
       expect(result.hasMore).toBe(true);
       expect(result.unseenCount).toBe(3);
+      expect(result.nextCursor).toBe(
+        encodeNotificationCursor(makeNotification()),
+      );
       expect(result.items[0]).toMatchObject({
         kind: 'POST_LIKED',
         seen: false,
@@ -64,16 +69,45 @@ describe('NotificationsService', () => {
       });
     });
 
-    it('parses the before cursor into a Date', async () => {
+    it('has no nextCursor on the last page', async () => {
+      repo.page.mockResolvedValue({
+        items: [makeNotification()],
+        hasMore: false,
+      });
+
+      expect((await service.list(USER, {})).nextCursor).toBeNull();
+    });
+
+    it('decodes the opaque cursor into occurredAt and id', async () => {
+      const n = makeNotification();
+      await service.list(USER, {
+        before: encodeNotificationCursor(n),
+        limit: 5,
+      });
+
+      expect(repo.page).toHaveBeenCalledWith(USER, {
+        before: { occurredAt: n.occurredAt, id: n.id },
+        limit: 5,
+      });
+    });
+
+    it('still accepts a bare ISO occurredAt as before (no id)', async () => {
       await service.list(USER, {
         before: '2026-01-01T10:00:00.000Z',
         limit: 5,
       });
 
       expect(repo.page).toHaveBeenCalledWith(USER, {
-        before: new Date('2026-01-01T10:00:00.000Z'),
+        before: { occurredAt: new Date('2026-01-01T10:00:00.000Z') },
         limit: 5,
       });
+    });
+
+    it('rejects a malformed cursor with a DomainError', async () => {
+      await expect(service.list(USER, { before: 'nope' })).rejects.toThrow(
+        InvalidNotificationCursorError,
+      );
+      expect(repo.page).not.toHaveBeenCalled();
     });
   });
 

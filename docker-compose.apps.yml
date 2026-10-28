@@ -1,0 +1,139 @@
+# Application overlay for docker-compose.yml: runs the four apps as containers.
+#   npm run docker:apps:up     (compose -f docker-compose.yml -f docker-compose.apps.yml
+#                               --env-file .env.production up -d --build)
+# .env.production (copy from .env.production.example) feeds both the container
+# environments and the interpolation of the infra credentials in docker-compose.yml.
+# The migrate jobs run once per `up`; the apps start only after all three exit 0.
+
+x-backend: &backend
+  env_file: .env.production
+  restart: unless-stopped
+  networks:
+    - innogram-network
+
+x-infra-ready: &infra-ready
+  postgres:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+  redis-cache:
+    condition: service_healthy
+  rabbitmq:
+    condition: service_healthy
+  mailpit:
+    condition: service_healthy
+  seaweedfs-setup:
+    condition: service_completed_successfully
+
+x-migrations-done: &migrations-done
+  auth-migrate:
+    condition: service_completed_successfully
+  core-migrate:
+    condition: service_completed_successfully
+  notifications-migrate:
+    condition: service_completed_successfully
+
+services:
+  auth-migrate:
+    <<: *backend
+    image: innogram-auth:local
+    build:
+      context: .
+      dockerfile: apps/auth_microservice/Dockerfile
+    restart: "no"
+    command: ["node", "dist/migrate.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  core-migrate:
+    <<: *backend
+    image: innogram-core:local
+    build:
+      context: .
+      dockerfile: apps/core_microservice/Dockerfile
+    restart: "no"
+    command: ["node", "dist/migrate.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  notifications-migrate:
+    <<: *backend
+    image: innogram-notifications:local
+    build:
+      context: .
+      dockerfile: apps/notifications_consumer_microservice/Dockerfile
+    restart: "no"
+    command: ["node", "dist/migrate.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  auth:
+    <<: *backend
+    image: innogram-auth:local
+    build:
+      context: .
+      dockerfile: apps/auth_microservice/Dockerfile
+    environment:
+      # The internal listener (3012) must accept other containers; it is never published.
+      AUTH_INTERNAL_HOST: 0.0.0.0
+    ports:
+      - "3002:3002"
+    depends_on:
+      <<: [*infra-ready, *migrations-done]
+
+  core:
+    <<: *backend
+    image: innogram-core:local
+    build:
+      context: .
+      dockerfile: apps/core_microservice/Dockerfile
+    ports:
+      - "3001:3001"
+    depends_on:
+      <<: [*infra-ready, *migrations-done]
+
+  notifications:
+    <<: *backend
+    image: innogram-notifications:local
+    build:
+      context: .
+      dockerfile: apps/notifications_consumer_microservice/Dockerfile
+    ports:
+      - "3003:3003"
+    depends_on:
+      <<: [*infra-ready, *migrations-done]
+      auth:
+        condition: service_healthy
+
+  # No env_file: the client needs no secrets. Its service URLs are baked into the
+  # bundle at build time and must be reachable from the browser (host ports).
+  client:
+    image: innogram-client:local
+    build:
+      context: .
+      dockerfile: apps/client_app/Dockerfile
+      args:
+        AUTH_SERVICE_URL: ${CLIENT_PUBLIC_AUTH_URL:-http://localhost:3002}
+        CORE_SERVICE_URL: ${CLIENT_PUBLIC_CORE_URL:-http://localhost:3001}
+        NOTIFICATIONS_SERVICE_URL: ${CLIENT_PUBLIC_NOTIFICATIONS_URL:-http://localhost:3003}
+        GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      auth:
+        condition: service_healthy
+      core:
+        condition: service_healthy
+      notifications:
+        condition: service_healthy
+    networks:
+      - innogram-network
+
+  # Monitoring profile: scrape the app containers instead of the host.
+  prometheus:
+    environment:
+      PROMETHEUS_TARGETS: core:3001,auth:3002,notifications:3003

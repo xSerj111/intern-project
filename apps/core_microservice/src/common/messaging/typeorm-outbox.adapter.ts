@@ -1,8 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, LessThan, Repository } from 'typeorm';
+import { currentRequestId } from '@repo/shared';
 import { OutboxEvent } from './outbox-event.entity';
-import type { IOutboxPort } from './outbox.port';
+import type { IOutboxPort, OutboxPendingStats } from './outbox.port';
 
 /**
  * Delay before waking the relay for a row written inside a transaction.
@@ -29,7 +30,12 @@ export class TypeOrmOutboxAdapter implements IOutboxPort {
     tx: EntityManager,
   ): Promise<OutboxEvent> {
     const event = await tx.save(
-      tx.create(OutboxEvent, { routingKey, payload, occurredAt: new Date() }),
+      tx.create(OutboxEvent, {
+        routingKey,
+        payload,
+        occurredAt: new Date(),
+        correlationId: currentRequestId() ?? null,
+      }),
     );
     this.scheduleWake(tx);
     return event;
@@ -104,6 +110,22 @@ export class TypeOrmOutboxAdapter implements IOutboxPort {
       })
       .where('id = :id', { id })
       .execute();
+  }
+
+  async pendingStats(
+    manager: EntityManager = this.repository.manager,
+  ): Promise<OutboxPendingStats> {
+    const rows: { count: string; oldest_seconds: string | null }[] =
+      await manager.query(
+        `SELECT count(*) AS count,
+                GREATEST(EXTRACT(EPOCH FROM (clock_timestamp() - min("occurredAt"))), 0) AS oldest_seconds
+           FROM outbox_events
+          WHERE "publishedAt" IS NULL AND "deadLetteredAt" IS NULL`,
+      );
+    return {
+      count: Number(rows[0].count),
+      oldestSeconds: Number(rows[0].oldest_seconds ?? 0),
+    };
   }
 
   async purgePublished(olderThan: Date): Promise<number> {

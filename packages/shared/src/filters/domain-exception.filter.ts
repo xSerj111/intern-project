@@ -14,6 +14,10 @@ import {
 } from "../errors/database.errors";
 import { DomainError } from "../errors/domain.error";
 import { WinstonLogger } from "../logger";
+import {
+  ErrorsCounterLike,
+  recordError,
+} from "../observability/error-metrics";
 
 /** Minimal HTTP response shape (avoids a hard dependency on express types). */
 interface HttpResponse {
@@ -25,14 +29,19 @@ interface HttpResponse {
  * Translates framework-agnostic {@link DomainError}s thrown by entities and
  * repositories into HTTP responses, so the domain layer never imports HTTP.
  * Register globally in each service's `main.ts` via `app.useGlobalFilters(...)`.
+ * With an `errors_total` counter (`createErrorsCounter`), every caught error
+ * is counted as `{source="http", type=<error class>}`.
  */
 @Catch(DomainError)
 export class DomainExceptionFilter implements ExceptionFilter {
   private readonly logger = new WinstonLogger(DomainExceptionFilter.name);
 
+  constructor(private readonly errorsCounter?: ErrorsCounterLike) {}
+
   catch(exception: DomainError, host: ArgumentsHost): void {
     const response = host.switchToHttp().getResponse<HttpResponse>();
     const status = this.statusFor(exception);
+    recordError(this.errorsCounter, "http", exception);
 
     if (status >= HttpStatus.INTERNAL_SERVER_ERROR) {
       this.logger.error(exception.message, { error: exception });

@@ -1,6 +1,6 @@
 import type {
   ICreatePostRequest,
-  IFeedResponse,
+  IOffsetPage,
   IPostResponse,
   IPostsByAuthorQuery,
   IUpdatePostRequest,
@@ -38,8 +38,8 @@ export function getPostsByAuthor(
   userId: string,
   { page = 1, limit = 12, status }: IPostsByAuthorQuery = {},
   { token, signal }: Auth = {},
-): Promise<IFeedResponse> {
-  return coreApi<IFeedResponse>(`/posts/author/${userId}`, {
+): Promise<IOffsetPage<IPostResponse>> {
+  return coreApi<IOffsetPage<IPostResponse>>(`/posts/author/${userId}`, {
     token,
     signal,
     query: { page, limit, status },

@@ -15,7 +15,7 @@ export const AppDataSource = new DataSource({
   database: env.db.database,
   entities: [AuthUser],
   synchronize: false,
-  migrations: [__dirname + '/../migrations/*.ts'],
+  migrations: [__dirname + '/../migrations/*.{ts,js}'],
 });
 
 export async function initDatabase(): Promise<DataSource> {

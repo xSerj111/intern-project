@@ -27,6 +27,6 @@ export class CreatePostDto {
   @IsOptional()
   @IsArray()
   @IsUUID('4', { each: true })
-  @ArrayMaxSize(10) // Opcjonalny limit np. 10 plików na post
+  @ArrayMaxSize(10) // Optional limit, e.g. 10 files per post
   assetIds?: string[];
 }

@@ -1,4 +1,8 @@
-import type { IFollowResponse } from '@repo/contracts';
+import type {
+  IFollowListItem,
+  IFollowResponse,
+  IOffsetPage,
+} from '@repo/contracts';
 
 import { coreApi } from './client';
 
@@ -41,24 +45,33 @@ export function unfollowUser(
   });
 }
 
-/** Who follows `userId` (`GET /follows/:userId/followers`). */
-export function listFollowers(
+interface PageOptions extends Auth {
+  /** 1-based page number (default 1). */
+  page?: number;
+  /** Page size, 1..50 (server default 50). */
+  limit?: number;
+}
+
+/** Who follows `userId` (`GET /follows/:userId/followers`), newest follow first. */
+export function getFollowers(
   userId: string,
-  { token, signal }: Auth = {},
-): Promise<IFollowResponse[]> {
-  return coreApi<IFollowResponse[]>(`/follows/${userId}/followers`, {
+  { token, signal, page, limit }: PageOptions = {},
+): Promise<IOffsetPage<IFollowListItem>> {
+  return coreApi<IOffsetPage<IFollowListItem>>(`/follows/${userId}/followers`, {
     token,
     signal,
+    query: { page, limit },
   });
 }
 
-/** Who `userId` follows (`GET /follows/:userId/following`). */
-export function listFollowing(
+/** Who `userId` follows (`GET /follows/:userId/following`), newest follow first. */
+export function getFollowing(
   userId: string,
-  { token, signal }: Auth = {},
-): Promise<IFollowResponse[]> {
-  return coreApi<IFollowResponse[]>(`/follows/${userId}/following`, {
+  { token, signal, page, limit }: PageOptions = {},
+): Promise<IOffsetPage<IFollowListItem>> {
+  return coreApi<IOffsetPage<IFollowListItem>>(`/follows/${userId}/following`, {
     token,
     signal,
+    query: { page, limit },
   });
 }

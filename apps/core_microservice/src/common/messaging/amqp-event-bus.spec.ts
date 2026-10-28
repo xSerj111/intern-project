@@ -1,7 +1,12 @@
 import type { AmqpConnectionManager } from 'amqp-connection-manager';
 import { Logger } from '@nestjs/common';
 import type { ConfirmChannel } from 'amqplib';
-import { EXCHANGE_NAME, EventEnvelope, RoutingKeys } from '@repo/shared';
+import {
+  CORRELATION_ID_HEADER,
+  EXCHANGE_NAME,
+  EventEnvelope,
+  RoutingKeys,
+} from '@repo/shared';
 import { AmqpEventBus } from './amqp-event-bus';
 import { EventRejectedError } from './event-bus.port';
 
@@ -65,6 +70,31 @@ describe('AmqpEventBus', () => {
         type: envelope.type,
       }),
     );
+  });
+
+  it('sends no headers without a correlation id', async () => {
+    await bus.publish(envelope);
+
+    const [, , , options] = channel.publish.mock.calls[0] as [
+      string,
+      string,
+      Buffer,
+      Record<string, unknown>,
+    ];
+    expect(options).not.toHaveProperty('headers');
+  });
+
+  it('sends the correlation id as the x-correlation-id header', async () => {
+    await bus.publish(envelope, { correlationId: 'req-1' });
+
+    const [, , , options] = channel.publish.mock.calls[0] as [
+      string,
+      string,
+      Buffer,
+      Record<string, unknown>,
+    ];
+    expect(options.headers).toEqual({ [CORRELATION_ID_HEADER]: 'req-1' });
+    expect(CORRELATION_ID_HEADER).toBe('x-correlation-id');
   });
 
   it('rejects when the broker nacks or the channel closes', async () => {

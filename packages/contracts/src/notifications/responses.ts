@@ -30,6 +30,8 @@ export interface INotificationsPage {
   items: INotification[];
   hasMore: boolean;
   unseenCount: number;
+  /** Opaque cursor for the next page (send as `before`); `null` on the last page. */
+  nextCursor: string | null;
 }
 
 export interface IUnseenCount {

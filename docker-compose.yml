@@ -2,6 +2,7 @@ services:
   postgres:
     image: postgres:15
     container_name: innogram-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB}
       POSTGRES_USER: ${POSTGRES_USER}
@@ -11,53 +12,103 @@ services:
       DB_NAME_CORE: ${DB_NAME_CORE}
       DB_NAME_NOTIFICATIONS: ${DB_NAME_NOTIFICATIONS}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     networks:
       - innogram-network
 
   redis:
     image: redis:7-alpine
     container_name: innogram-redis
+    restart: unless-stopped
+    # Holds sessions and token blacklists. With REDIS_PASSWORD set (required by the
+    # apps in production) clients must authenticate; empty keeps local dev open.
+    # Re-enters the image entrypoint so Redis still drops root.
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    command: ["sh", "-c", "exec docker-entrypoint.sh redis-server $${REDIS_PASSWORD:+--requirepass \"$$REDIS_PASSWORD\"}"]
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli $${REDIS_PASSWORD:+--no-auth-warning -a \"$$REDIS_PASSWORD\"} ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - innogram-network
+
+  # Cache store for core (US5). Persistence is off and memory is capped, so
+  # it holds no durable state and needs no volume.
+  redis-cache:
+    image: redis:7-alpine
+    container_name: innogram-redis-cache
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    ports:
+      - "127.0.0.1:6380:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     networks:
       - innogram-network
 
   rabbitmq:
     image: rabbitmq:3-management
     container_name: innogram-rabbitmq
+    restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      start_period: 20s
+      retries: 20
     networks:
       - innogram-network
 
   mailpit:
     image: axllent/mailpit
     container_name: innogram-mailpit
+    restart: unless-stopped
     ports:
-      - "1025:1025"
-      - "8025:8025"
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8025/livez"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
     networks:
       - innogram-network
 
   # S3-compatible storage for core assets. Host port 9000 is kept so the URLs
   # stored in the DB (http://localhost:9000/<bucket>/<key>) stay valid.
   seaweedfs:
-    image: chrislusf/seaweedfs:latest
+    image: chrislusf/seaweedfs:4.48
     container_name: innogram-seaweedfs
+    restart: unless-stopped
     entrypoint: ["/bin/sh", "/entrypoint.sh"]
     environment:
       S3_ACCESS_KEY: ${S3_ACCESS_KEY}
       S3_SECRET_KEY: ${S3_SECRET_KEY}
+      # Read by entrypoint.sh for the S3 CORS allow-list (-s3.allowedOrigins).
+      CLIENT_URL: ${CLIENT_URL:-http://localhost:3000}
     ports:
       - "9000:8333"
     volumes:
@@ -75,7 +126,7 @@ services:
   # One-shot: creates the buckets, then exits. The public-read rule for
   # innogram-assets lives in the identities file rendered by entrypoint.sh.
   seaweedfs-setup:
-    image: chrislusf/seaweedfs:latest
+    image: chrislusf/seaweedfs:4.48
     depends_on:
       seaweedfs:
         condition: service_healthy
@@ -91,10 +142,72 @@ services:
     networks:
       - innogram-network
 
+  # Optional monitoring stack: `docker compose --profile monitoring up -d`.
+  # Scrapes the services running on the host; nothing else depends on it.
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    container_name: innogram-prometheus
+    restart: unless-stopped
+    profiles: ["monitoring"]
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+    environment:
+      # Written to /run/secrets/internal_token by entrypoint.sh; never logged.
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-}
+      # Comma-separated host:port or name=host:port; format in entrypoint.sh.
+      PROMETHEUS_TARGETS: ${PROMETHEUS_TARGETS:-host.docker.internal:3001,host.docker.internal:3002,host.docker.internal:3003}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    tmpfs:
+      # 65534 = the nobody user Prometheus runs as.
+      - /run/secrets:uid=65534,gid=65534,mode=0700
+      # file_sd targets written by entrypoint.sh.
+      - /run/sd:uid=65534,gid=65534,mode=0700
+    volumes:
+      - ./docker/monitoring/entrypoint.sh:/entrypoint.sh:ro
+      - ./docker/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docker/monitoring/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - innogram-network
+
+  grafana:
+    image: grafana/grafana:12.2.0
+    container_name: innogram-grafana
+    restart: unless-stopped
+    profiles: ["monitoring"]
+    entrypoint:
+      - /bin/sh
+      - -c
+      - ': "$${GF_SECURITY_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in the root .env}";
+        case "$$GF_SECURITY_ADMIN_PASSWORD" in *CHANGE_ME*) echo "GRAFANA_ADMIN_PASSWORD still holds the CHANGE_ME placeholder" >&2; exit 1;; esac;
+        exec /run.sh'
+    environment:
+      # Required, but checked by the entrypoint below: `${VAR:?}` here would make
+      # `docker compose config/up` fail for the default (non-monitoring) services.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "127.0.0.1:3030:3000"
+    volumes:
+      - ./docker/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./docker/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    networks:
+      - innogram-network
+
 volumes:
   postgres_data:
   redis_data:
   seaweedfs_data:
+  prometheus_data:
+  grafana_data:
 
 networks:
   innogram-network:

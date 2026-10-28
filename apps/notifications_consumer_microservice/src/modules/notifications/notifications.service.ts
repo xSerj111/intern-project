@@ -9,8 +9,11 @@ import { EVENT_BUS, type IEventBus } from './domain/interfaces/event-bus.port';
 import {
   NOTIFICATION_REPOSITORY,
   type INotificationRepository,
+  type NotificationCursor,
 } from './domain/interfaces/notification-repository.port';
+import { InvalidNotificationCursorError } from './domain/errors/notification.errors';
 import { NOTIFICATIONS_DEFAULT_LIMIT } from './dto/list-notifications-query.dto';
+import { parseNotificationCursor } from './dto/notification-cursor';
 import {
   NotificationsPageResponseDto,
   UnseenCountResponseDto,
@@ -26,14 +29,21 @@ export class NotificationsService {
     @Inject(EVENT_BUS) private readonly eventBus: IEventBus,
   ) {}
 
-  /** Newest first; `before` is an exclusive `occurredAt` cursor. */
+  /** Newest first; `before` is an exclusive `(occurredAt, id)` keyset cursor. */
   async list(
     userId: string,
     options: { before?: string; limit?: number },
   ): Promise<NotificationsPageResponseDto> {
+    let before: NotificationCursor | undefined;
+    if (options.before !== undefined) {
+      // The DTO already rejects bad cursors; this keeps other callers at 400 too.
+      const parsed = parseNotificationCursor(options.before);
+      if (!parsed) throw new InvalidNotificationCursorError();
+      before = parsed;
+    }
     const [{ items, hasMore }, unseenCount] = await Promise.all([
       this.notifications.page(userId, {
-        before: options.before ? new Date(options.before) : undefined,
+        before,
         limit: options.limit ?? NOTIFICATIONS_DEFAULT_LIMIT,
       }),
       this.notifications.unseenCount(userId),

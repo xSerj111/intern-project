@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { assertInternalApiToken } from '@repo/shared';
 
 /**
  * Typed application configuration, backed by `@nestjs/config`'s ConfigService.
@@ -17,18 +18,25 @@ export class AppConfigService {
     return parseInt(this.config.get<string>('CORE_PORT', '3001'), 10);
   }
 
+  /** Browser origin allowed by CORS (HTTP and `/realtime`); empty counts as unset. */
+  get clientUrl(): string {
+    return this.config.get<string>('CLIENT_URL') || 'http://localhost:3000';
+  }
+
+  /** Secret auth_microservice signs access tokens with (`JWT_SECRET`). */
+  get jwtSecret(): string {
+    return this.config.getOrThrow<string>('JWT_SECRET');
+  }
+
   /** Postgres connection settings for the Core database. */
   get postgres() {
     return {
       type: 'postgres' as const,
-      host: this.config.getOrThrow<string>('POSTGRES_HOST', 'localhost'),
-      port: parseInt(
-        this.config.getOrThrow<string>('POSTGRES_PORT', '5432'),
-        10,
-      ),
-      username: this.config.getOrThrow<string>('POSTGRES_USER', 'postgres'),
-      password: this.config.getOrThrow<string>('POSTGRES_PASSWORD', 'postgres'),
-      database: this.config.getOrThrow<string>('DB_NAME_CORE', 'innogram_core'),
+      host: this.config.get<string>('POSTGRES_HOST', 'localhost'),
+      port: parseInt(this.config.get<string>('POSTGRES_PORT', '5432'), 10),
+      username: this.config.getOrThrow<string>('POSTGRES_USER'),
+      password: this.config.getOrThrow<string>('POSTGRES_PASSWORD'),
+      database: this.config.get<string>('DB_NAME_CORE', 'innogram_core'),
       synchronize: false, // Strict migrations mode
     };
   }
@@ -85,5 +93,88 @@ export class AppConfigService {
       useSsl:
         this.config.get<string>('S3_USE_SSL', 'false').toLowerCase() === 'true',
     };
+  }
+
+  /** Enables per-request SQL counting (`X-Db-Query-Count`); never allowed in production. */
+  get perfInstrumentation(): boolean {
+    return this.config.get<string>('PERF_INSTRUMENTATION') === 'true';
+  }
+
+  /** Serves Swagger UI at `/api`; on unless `NODE_ENV=production`, `SWAGGER_ENABLED` overrides. */
+  get swaggerEnabled(): boolean {
+    const raw = this.config.get<string>('SWAGGER_ENABLED');
+    if (raw === undefined || raw === '') {
+      return this.config.get<string>('NODE_ENV') !== 'production';
+    }
+    return raw === 'true';
+  }
+
+  /** Queries slower than this many milliseconds are logged as slow. */
+  get slowQueryMs(): number {
+    return this.positiveInt('SLOW_QUERY_MS', 200);
+  }
+
+  /** Connection settings for the separate cache Redis instance. */
+  get cacheRedis() {
+    return {
+      host: this.config.get<string>('CACHE_REDIS_HOST') || 'localhost',
+      port: this.positiveInt('CACHE_REDIS_PORT', 6380),
+    };
+  }
+
+  /** Upload-link lifetime and orphan-sweep timings, in seconds. */
+  get uploads() {
+    return {
+      linkTtlSec: this.positiveInt('UPLOAD_LINK_TTL_SEC', 300),
+      sweepGraceSec: this.nonNegativeInt('UPLOAD_SWEEP_GRACE_SEC', 3600),
+      sweepIntervalSec: this.positiveInt('UPLOAD_SWEEP_INTERVAL_SEC', 900),
+    };
+  }
+
+  /** Raw shared token for internal endpoints; length validation is added separately. */
+  get internalApiToken(): string | undefined {
+    return this.config.get<string>('INTERNAL_API_TOKEN') || undefined;
+  }
+
+  /** Fails fast unless `INTERNAL_API_TOKEN` is set and at least 32 chars; called during bootstrap. */
+  assertInternalApiToken(): void {
+    assertInternalApiToken(this.internalApiToken);
+  }
+
+  /**
+   * Fails fast on unsafe configuration; called during bootstrap.
+   * Query-count instrumentation must never run in production.
+   */
+  assertSafeForEnvironment(): void {
+    if (
+      this.perfInstrumentation &&
+      this.config.get<string>('NODE_ENV') === 'production'
+    ) {
+      throw new Error(
+        'PERF_INSTRUMENTATION=true is not allowed when NODE_ENV=production',
+      );
+    }
+  }
+
+  private positiveInt(key: string, fallback: number): number {
+    const raw = this.config.get<string>(key);
+    if (raw === undefined || raw === '') return fallback;
+
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < 1) {
+      throw new Error(`${key} must be a positive integer`);
+    }
+    return value;
+  }
+
+  private nonNegativeInt(key: string, fallback: number): number {
+    const raw = this.config.get<string>(key);
+    if (raw === undefined || raw === '') return fallback;
+
+    const value = Number(raw);
+    if (!Number.isInteger(value) || value < 0) {
+      throw new Error(`${key} must be a non-negative integer`);
+    }
+    return value;
   }
 }

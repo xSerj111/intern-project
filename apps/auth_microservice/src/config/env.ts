@@ -3,7 +3,7 @@ import * as path from 'path';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../../.env') });
 
-// Funkcja pomocnicza wymuszająca obecność zmiennych (Fail-Fast)
+// Helper that enforces required variables are present (fail-fast)
 const requireEnv = (key: string, defaultValue?: string): string => {
   const value = process.env[key] || defaultValue;
   if (!value) {
@@ -25,6 +25,65 @@ const requireInternalApiToken = (): string => {
   return token;
 };
 
+const JWT_SECRET_MIN_LENGTH = 32;
+
+// Must stay identical to the JWT_* values in the root .env.example.
+export const JWT_PLACEHOLDER_SECRETS: readonly string[] = [
+  'your-super-secret-jwt-key-here',
+  'your-super-secret-jwt-refresh-key-here',
+];
+
+// What .env.production.example puts in every secret.
+export const PRODUCTION_SECRET_PLACEHOLDER = 'CHANGE_ME';
+
+// Production has no fallback and refuses short or copied-from-example secrets.
+// Outside production the dev default is kept. Errors name the variable only.
+const requireJwtSecret = (key: string, devDefault: string): string => {
+  if (process.env.NODE_ENV !== 'production') return requireEnv(key, devDefault);
+  const secret = requireEnv(key);
+  if (JWT_PLACEHOLDER_SECRETS.includes(secret)) {
+    throw new Error(
+      `${key} must not be the .env.example placeholder value in production`,
+    );
+  }
+  if (secret.includes(PRODUCTION_SECRET_PLACEHOLDER)) {
+    throw new Error(
+      `${key} must not be the .env.production.example placeholder in production`,
+    );
+  }
+  if (secret.length < JWT_SECRET_MIN_LENGTH) {
+    throw new Error(
+      `${key} must be at least ${JWT_SECRET_MIN_LENGTH} characters long in production`,
+    );
+  }
+  return secret;
+};
+
+// Production refuses the .env.production.example placeholder in every secret.
+const rejectProductionPlaceholder = (key: string, value: string): void => {
+  if (
+    process.env.NODE_ENV === 'production' &&
+    value.includes(PRODUCTION_SECRET_PLACEHOLDER)
+  ) {
+    throw new Error(
+      `${key} must not be the .env.production.example placeholder in production`,
+    );
+  }
+};
+
+// A credential with no default; in production also placeholder-free.
+const requireSecret = (key: string): string => {
+  const value = requireEnv(key);
+  rejectProductionPlaceholder(key, value);
+  return value;
+};
+
+// Optional in development (the local Redis has no password), required in production.
+const requireRedisPassword = (): string | undefined =>
+  process.env.NODE_ENV === 'production'
+    ? requireSecret('REDIS_PASSWORD')
+    : process.env.REDIS_PASSWORD || undefined;
+
 const SAME_SITE_VALUES = ['strict', 'lax', 'none'] as const;
 type SameSite = (typeof SAME_SITE_VALUES)[number];
 
@@ -38,12 +97,26 @@ const parseSameSite = (value: string | undefined): SameSite => {
   return value as SameSite;
 };
 
+// Unset or empty = on outside production; otherwise exactly 'true' or 'false'.
+const parseSwaggerEnabled = (value: string | undefined): boolean => {
+  if (!value) return process.env.NODE_ENV !== 'production';
+  if (value !== 'true' && value !== 'false') {
+    throw new Error('SWAGGER_ENABLED must be one of: true, false');
+  }
+  return value === 'true';
+};
+
+const port = parseInt(process.env.AUTH_PORT || '3002', 10);
+
 export const env = {
   app: {
-    // Auth service domyślnie działa na 3002 (zgodnie z AUTH_SERVICE_URL z .env)
+    // Auth service listens on 3002 by default (matches AUTH_SERVICE_URL in .env)
     // Own variable, not the shared PORT: every service reads the same root
     // config file, so a single PORT makes two services fight over one socket.
-    port: parseInt(process.env.AUTH_PORT || '3002', 10),
+    port,
+    // The URL browsers use to reach auth (same variable the client reads); the
+    // OpenAPI `servers` entry. Falls back to localhost on the public port.
+    publicUrl: process.env.AUTH_SERVICE_URL || `http://localhost:${port}`,
     coreMicroserviceUrl: requireEnv('CORE_SERVICE_URL'),
     allowedOrigins: requireEnv('AUTH_ALLOWED_ORIGINS'),
     // Separate listener for service-to-service endpoints; never published or proxied.
@@ -54,8 +127,8 @@ export const env = {
   db: {
     host: requireEnv('POSTGRES_HOST', 'localhost'),
     port: parseInt(requireEnv('POSTGRES_PORT', '5432'), 10),
-    username: requireEnv('POSTGRES_USER', 'innogram_user'),
-    password: requireEnv('POSTGRES_PASSWORD', 'innogram_password'),
+    username: requireEnv('POSTGRES_USER'),
+    password: requireSecret('POSTGRES_PASSWORD'),
     // Must match data-source.ts, which the migration CLI uses, or the app talks
     // to a different database than the one the migrations built.
     database: requireEnv('DB_NAME_AUTH', 'innogram_auth'),
@@ -63,11 +136,11 @@ export const env = {
   redis: {
     host: requireEnv('REDIS_HOST', 'localhost'),
     port: parseInt(requireEnv('REDIS_PORT', '6379'), 10),
-    password: process.env.REDIS_PASSWORD || undefined, // Hasło może być puste
+    password: requireRedisPassword(),
   },
   jwt: {
-    accessTokenSecret: requireEnv('JWT_SECRET', 'your-super-secret-jwt-key-here'),
-    refreshTokenSecret: requireEnv(
+    accessTokenSecret: requireJwtSecret('JWT_SECRET', 'your-super-secret-jwt-key-here'),
+    refreshTokenSecret: requireJwtSecret(
       'JWT_REFRESH_SECRET',
       'your-super-secret-jwt-refresh-key-here',
     ),
@@ -85,5 +158,8 @@ export const env = {
     // 'strict' works while client and auth share a site (localhost:3000 -> :3002);
     // a cross-site deployment needs 'none' (which browsers only accept with secure).
     sameSite: parseSameSite(process.env.AUTH_COOKIE_SAMESITE),
+  },
+  swagger: {
+    enabled: parseSwaggerEnabled(process.env.SWAGGER_ENABLED),
   },
 } as const;
