@@ -3,17 +3,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, type Repository } from 'typeorm';
 
 import { TypeormRepositoryBase } from '@repo/shared';
+import { escapeLikePattern } from '../../../../common/db/like-pattern';
 import { UserProfile } from '../../domain/entities/user-profile.entity';
 import type { UserProfileProps } from '../../domain/interfaces/user-profile.props';
 import type { IUserProfileRepository } from '../../domain/interfaces/user-profile-repository.port';
-
-/**
- * Escapes LIKE metacharacters so `value` is matched literally with
- * `ESCAPE '\'`. The backslash is escaped first, then `%` and `_`.
- */
-export function escapeLikePattern(value: string): string {
-  return value.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
-}
 
 /**
  * TypeORM adapter for the profile repository port. Inherits the full data-access

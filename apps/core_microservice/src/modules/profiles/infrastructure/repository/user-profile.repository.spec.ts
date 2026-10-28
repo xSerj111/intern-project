@@ -1,25 +1,7 @@
 import type { Repository } from 'typeorm';
 
 import type { UserProfile } from '../../domain/entities/user-profile.entity';
-import {
-  UserProfileRepository,
-  escapeLikePattern,
-} from './user-profile.repository';
-
-describe('escapeLikePattern', () => {
-  it('leaves plain text unchanged', () => {
-    expect(escapeLikePattern('alice')).toBe('alice');
-  });
-
-  it('escapes %, _ and backslash', () => {
-    expect(escapeLikePattern('a%b_c')).toBe('a\\%b\\_c');
-    expect(escapeLikePattern('a\\b')).toBe('a\\\\b');
-  });
-
-  it('escapes the backslash before the wildcards', () => {
-    expect(escapeLikePattern('\\%')).toBe('\\\\\\%');
-  });
-});
+import { UserProfileRepository } from './user-profile.repository';
 
 describe('UserProfileRepository.searchByUsername', () => {
   const build = () => {

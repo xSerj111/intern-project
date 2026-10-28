@@ -144,7 +144,7 @@ export class PostsService {
       throw new ForbiddenException('You are not allowed to update this post');
     }
     if (updatePostDto.content) {
-      post.content = updatePostDto.content;
+      post.editContent(updatePostDto.content);
     }
     const updatedPost = await this.postRepository.save(post);
     this.logger.debug('Post updated', { props: { postId: updatedPost.id } });

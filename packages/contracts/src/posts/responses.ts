@@ -44,3 +44,20 @@ export interface IFeedPage {
   /** `null` when there are no more items. */
   nextCursor: string | null;
 }
+
+/** One hashtag suggestion returned by `GET /posts/hashtags/search`. */
+export interface IHashtagResult {
+  /** Normalized tag, without `#`. */
+  tag: string;
+  /** Number of published posts carrying the tag. */
+  postCount: number;
+}
+
+/** Offset page returned by `GET /posts/search`. */
+export interface IPostSearchPage {
+  items: IPostResponse[];
+  /** Total number of matching posts. */
+  total: number;
+  page: number;
+  limit: number;
+}

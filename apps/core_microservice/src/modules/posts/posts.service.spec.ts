@@ -237,6 +237,29 @@ describe('PostsService', () => {
       expect(postRepository.getCommentCounts).not.toHaveBeenCalled();
     });
   });
+
+  describe('updatePost', () => {
+    it('recomputes the hashtags on the saved entity', async () => {
+      const post = fakePost({
+        authorId: AUTHOR,
+        content: '#old',
+        hashtags: ['old'],
+      });
+      postRepository.findOneByIdOrThrow.mockResolvedValue(post);
+      postRepository.save.mockImplementation((p: unknown) =>
+        Promise.resolve(p),
+      );
+
+      const result = await service.updatePost(AUTHOR, post.id, {
+        content: 'fresh #New',
+      });
+
+      expect(result.content).toBe('fresh #New');
+      expect(result.hashtags).toEqual(['new']);
+      expect(postRepository.save).toHaveBeenCalledWith(post);
+    });
+  });
+
   describe('counts cache invalidation', () => {
     it('invalidates the author counts after publishing a draft', async () => {
       const draft = fakePost({ id: 'p-1', authorId: AUTHOR });
