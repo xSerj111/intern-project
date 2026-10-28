@@ -75,23 +75,102 @@ export class PostRepository
       params,
     );
 
+    const { ids, nextCursor } = this.slicePage(rows, limit);
+    return { posts: await this.hydrateInOrder(ids), nextCursor };
+  }
+
+  /**
+   * Tags starting with `prefix` (escaped, so `_` and `%` match literally) and
+   * the number of published, non-deleted posts carrying each. Scaling note:
+   * the GIN array index (`IDX_posts_hashtags`) can't serve a prefix match on
+   * unnested elements, so this scans published posts' tag arrays. If perf runs
+   * flag it, move to a `hashtags(tag, post_count)` table maintained on
+   * publish/archive/delete.
+   */
+  async searchHashtags(
+    prefix: string,
+    limit: number,
+  ): Promise<{ tag: string; postCount: number }[]> {
+    const rows = await this.repository.query<
+      { tag: string; postCount: number | string }[]
+    >(
+      `SELECT tag, count(*)::int AS "postCount"
+         FROM posts p, unnest(p.hashtags) AS tag
+        WHERE p.status = '${PostStatus.Published}'
+          AND p."deletedAt" IS NULL
+          AND tag LIKE $1 || '%' ESCAPE '\\'
+        GROUP BY tag
+        ORDER BY "postCount" DESC, tag ASC
+        LIMIT $2`,
+      [escapeLikePattern(prefix), limit],
+    );
+    return rows.map((row) => ({
+      tag: row.tag,
+      postCount: Number(row.postCount),
+    }));
+  }
+
+  /**
+   * Same keyset paging as `findFeedPage`, over published, non-deleted posts
+   * whose `hashtags` contain `tag`. The `@>` filter, the literal status and
+   * `"deletedAt" IS NULL` let the planner use the partial `IDX_posts_hashtags`.
+   */
+  async findByHashtagPage(
+    tag: string,
+    cursor: FeedCursor | null,
+    limit: number,
+  ): Promise<{ posts: Post[]; nextCursor: string | null }> {
+    const params: unknown[] = [tag, limit + 1];
+    let keyset = '';
+    if (cursor) {
+      params.push(cursor.t, cursor.id);
+      keyset = 'AND (p."createdAt", p.id) < ($3::timestamptz, $4::uuid)';
+    }
+    const rows = await this.repository.query<{ id: string; t: string }[]>(
+      `SELECT p.id,
+              to_char(p."createdAt" AT TIME ZONE 'UTC',
+                      'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS t
+         FROM posts p
+        WHERE p.hashtags @> ARRAY[$1]::text[]
+          AND p.status = '${PostStatus.Published}'
+          AND p."deletedAt" IS NULL
+          ${keyset}
+        ORDER BY p."createdAt" DESC, p.id DESC
+        LIMIT $2`,
+      params,
+    );
+
+    const { ids, nextCursor } = this.slicePage(rows, limit);
+    return { posts: await this.hydrateInOrder(ids), nextCursor };
+  }
+
+  /**
+   * Keeps the first `limit` of `limit + 1` keyset rows; the extra row only
+   * signals that another page exists, whose cursor is the last kept row.
+   */
+  private slicePage(
+    rows: { id: string; t: string }[],
+    limit: number,
+  ): { ids: string[]; nextCursor: string | null } {
     const page = rows.slice(0, limit);
     const last = page[page.length - 1];
     const nextCursor =
       rows.length > limit && last ? FeedCursor.fromRow(last).encode() : null;
-    if (page.length === 0) return { posts: [], nextCursor };
+    return { ids: page.map((row) => row.id), nextCursor };
+  }
 
-    const ids = page.map((row) => row.id);
+  /** Posts with author and assets, in the order of `ids`. */
+  private async hydrateInOrder(ids: string[]): Promise<Post[]> {
+    if (ids.length === 0) return [];
     const found = await this.repository.find({
       where: { id: In(ids) },
       relations: { author: true, assets: { asset: true } },
     });
     const byId = new Map(found.map((post) => [post.id, post]));
     // A post deleted between the two queries simply drops out of the page.
-    const posts = ids
+    return ids
       .map((id) => byId.get(id))
       .filter((post): post is Post => post !== undefined);
-    return { posts, nextCursor };
   }
 
   async findByAuthor(

@@ -1,10 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { PostsController } from './posts.controller';
 import { PostsService } from './posts.service';
+import { PostResponseMapper } from './post-response.mapper';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../../common/auth/optional-jwt-auth.guard';
 import { fakePost } from './__tests__/fakers/post.faker';
-import { Post, PostStatus } from './domain/entities/post.entity';
+import { PostStatus } from './domain/entities/post.entity';
 
 describe('PostsController', () => {
   let controller: PostsController;
@@ -29,7 +30,10 @@ describe('PostsController', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [PostsController],
-      providers: [{ provide: PostsService, useValue: postsService }],
+      providers: [
+        { provide: PostsService, useValue: postsService },
+        PostResponseMapper,
+      ],
     })
       .overrideGuard(JwtAuthGuard)
       .useValue({ canActivate: () => true })
@@ -92,87 +96,6 @@ describe('PostsController', () => {
         undefined,
       );
       expect(response).toMatchObject({ likeCount: 4, likedByMe: false });
-    });
-  });
-
-  describe('response mapping', () => {
-    it('adds commentCount, author and asset url/mimeType', async () => {
-      const mapped = fakePost({
-        author: {
-          authUserId: 'author-1',
-          username: 'john_doe',
-          displayName: 'John Doe',
-          avatarUrl: null,
-        } as Post['author'],
-        assets: [
-          {
-            assetId: 'a-2',
-            displayOrder: 1,
-            asset: { url: null, mimeType: 'application/pdf' },
-          },
-          {
-            assetId: 'a-1',
-            displayOrder: 0,
-            asset: { url: 'https://cdn/1.png', mimeType: 'image/png' },
-          },
-        ] as unknown as Post['assets'],
-      });
-      postsService.getPost.mockResolvedValue(mapped);
-      postsService.getCommentCounts.mockResolvedValue(
-        new Map([[mapped.id, 7]]),
-      );
-      postsService.getLikeStats.mockResolvedValue(
-        new Map([[mapped.id, { likeCount: 4, likedByMe: true }]]),
-      );
-
-      const response = await controller.getPost('viewer-1', mapped.id);
-
-      expect(postsService.getCommentCounts).toHaveBeenCalledWith([mapped.id]);
-      expect(response.commentCount).toBe(7);
-      expect(response.author).toEqual({
-        userId: 'author-1',
-        username: 'john_doe',
-        displayName: 'John Doe',
-        avatarUrl: null,
-      });
-      expect(response.assets).toEqual([
-        {
-          assetId: 'a-1',
-          displayOrder: 0,
-          url: 'https://cdn/1.png',
-          mimeType: 'image/png',
-        },
-        {
-          assetId: 'a-2',
-          displayOrder: 1,
-          url: null,
-          mimeType: 'application/pdf',
-        },
-      ]);
-    });
-
-    it('returns author null and defaults commentCount to 0 when missing', async () => {
-      postsService.getPost.mockResolvedValue(post);
-      postsService.getCommentCounts.mockResolvedValue(new Map());
-
-      const response = await controller.getPost(undefined, post.id);
-
-      expect(response.author).toBeNull();
-      expect(response.commentCount).toBe(0);
-    });
-
-    it('skips assets whose file was deleted (asset joined as null)', async () => {
-      postsService.getPost.mockResolvedValue(
-        fakePost({
-          assets: [
-            { assetId: 'gone', displayOrder: 0, asset: null },
-          ] as unknown as Post['assets'],
-        }),
-      );
-
-      const response = await controller.getPost(undefined, post.id);
-
-      expect(response.assets).toEqual([]);
     });
   });
 

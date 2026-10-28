@@ -11,6 +11,7 @@ import * as dotenv from 'dotenv';
 import { join } from 'path';
 import { Client } from 'pg';
 import { corePostgresConnection } from '../src/database/database.config';
+import { extractHashtags } from '../src/modules/posts/domain/hashtags';
 import {
   commentId,
   commentLikes,
@@ -28,6 +29,25 @@ import { seedPerfProfile } from './perf-profile';
 dotenv.config({ path: join(__dirname, '../../../.env') });
 
 const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000);
+
+/**
+ * Hashtags appended to fixture posts (the shared fixtures stay tag-free).
+ * `#innogram` is on 5 published posts plus a draft and an archived one, which
+ * search must not return. `#café` is non-ASCII and `#2024` is digits only.
+ */
+const postTags: Record<string, string> = {
+  p1: '#innogram #art',
+  p2: '#art #jazz #travel',
+  p4: '#innogram',
+  p5: '#sourdough #2024',
+  p7: '#innogram #dev',
+  p10: '#innogram #running',
+  p11: '#running #2024',
+  p13: '#travel #photography #café',
+  p16: '#travel #lisbon #innogram',
+  p17: '#travel #café #lisbon',
+  p19: '#innogram #dev',
+};
 
 async function main() {
   const reset = process.argv.includes('--reset');
@@ -102,12 +122,24 @@ async function main() {
     }
 
     for (const p of posts) {
+      const content = postTags[p.key]
+        ? `${p.content} ${postTags[p.key]}`
+        : p.content;
+      // Upsert content and hashtags so already-seeded rows pick the tags up.
       await run(
         'posts',
-        `INSERT INTO posts (id, "authorId", content, status, "createdAt", "updatedAt")
-         VALUES ($1, $2, $3, $4, $5, $5)
-         ON CONFLICT DO NOTHING`,
-        [postId(p.key), userId(p.author), p.content, p.status, hoursAgo(p.hoursAgo)],
+        `INSERT INTO posts (id, "authorId", content, hashtags, status, "createdAt", "updatedAt")
+         VALUES ($1, $2, $3, $4, $5, $6, $6)
+         ON CONFLICT (id) DO UPDATE
+           SET content = EXCLUDED.content, hashtags = EXCLUDED.hashtags`,
+        [
+          postId(p.key),
+          userId(p.author),
+          content,
+          extractHashtags(content),
+          p.status,
+          hoursAgo(p.hoursAgo),
+        ],
       );
     }
 

@@ -2,7 +2,8 @@
  * `--profile perf` for the core seed (research §3). Generates, from the shared
  * PRNG and base date in `seed/perf.ts`:
  *   1,000 profiles · 10,000 follows (20 popular users with 150+ followers) ·
- *   20,000 published posts (30% with 1–3 of 10 sample images) ·
+ *   20,000 published posts (30% with 1–3 of 10 sample images, ~50% with 1–3
+ *   hashtags from a Zipf-skewed pool of 200) ·
  *   50,000 comments (30% replies) · ~40,000 likes (posts + comments) ·
  *   200 chats (150 direct, 50 groups of 3–20) with 20 messages each.
  * Rows go straight into the tables, so no outbox events are produced.
@@ -17,6 +18,7 @@ import {
 } from '@aws-sdk/client-s3';
 import type { Client } from 'pg';
 import { deflateSync } from 'zlib';
+import { extractHashtags } from '../src/modules/posts/domain/hashtags';
 import {
   PERF_BASE_DATE,
   PERF_PRNG_SEED,
@@ -43,6 +45,8 @@ const COMMENT_LIKE_COUNT = 10_000;
 const DIRECT_CHAT_COUNT = 150;
 const GROUP_CHAT_COUNT = 50;
 const MESSAGES_PER_CHAT = 20;
+const POST_HASHTAG_SHARE = 0.5;
+const HASHTAG_POOL_SIZE = 200;
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -53,6 +57,14 @@ const WORDS = (
   'jazz book train river garden market rain mountain coast morning night ' +
   'weekend project idea photo travel kitchen music friend street bike'
 ).split(' ');
+
+/**
+ * Fixed hashtag pool: 20 word tags (every 10th rank) mixed with `tag001`-style
+ * tags. Rank `i` is drawn with weight 1 / (i + 1), so a few tags are popular.
+ */
+const HASHTAG_POOL = Array.from({ length: HASHTAG_POOL_SIZE }, (_, i) =>
+  i % 10 === 0 ? WORDS[i / 10] : `tag${String(i).padStart(3, '0')}`,
+);
 
 type Row = unknown[];
 
@@ -296,16 +308,29 @@ function generate(images: SampleImage[]): PerfData {
     isPopular(n) ? 8 : 0.1 + 2 * gen.next() ** 2,
   );
   const pickAuthor = weightedPicker(gen, authorWeights);
+  const pickHashtag = weightedPicker(
+    gen,
+    HASHTAG_POOL.map((_, i) => 1 / (i + 1)),
+  );
   const posts: Row[] = [];
   const postMeta: { id: string; at: number }[] = [];
   const postAssets: Row[] = [];
   for (let i = 1; i <= POST_COUNT; i++) {
     const id = seedId('post', i);
     const at = gen.before(base, 180 * DAY);
+    const authorId = uid(pickAuthor() + 1);
+    let content = gen.sentence(5, 30);
+    if (gen.next() < POST_HASHTAG_SHARE) {
+      const wanted = gen.int(1, 3);
+      const tags = new Set<string>();
+      while (tags.size < wanted) tags.add(HASHTAG_POOL[pickHashtag()]);
+      content += ` ${[...tags].map((t) => `#${t}`).join(' ')}`;
+    }
     posts.push([
       id,
-      uid(pickAuthor() + 1),
-      gen.sentence(5, 30),
+      authorId,
+      content,
+      extractHashtags(content),
       'published',
       at,
       at,
@@ -518,7 +543,7 @@ function generate(images: SampleImage[]): PerfData {
       },
       {
         table: 'posts',
-        columns: ['id', 'authorId', 'content', 'status', ...ts],
+        columns: ['id', 'authorId', 'content', 'hashtags', 'status', ...ts],
         rows: posts,
       },
       {

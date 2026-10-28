@@ -24,6 +24,7 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { PostsService } from './posts.service';
+import { PostResponseMapper } from './post-response.mapper';
 import { CreatePostDto } from './dto/create-post.dto';
 import { UpdatePostDto } from './dto/update-post.dto';
 import { PostResponseDto } from './dto/post-response.dto';
@@ -32,7 +33,7 @@ import { FeedQueryDto } from './dto/feed-query.dto';
 import { SearchQueryDto } from './dto/search-query.dto';
 import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { OptionalJwtAuthGuard } from '../../common/auth/optional-jwt-auth.guard';
-import { Post, PostStatus } from './domain/entities/post.entity';
+import { PostStatus } from './domain/entities/post.entity';
 import { PostsByAuthorQueryDto } from '@repo/shared';
 import type { IFeedPage, IPostSearchPage } from '@repo/contracts';
 import { FeedPageResponseDto } from './dto/feed-page-response.dto';
@@ -42,33 +43,10 @@ import { AuthorPostsResponseDto } from './dto/author-posts-response.dto';
 @ApiTags('Posts')
 @Controller('posts')
 export class PostsController {
-  constructor(private readonly postsService: PostsService) {}
-
-  /** Wraps posts with like/comment counts and the viewer's own like (one query each). */
-  private async toResponses(
-    posts: Post[],
-    viewerId?: string,
-  ): Promise<PostResponseDto[]> {
-    const ids = posts.map((post) => post.id);
-    const [likes, commentCounts] = await Promise.all([
-      this.postsService.getLikeStats(ids, viewerId),
-      this.postsService.getCommentCounts(ids),
-    ]);
-    return posts.map(
-      (post) =>
-        new PostResponseDto(post, {
-          ...(likes.get(post.id) ?? { likeCount: 0, likedByMe: false }),
-          commentCount: commentCounts.get(post.id) ?? 0,
-        }),
-    );
-  }
-
-  private async toResponse(
-    post: Post,
-    viewerId?: string,
-  ): Promise<PostResponseDto> {
-    return (await this.toResponses([post], viewerId))[0];
-  }
+  constructor(
+    private readonly postsService: PostsService,
+    private readonly postResponseMapper: PostResponseMapper,
+  ) {}
 
   @HttpPost()
   @UseGuards(JwtAuthGuard)
@@ -115,7 +93,10 @@ export class PostsController {
       query.cursor,
       query.limit,
     );
-    return { items: await this.toResponses(items, userId), nextCursor };
+    return {
+      items: await this.postResponseMapper.toResponses(items, userId),
+      nextCursor,
+    };
   }
 
   @Get('search')
@@ -141,7 +122,7 @@ export class PostsController {
     );
 
     return {
-      items: await this.toResponses(items, userId),
+      items: await this.postResponseMapper.toResponses(items, userId),
       total,
       page: query.page,
       limit: query.limit,
@@ -179,7 +160,7 @@ export class PostsController {
       viewerId,
     );
     return {
-      items: await this.toResponses(items, viewerId),
+      items: await this.postResponseMapper.toResponses(items, viewerId),
       total,
       page: query.page,
       limit: query.limit,
@@ -202,7 +183,10 @@ export class PostsController {
     @CurrentUser('sub') userId: string | undefined,
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<PostResponseDto> {
-    return this.toResponse(await this.postsService.getPost(id), userId);
+    return this.postResponseMapper.toResponse(
+      await this.postsService.getPost(id),
+      userId,
+    );
   }
 
   @Patch(':id')
@@ -225,7 +209,7 @@ export class PostsController {
     @Param('id', ParseUUIDPipe) id: string,
     @Body() updatePostDto: UpdatePostDto,
   ): Promise<PostResponseDto> {
-    return this.toResponse(
+    return this.postResponseMapper.toResponse(
       await this.postsService.updatePost(userId, id, updatePostDto),
       userId,
     );
@@ -248,7 +232,7 @@ export class PostsController {
     @CurrentUser('sub') userId: string,
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<PostResponseDto> {
-    return this.toResponse(
+    return this.postResponseMapper.toResponse(
       await this.postsService.publishPost(userId, id),
       userId,
     );
@@ -273,7 +257,7 @@ export class PostsController {
     @CurrentUser('sub') userId: string,
     @Param('id', ParseUUIDPipe) id: string,
   ): Promise<PostResponseDto> {
-    return this.toResponse(
+    return this.postResponseMapper.toResponse(
       await this.postsService.archivePost(userId, id),
       userId,
     );
