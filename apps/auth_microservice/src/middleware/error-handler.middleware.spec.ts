@@ -102,12 +102,16 @@ describe('createErrorHandler', () => {
     expect(counter.inc).toHaveBeenCalledWith({ source: 'http', type: 'BoomError' });
   });
 
-  it('does not count domain errors', () => {
+  it('counts domain errors once with their class name', () => {
     run(new AccessDeniedError());
-    expect(counter.inc).not.toHaveBeenCalled();
+    expect(counter.inc).toHaveBeenCalledTimes(1);
+    expect(counter.inc).toHaveBeenCalledWith({
+      source: 'http',
+      type: 'AccessDeniedError',
+    });
   });
 
-  it('maps malformed JSON to 400 without echoing the body, logging or counting', () => {
+  it('maps malformed JSON to 400 without echoing the body or logging, and counts it', () => {
     const err = Object.assign(new SyntaxError('Unexpected token s in JSON'), {
       type: 'entity.parse.failed',
       body: '{"password":"secret-pass"',
@@ -117,6 +121,6 @@ describe('createErrorHandler', () => {
     expect(json).toHaveBeenCalledWith({ message: 'Malformed JSON body' });
     expect(JSON.stringify(json.mock.calls)).not.toContain('secret-pass');
     expect(logger.error).not.toHaveBeenCalled();
-    expect(counter.inc).not.toHaveBeenCalled();
+    expect(counter.inc).toHaveBeenCalledWith({ source: 'http', type: 'SyntaxError' });
   });
 });

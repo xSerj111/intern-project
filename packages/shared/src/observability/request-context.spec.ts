@@ -118,6 +118,34 @@ describe('accessLogMiddleware', () => {
     expect(logger.info).not.toHaveBeenCalled();
   });
 
+  it('keeps the router mount path when an app-level error handler responds', async () => {
+    const logger = { info: jest.fn(), error: jest.fn() };
+    const app = express();
+    app.use(accessLogMiddleware(logger));
+    const router = express.Router();
+    router.post('/login', (_req, _res, next) => next(new Error('bad')));
+    app.use('/auth', router);
+    app.use(
+      (
+        _err: Error,
+        _req: express.Request,
+        res: express.Response,
+        _next: express.NextFunction,
+      ) => {
+        res.status(401).json({});
+      },
+    );
+
+    await request(app).post('/auth/login').expect(401);
+
+    expect(logger.info).toHaveBeenCalledWith(
+      'POST /auth/login 401',
+      expect.objectContaining({
+        props: expect.objectContaining({ route: '/auth/login' }),
+      }),
+    );
+  });
+
   it('uses "unmatched" for requests no route handled', async () => {
     const { app, logger } = buildApp();
     await request(app).get('/nothing/secret-id');

@@ -37,7 +37,6 @@ describe('AppConfigService swaggerEnabled', () => {
     ['production', undefined, false],
     ['production', '', false],
     ['production', 'true', true],
-    ['production', 'TRUE', true],
     ['development', 'false', false],
     [undefined, 'false', false],
   ])('NODE_ENV=%s SWAGGER_ENABLED=%s -> %s', (nodeEnv, flag, expected) => {

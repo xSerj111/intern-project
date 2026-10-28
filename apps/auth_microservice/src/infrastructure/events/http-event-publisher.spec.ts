@@ -2,7 +2,11 @@ process.env.CORE_SERVICE_URL = 'http://core.test:3001';
 process.env.AUTH_ALLOWED_ORIGINS = 'http://localhost:3000';
 process.env.INTERNAL_API_TOKEN = 'a'.repeat(40);
 
-import { INTERNAL_TOKEN_HEADER } from '@repo/shared';
+import {
+  INTERNAL_TOKEN_HEADER,
+  REQUEST_ID_HEADER,
+  runWithRequestContext,
+} from '@repo/shared';
 import type { UserCreatedEvent, WinstonLogger } from '@repo/shared';
 import { HttpEventPublisher } from './http-event-publisher';
 
@@ -54,6 +58,33 @@ describe('HttpEventPublisher', () => {
     );
     expect(logger.warn).not.toHaveBeenCalled();
     expect(logger.error).not.toHaveBeenCalled();
+  });
+
+  it('forwards the current request id to core', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 201 });
+
+    runWithRequestContext('req-123', () => publisher.publishUserCreatedEvent(payload));
+    await flush();
+
+    const [, init] = fetchMock.mock.calls[0] as [
+      string,
+      { headers: Record<string, string> },
+    ];
+    expect(init.headers[REQUEST_ID_HEADER]).toBe('req-123');
+    expect(init.headers[INTERNAL_TOKEN_HEADER]).toBe(TOKEN);
+  });
+
+  it('omits the request id header when there is no request context', async () => {
+    fetchMock.mockResolvedValue({ ok: true, status: 201 });
+
+    publisher.publishUserCreatedEvent(payload);
+    await flush();
+
+    const [, init] = fetchMock.mock.calls[0] as [
+      string,
+      { headers: Record<string, string> },
+    ];
+    expect(init.headers).not.toHaveProperty(REQUEST_ID_HEADER);
   });
 
   it('returns synchronously without waiting for the response (fire-and-forget)', () => {

@@ -24,9 +24,6 @@
     "client_app#type-check": {
       "dependsOn": ["^build", "build"]
     },
-    "clean": {
-      "cache": false
-    },
     "db:migrate": {
       "cache": false
     },

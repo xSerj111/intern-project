@@ -25,6 +25,8 @@ export const OUTBOX_BACKOFF_BASE_MS = 1_000;
 export const OUTBOX_BACKOFF_MAX_MS = 30_000;
 export const OUTBOX_PURGE_INTERVAL_MS = 60 * 60 * 1000;
 export const OUTBOX_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+/** How often the backlog gauges are refreshed in the background. */
+export const OUTBOX_STATS_INTERVAL_MS = 15_000;
 const LAST_ERROR_MAX_LENGTH = 1_000;
 
 /**
@@ -38,19 +40,24 @@ const LAST_ERROR_MAX_LENGTH = 1_000;
  * limit. Broker-side failures (broker down, nack, confirm timeout, closed
  * channel) only record `lastError` and back off, so an outage of any length
  * never dead-letters healthy rows.
+ *
+ * The backlog gauges are refreshed by a background query every 15 s and set
+ * from the live relay, so a `/metrics` scrape never touches the database.
  */
 @Injectable()
 export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(OutboxRelay.name);
   private pollTimer?: NodeJS.Timeout;
   private purgeTimer?: NodeJS.Timeout;
+  private statsTimer?: NodeJS.Timeout;
   private unsubscribe?: () => void;
   private inFlight: Promise<void> | null = null;
   private redrainRequested = false;
   private stopped = false;
   private consecutiveFailures = 0;
   private retryAt = 0;
-  private refreshingStats = false;
+  private statsInFlight: Promise<void> | null = null;
+  private statsFailing = false;
   private readonly maxAttempts: number;
   private readonly publishedTotal: Counter;
   private readonly failedTotal: Counter;
@@ -121,16 +128,19 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
   onModuleInit(): void {
     this.stopped = false;
     this.unsubscribe = this.outbox.onPending(() => this.trigger());
-    this.pollTimer = setInterval(() => {
-      void this.refreshStats();
-      this.trigger();
-    }, OUTBOX_POLL_INTERVAL_MS);
+    this.pollTimer = setInterval(() => this.trigger(), OUTBOX_POLL_INTERVAL_MS);
     this.pollTimer.unref();
     this.purgeTimer = setInterval(
       () => void this.purge(),
       OUTBOX_PURGE_INTERVAL_MS,
     );
     this.purgeTimer.unref();
+    this.statsTimer = setInterval(
+      () => this.refreshStats(),
+      OUTBOX_STATS_INTERVAL_MS,
+    );
+    this.statsTimer.unref();
+    this.refreshStats();
     this.logger.log('Outbox relay started');
     this.trigger();
   }
@@ -138,12 +148,14 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
   /**
    * Called before the global MessagingModule closes the AMQP connection (see
    * messaging.module.ts), so the in-flight publish can still be confirmed.
+   * A running stats query is not awaited: its result is dropped once stopped.
    */
   async onModuleDestroy(): Promise<void> {
     this.stopped = true;
     clearInterval(this.pollTimer);
     clearInterval(this.purgeTimer);
-    this.pollTimer = this.purgeTimer = undefined;
+    clearInterval(this.statsTimer);
+    this.pollTimer = this.purgeTimer = this.statsTimer = undefined;
     this.unsubscribe?.();
     this.unsubscribe = undefined;
     await this.inFlight;
@@ -161,18 +173,31 @@ export class OutboxRelay implements OnModuleInit, OnModuleDestroy {
     return this.inFlight;
   }
 
-  /** One aggregate query per poll; gauges keep their last value on error. */
-  private async refreshStats(): Promise<void> {
-    if (this.refreshingStats || this.stopped) return;
-    this.refreshingStats = true;
+  /**
+   * Runs on the stats timer: one aggregate query, skipped while the previous
+   * one is still running. The gauges keep their last value on error, which is
+   * warned once per failure streak.
+   */
+  private refreshStats(): void {
+    if (this.stopped || this.statsInFlight) return;
+    this.statsInFlight = this.queryStats().finally(() => {
+      this.statsInFlight = null;
+    });
+  }
+
+  private async queryStats(): Promise<void> {
     try {
       const stats = await this.outbox.pendingStats();
+      if (this.stopped) return;
       this.pendingGauge.set(stats.count);
       this.oldestPendingGauge.set(stats.count > 0 ? stats.oldestSeconds : 0);
+      this.statsFailing = false;
     } catch (err) {
-      this.logger.warn(`Outbox stats refresh failed: ${errorMessage(err)}`);
-    } finally {
-      this.refreshingStats = false;
+      if (this.stopped) return;
+      if (!this.statsFailing) {
+        this.logger.warn(`Outbox stats refresh failed: ${errorMessage(err)}`);
+      }
+      this.statsFailing = true;
     }
   }
 

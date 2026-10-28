@@ -49,6 +49,33 @@ describe('notifications env validation', () => {
     expect(() => validate(env)).toThrow(new RegExp(key));
   });
 
+  it('treats an empty optional variable as unset', () => {
+    expect(() =>
+      validate({
+        ...valid(),
+        NODE_ENV: '',
+        NOTIFICATIONS_PORT: '',
+        POSTGRES_PORT: '',
+        POSTGRES_HOST: '',
+        SWAGGER_ENABLED: '',
+      }),
+    ).not.toThrow();
+  });
+
+  it.each([
+    'RABBITMQ_URL',
+    'JWT_SECRET',
+    'INTERNAL_API_TOKEN',
+    'AUTH_INTERNAL_URL',
+    'CLIENT_URL',
+    'SMTP_HOST',
+    'SMTP_PORT',
+    'SMTP_SECURE',
+    'SMTP_FROM',
+  ])('fails naming %s when it is empty', (key) => {
+    expect(() => validate({ ...valid(), [key]: '' })).toThrow(new RegExp(key));
+  });
+
   it('lists every failing variable in one error', () => {
     try {
       validate({});
@@ -90,6 +117,9 @@ describe('notifications env validation', () => {
       validate({ ...valid(), SWAGGER_ENABLED: 'false' }),
     ).not.toThrow();
     expect(() => validate({ ...valid(), SWAGGER_ENABLED: 'yes' })).toThrow(
+      /SWAGGER_ENABLED/,
+    );
+    expect(() => validate({ ...valid(), SWAGGER_ENABLED: 'TRUE' })).toThrow(
       /SWAGGER_ENABLED/,
     );
   });

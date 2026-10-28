@@ -46,3 +46,4 @@ export * from "./observability";
 
 // Filters (domain errors -> HTTP)
 export * from "./filters/domain-exception.filter";
+export * from "./filters/all-exceptions.filter";

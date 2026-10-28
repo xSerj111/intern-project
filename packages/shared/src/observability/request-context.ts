@@ -2,6 +2,12 @@ import { AsyncLocalStorage } from 'async_hooks';
 import { randomUUID } from 'crypto';
 import type { IncomingMessage, ServerResponse } from 'http';
 import type { Logger } from '../logger/logger.port';
+import {
+  isExcludedPath,
+  routeLabel,
+  trackRoute,
+  type RoutedRequest,
+} from './http-route';
 
 /** HTTP header carrying the request id (accepted on input, echoed on output). */
 export const REQUEST_ID_HEADER = 'x-request-id';
@@ -16,7 +22,6 @@ const storage = new AsyncLocalStorage<RequestContext>();
 
 /** Client-supplied ids are kept only when short and free of odd characters. */
 const VALID_REQUEST_ID = /^[A-Za-z0-9._-]{1,128}$/;
-const EXCLUDED_PATHS = new Set(['/health', '/health/details', '/metrics']);
 
 /** Runs `fn` (and every async continuation it starts) with `requestId` as the current id. */
 export function runWithRequestContext<T>(requestId: string, fn: () => T): T {
@@ -27,13 +32,6 @@ export function runWithRequestContext<T>(requestId: string, fn: () => T): T {
 export function currentRequestId(): string | undefined {
   return storage.getStore()?.requestId;
 }
-
-/** The subset of an Express request the middlewares read (no express dependency). */
-type ContextRequest = IncomingMessage & {
-  baseUrl?: string;
-  originalUrl?: string;
-  route?: { path?: unknown };
-};
 
 /** Returns the incoming id when it is valid, otherwise a fresh UUID. */
 export function resolveRequestId(incoming: unknown): string {
@@ -59,13 +57,6 @@ export function requestIdMiddleware() {
   };
 }
 
-/** `/posts/:id` from the matched Express route, never the raw URL (same rule as http metrics). */
-function routeLabel(req: ContextRequest): string {
-  const path = req.route?.path;
-  if (typeof path !== 'string') return 'unmatched';
-  return `${req.baseUrl ?? ''}${path}`;
-}
-
 /**
  * Express-compatible middleware writing one log line per response on
  * `finish`: method, route template, status and duration. The route is read on
@@ -73,12 +64,12 @@ function routeLabel(req: ContextRequest): string {
  * Never logs query strings, bodies or headers. Skips health and metrics.
  */
 export function accessLogMiddleware(logger: Pick<Logger, 'info' | 'error'>) {
-  return (req: ContextRequest, res: ServerResponse, next: () => void): void => {
-    const path = (req.originalUrl ?? req.url ?? '').split('?')[0];
-    if (EXCLUDED_PATHS.has(path)) {
+  return (req: RoutedRequest, res: ServerResponse, next: () => void): void => {
+    if (isExcludedPath(req)) {
       next();
       return;
     }
+    trackRoute(req, res);
 
     const correlationId = currentRequestId();
     const start = process.hrtime.bigint();

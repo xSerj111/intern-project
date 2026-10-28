@@ -55,6 +55,32 @@ describe("httpMetricsMiddleware", () => {
     expect(await registry.metrics()).toMatch(/route="\/users\/:id"/);
   });
 
+  it("keeps the router mount path when an app-level error handler responds", async () => {
+    const registry = createMetricsRegistry("test");
+    const app = express();
+    app.use(httpMetricsMiddleware(registry));
+    const router = express.Router();
+    router.post("/login", (_req, _res, next) => next(new Error("bad")));
+    app.use("/auth", router);
+    app.use(
+      (
+        _err: Error,
+        _req: express.Request,
+        res: express.Response,
+        _next: express.NextFunction,
+      ) => {
+        res.status(401).json({});
+      },
+    );
+
+    await request(app).post("/auth/login").expect(401);
+
+    const text = await registry.metrics();
+    expect(text).toMatch(
+      /http_request_errors_total\{[^}]*route="\/auth\/login"[^}]*status_class="4xx"[^}]*\} 1/,
+    );
+  });
+
   it('uses "unmatched" when no route handled the request', async () => {
     const { app, registry } = buildApp();
     await request(app).get("/nothing/secret-id").expect(404);

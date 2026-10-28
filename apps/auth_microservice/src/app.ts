@@ -11,10 +11,11 @@ import {
   httpMetricsMiddleware,
   httpStatusFor,
   registerDbPoolGauge,
+  CORS_ALLOWED_HEADERS,
+  CORS_EXPOSED_HEADERS,
   requestIdMiddleware,
   requireInternalToken,
   runHealthChecks,
-  type ErrorsCounterLike,
   type HealthCheck,
   type WinstonLogger,
 } from '@repo/shared';
@@ -42,6 +43,7 @@ type MetricsRegistry = ReturnType<typeof createMetricsRegistry>;
 export interface ObservabilityOptions {
   /** Overrides the default `database` + `redis` checks (tests). */
   healthChecks?: HealthCheck[];
+  /** Pass the same registry to `createInternalApp`, so both listeners count into one `errors_total`. */
   metricsRegistry?: MetricsRegistry;
 }
 
@@ -93,9 +95,6 @@ export function createApp(
 
   const registry = observability.metricsRegistry ?? createMetricsRegistry('auth');
   registerDbPoolGauge(registry, () => getPgPool(dataSource));
-  const errorsCounter = createErrorsCounter(registry);
-  // Shared with the internal listener (see `createInternalApp`), which has no registry of its own.
-  app.locals.errorsCounter = errorsCounter;
   const healthChecks = observability.healthChecks ?? [
     createDatabaseCheck(dataSource),
     // Same Redis server as the session store; this connection is never in subscriber mode.
@@ -118,7 +117,9 @@ export function createApp(
       origin: env.app.allowedOrigins.split(',').map((origin) => origin.trim()),
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization'],
+      // The request id header is allowed and exposed, so the client can quote it in error reports.
+      allowedHeaders: [...CORS_ALLOWED_HEADERS],
+      exposedHeaders: [...CORS_EXPOSED_HEADERS],
     }),
   );
 
@@ -151,7 +152,7 @@ export function createApp(
   app.use('/users', createUsersRouter(usersService));
   app.use('/auth', createAuthRouter(authService));
 
-  app.use(createErrorHandler(logger, errorsCounter));
+  app.use(createErrorHandler(logger, createErrorsCounter(registry)));
 
   return app;
 }
@@ -164,8 +165,8 @@ export function createApp(
 export function createInternalApp(
   dataSource: DataSource,
   logger: WinstonLogger,
-  /** The public app's `errors_total` counter (`publicApp.locals.errorsCounter`); no-op when omitted. */
-  errorsCounter?: ErrorsCounterLike,
+  /** The public app's registry (created in `main.ts`); errors are not counted when omitted. */
+  registry?: MetricsRegistry,
 ): Application {
   const app = express();
 
@@ -180,7 +181,7 @@ export function createInternalApp(
     createInternalRouter(new AuthUserRepository(dataSource)),
   );
 
-  app.use(createErrorHandler(logger, errorsCounter));
+  app.use(createErrorHandler(logger, registry && createErrorsCounter(registry)));
 
   return app;
 }

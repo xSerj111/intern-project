@@ -1,7 +1,7 @@
 import 'reflect-metadata';
 import { env } from './config/env';
 
-import { WinstonLogger, type ErrorsCounterLike } from '@repo/shared';
+import { WinstonLogger, createMetricsRegistry } from '@repo/shared';
 import { initDatabase } from './config/database';
 import { createApp, createInternalApp } from './app';
 import { createRedisClient } from './config/redis';
@@ -21,12 +21,12 @@ async function bootstrap() {
     // 2. Initialize the Express app with injected dependencies
     // Dedicated connection for session-revocation pub/sub (publishing needs no subscriber mode)
     const sessionRedisClient = createRedisClient();
-    const app = createApp(dataSource, logger, redisService, sessionRedisClient);
-    const internalApp = createInternalApp(
-      dataSource,
-      logger,
-      app.locals.errorsCounter as ErrorsCounterLike,
-    );
+    // One registry, shared by the public and internal listeners (one `errors_total`).
+    const metricsRegistry = createMetricsRegistry('auth');
+    const app = createApp(dataSource, logger, redisService, sessionRedisClient, {
+      metricsRegistry,
+    });
+    const internalApp = createInternalApp(dataSource, logger, metricsRegistry);
     const port = env.app.port;
 
     // 3. Uruchomienie serwera

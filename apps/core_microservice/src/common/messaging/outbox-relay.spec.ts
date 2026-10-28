@@ -11,6 +11,7 @@ import {
   OUTBOX_POLL_INTERVAL_MS,
   OUTBOX_PURGE_INTERVAL_MS,
   OUTBOX_RETENTION_MS,
+  OUTBOX_STATS_INTERVAL_MS,
   OutboxRelay,
 } from './outbox-relay';
 
@@ -418,34 +419,131 @@ describe('OutboxRelay', () => {
       expect(await value('outbox_published_total')).toBe(0);
     });
 
-    it('sets the backlog gauges from one aggregate query per poll', async () => {
+    it('sets the backlog gauges from a background query on start', async () => {
       outbox.pendingStats.mockResolvedValue({ count: 4, oldestSeconds: 12.5 });
       relay.onModuleInit();
-      await jest.advanceTimersByTimeAsync(OUTBOX_POLL_INTERVAL_MS);
+      await flush();
+
+      const text = await registry.metrics();
 
       expect(outbox.pendingStats).toHaveBeenCalledTimes(1);
-      expect(await value('outbox_pending')).toBe(4);
-      expect(await value('outbox_oldest_pending_seconds')).toBe(12.5);
+      expect(text).toMatch(/^outbox_pending 4$/m);
+      expect(text).toMatch(/^outbox_oldest_pending_seconds 12.5$/m);
+    });
+
+    it('never queries the database on a scrape', async () => {
+      relay.onModuleInit();
+      await flush();
+      outbox.pendingStats.mockClear();
+
+      await registry.metrics();
+      await registry.metrics();
+
+      expect(outbox.pendingStats).not.toHaveBeenCalled();
+    });
+
+    it('refreshes the stats every 15 s, not on every poll', async () => {
+      relay.onModuleInit();
+      await flush();
+      expect(outbox.pendingStats).toHaveBeenCalledTimes(1);
+
+      await jest.advanceTimersByTimeAsync(OUTBOX_STATS_INTERVAL_MS - 1);
+      expect(outbox.pendingStats).toHaveBeenCalledTimes(1);
+
+      outbox.pendingStats.mockResolvedValue({ count: 2, oldestSeconds: 3 });
+      await jest.advanceTimersByTimeAsync(1);
+      expect(outbox.pendingStats).toHaveBeenCalledTimes(2);
+      expect(await value('outbox_pending')).toBe(2);
+    });
+
+    it('skips a refresh while the previous stats query is still running', async () => {
+      const gate = deferred();
+      outbox.pendingStats.mockImplementation(() =>
+        gate.promise.then(() => ({ count: 1, oldestSeconds: 1 })),
+      );
+      relay.onModuleInit();
+
+      await jest.advanceTimersByTimeAsync(OUTBOX_STATS_INTERVAL_MS * 3);
+      expect(outbox.pendingStats).toHaveBeenCalledTimes(1);
+
+      gate.resolve();
+      await flush();
+      expect(await value('outbox_pending')).toBe(1);
     });
 
     it('reports an oldest age of 0 when nothing is pending', async () => {
       outbox.pendingStats.mockResolvedValue({ count: 0, oldestSeconds: 7 });
       relay.onModuleInit();
-      await jest.advanceTimersByTimeAsync(OUTBOX_POLL_INTERVAL_MS);
+      await flush();
 
       expect(await value('outbox_pending')).toBe(0);
       expect(await value('outbox_oldest_pending_seconds')).toBe(0);
     });
 
-    it('keeps polling and the last gauge values when the stats query fails', async () => {
+    it('keeps the last gauge values and warns once per failure streak', async () => {
+      const warnSpy = jest.spyOn(Logger.prototype, 'warn');
       outbox.pendingStats
         .mockResolvedValueOnce({ count: 3, oldestSeconds: 1 })
-        .mockRejectedValueOnce(new Error('db down'));
+        .mockRejectedValueOnce(new Error('db down'))
+        .mockRejectedValueOnce(new Error('db down'))
+        .mockResolvedValueOnce({ count: 5, oldestSeconds: 2 })
+        .mockRejectedValueOnce(new Error('db down again'));
       relay.onModuleInit();
-      await jest.advanceTimersByTimeAsync(OUTBOX_POLL_INTERVAL_MS * 2);
+      await flush();
+      warnSpy.mockClear();
+      const tick = async () => {
+        await jest.advanceTimersByTimeAsync(OUTBOX_STATS_INTERVAL_MS);
+        return value('outbox_pending');
+      };
+      const statsWarns = () =>
+        warnSpy.mock.calls.filter(([m]) =>
+          String(m).includes('stats refresh failed'),
+        );
 
-      expect(outbox.pendingStats).toHaveBeenCalledTimes(2);
       expect(await value('outbox_pending')).toBe(3);
+      expect(await tick()).toBe(3);
+      expect(await tick()).toBe(3);
+      expect(statsWarns()).toHaveLength(1);
+
+      expect(await tick()).toBe(5);
+      expect(await tick()).toBe(5);
+      expect(statsWarns()).toHaveLength(2);
+    });
+
+    it('does not wait for a running stats query on destroy and drops its result', async () => {
+      const gate = deferred();
+      outbox.pendingStats.mockImplementation(() =>
+        gate.promise.then(() => ({ count: 9, oldestSeconds: 9 })),
+      );
+      relay.onModuleInit();
+      await flush();
+
+      await relay.onModuleDestroy();
+
+      gate.resolve();
+      await flush();
+      expect(await value('outbox_pending')).toBe(0);
+      expect(outbox.pendingStats).toHaveBeenCalledTimes(1);
+    });
+
+    it('a relay re-created on the same registry sets the shared gauges', async () => {
+      relay.onModuleInit();
+      await flush();
+      await relay.onModuleDestroy();
+
+      outbox.pendingStats.mockResolvedValue({ count: 6, oldestSeconds: 4 });
+      relay = new OutboxRelay(
+        dataSource as unknown as DataSource,
+        outbox,
+        eventBus,
+        { outbox: { maxAttempts: 3 } } as AppConfigService,
+        registry,
+      );
+      relay.onModuleInit();
+      await flush();
+
+      expect(await value('outbox_pending')).toBe(6);
+      expect(await value('outbox_oldest_pending_seconds')).toBe(4);
     });
 
     it('reuses metrics already registered on the registry', () => {

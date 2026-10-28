@@ -106,7 +106,7 @@ export class AppConfigService {
     if (raw === undefined || raw === '') {
       return this.config.get<string>('NODE_ENV') !== 'production';
     }
-    return raw.toLowerCase() === 'true';
+    return raw === 'true';
   }
 
   /** Queries slower than this many milliseconds are logged as slow. */

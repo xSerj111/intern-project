@@ -35,7 +35,7 @@ export class EnvironmentVariables {
 
   /** Serve Swagger UI; default true unless NODE_ENV=production. */
   @IsOptional()
-  @Matches(/^(true|false)$/i, {
+  @Matches(/^(true|false)$/, {
     message: 'SWAGGER_ENABLED must be "true" or "false"',
   })
   SWAGGER_ENABLED?: string;
@@ -150,7 +150,11 @@ function placeholderErrors(config: Record<string, unknown>): string[] {
 export function validate(
   config: Record<string, unknown>,
 ): EnvironmentVariables {
-  const validated = plainToInstance(EnvironmentVariables, config, {
+  // An empty value counts as unset, like the getters in AppConfigService.
+  const present = Object.fromEntries(
+    Object.entries(config).filter(([, value]) => value !== ''),
+  );
+  const validated = plainToInstance(EnvironmentVariables, present, {
     enableImplicitConversion: true,
   });
   const errors = validateSync(validated, { skipMissingProperties: false });
@@ -158,7 +162,7 @@ export function validate(
     ...errors.map(
       (e) => `${e.property}: ${Object.values(e.constraints ?? {}).join('; ')}`,
     ),
-    ...placeholderErrors(config),
+    ...placeholderErrors(present),
   ];
   if (lines.length > 0) {
     throw new Error(

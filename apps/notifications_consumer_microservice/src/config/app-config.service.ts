@@ -30,7 +30,7 @@ export class AppConfigService implements OnModuleInit {
    */
   get swaggerEnabled(): boolean {
     const raw = this.config.get<string>('SWAGGER_ENABLED');
-    if (raw !== undefined && raw !== '') return raw.toLowerCase() === 'true';
+    if (raw !== undefined && raw !== '') return raw === 'true';
     return this.config.get<string>('NODE_ENV') !== 'production';
   }
 

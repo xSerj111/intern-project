@@ -1,18 +1,16 @@
-import type { IncomingMessage, ServerResponse } from "http";
+import type { ServerResponse } from "http";
 import { Counter, Histogram, Registry } from "prom-client";
+import {
+  isExcludedPath,
+  routeLabel,
+  trackRoute,
+  type RoutedRequest,
+} from "./http-route";
 
 const DURATION_NAME = "http_request_duration_seconds";
 const ERRORS_NAME = "http_request_errors_total";
 const LABELS = ["method", "route", "status_class"];
 const BUCKETS = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5];
-const EXCLUDED_PATHS = new Set(["/health", "/health/details", "/metrics"]);
-
-/** The subset of an Express request the middleware reads (kept structural so shared has no express dependency). */
-type MetricsRequest = IncomingMessage & {
-  baseUrl?: string;
-  originalUrl?: string;
-  route?: { path?: unknown };
-};
 
 function getOrCreateHistogram(registry: Registry): Histogram<string> {
   const existing = registry.getSingleMetric(DURATION_NAME);
@@ -37,13 +35,6 @@ function getOrCreateCounter(registry: Registry): Counter<string> {
   });
 }
 
-/** `/posts/:id` from the matched Express route, never the raw URL (cardinality, leaked ids). */
-function routeLabel(req: MetricsRequest): string {
-  const path = req.route?.path;
-  if (typeof path !== "string") return "unmatched";
-  return `${req.baseUrl ?? ""}${path}`;
-}
-
 /**
  * Express-compatible middleware recording request duration and 4xx/5xx counts
  * on `registry`. Metrics are registered idempotently, so it can be created
@@ -54,12 +45,12 @@ export function httpMetricsMiddleware(registry: Registry) {
   const duration = getOrCreateHistogram(registry);
   const errors = getOrCreateCounter(registry);
 
-  return (req: MetricsRequest, res: ServerResponse, next: () => void): void => {
-    const path = (req.originalUrl ?? req.url ?? "").split("?")[0];
-    if (EXCLUDED_PATHS.has(path)) {
+  return (req: RoutedRequest, res: ServerResponse, next: () => void): void => {
+    if (isExcludedPath(req)) {
       next();
       return;
     }
+    trackRoute(req, res);
 
     const start = process.hrtime.bigint();
     res.on("finish", () => {

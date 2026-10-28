@@ -67,7 +67,7 @@ Each service has its own isolated prom-client registry. Every series carries a `
 | `http_request_duration_seconds` | histogram | `method`, `route`, `status_class` | Buckets 0.005 s to 5 s. `status_class` is `2xx`, `4xx`, `5xx`. Its `_count` is the request count |
 | `http_request_errors_total`     | counter   | `method`, `route`, `status_class` | Responses with status 400 or above                                                               |
 
-`route` is the matched route template (`/posts/:id`), or `unmatched` when no route matched. `/health`, `/health/details` and `/metrics` are not recorded.
+`route` is the matched route template (`/posts/:id`), or `unmatched` when no route matched or the matched route passed the request on and Express answered with its default 404 page. `/health`, `/health/details` and `/metrics` are not recorded.
 
 ### Database
 
@@ -112,7 +112,14 @@ Queues seen here: `notifications.events` and `notifications.email` (notification
 | -------------- | ------- | --------------------------------------------------------------- |
 | `errors_total` | counter | `source` = `http`, `amqp`, `process`; `type` = error class name |
 
-`source="http"` counts every `DomainError` mapped by `DomainExceptionFilter` (4xx domain errors included) and every error handled by auth's error handler. `source="amqp"` counts failed message handling (every failed attempt, including poison messages). `source="process"` counts `uncaughtException` and `unhandledRejection`, which log one JSON line and then exit with code 1. Auth's error handler feeds the same counter; malformed JSON bodies (400) are neither logged nor counted.
+`source="http"` counts error responses, but each service counts at a different place, so the three do not count exactly the same set:
+
+- **Core and notifications** count in the global `AllExceptionsFilter` (`@repo/shared`), which sees every exception thrown while handling a matched route: domain errors (4xx and 5xx, by class name, e.g. `AccessDeniedError`, mapped by `DomainExceptionFilter`) and everything else, including unhandled exceptions answered with 500 (`TypeError`, ...) and Nest `HttpException`s such as `BadRequestException` from validation or `UnauthorizedException` from guards. Not counted: the `NotFoundException` Nest raises for a request that matches no route (`Cannot GET /x`, a 404 that scanners and typos produce), and `HttpException`s with a status below 400.
+- **Auth** counts in its Express error handler, so only errors passed to `next(err)`: domain errors, unhandled exceptions (500) and malformed JSON bodies (400, `SyntaxError`, not logged). Not counted: request-body validation failures (answered 400 without throwing), requests that match no route (Express's default 404) and the internal-token rejections on `/metrics` and `/health/details`.
+
+Every error response, counted or not, still appears in `http_request_errors_total`. Counting never changes the response. `source="amqp"` counts failed message handling (every failed attempt, including poison messages).
+
+`source="process"` (`uncaughtException`, `unhandledRejection`) is best-effort: the handler logs one JSON line to stderr and exits with code 1 right after incrementing, so the increment is almost never scraped. A process crash surfaces as that fatal log line plus `up == 0` (the `ServiceDown` alert) and container restarts, not through this counter.
 
 ### Process
 
@@ -124,13 +131,13 @@ All backends use the shared `WinstonLogger` from `@repo/shared`.
 
 - **Format**: pretty, colourised lines unless `NODE_ENV=production`; one JSON object per line in production (`timestamp`, `level`, `message`, `context`, `correlationId`, `stack` on errors, plus structured data such as `props`).
 - **`LOG_LEVEL`**: optional, one of `error`, `warn`, `info`, `debug`, `verbose` (the shared logger's levels). Default `info` in production, `debug` otherwise. An invalid value falls back to the default and logs one warning.
-- **Access log**: one line per HTTP response (`context: "AccessLog"`) with method, route template, status and duration in ms. Never query strings, bodies, headers or tokens. Status 500 and above is logged at `error`, the rest at `info`. Health and metrics requests are skipped.
+- **Access log**: one line per HTTP response (`context: "AccessLog"`) with method, route template, status and duration in ms. The route template is the same label the HTTP metrics use (one shared helper), captured when the route matches, so responses written by an app-level error handler keep the router prefix (`/auth/login`, not `/login`). Never query strings, bodies, headers or tokens. Status 500 and above is logged at `error`, the rest at `info`. Health and metrics requests are skipped.
 - Logs never contain secrets, tokens, cookies or request bodies.
 - Fatal process errors are written synchronously as JSON to stderr, then the process exits 1.
 
 ### Request ids
 
-Every HTTP request runs inside a request context. The id is the `X-Request-Id` request header when it matches `[A-Za-z0-9._-]{1,128}`, otherwise a fresh UUID. It is echoed on the response in `X-Request-Id`, and every log line written while handling the request carries it as `correlationId`. Browsers cannot set it cross-origin (it is not in the CORS `allowedHeaders`), so use `curl` or read it from the server log when debugging.
+Every HTTP request runs inside a request context. The id is the `X-Request-Id` request header when it matches `[A-Za-z0-9._-]{1,128}`, otherwise a fresh UUID. It is echoed on the response in `X-Request-Id`, and every log line written while handling the request carries it as `correlationId`. CORS in all three backends allows the `X-Request-Id` request header and exposes `x-request-id` on responses, so the browser client can both send an id and read the one echoed back.
 
 Over RabbitMQ the same id travels in the `x-correlation-id` message header:
 
@@ -232,7 +239,7 @@ Rules live in `docker/monitoring/alerts.yml`, evaluated every 15 s. **There is n
 
 **`High5xxRate`**: more than 5% of a service's requests fail with 5xx.
 
-1. Panels "Error rate" and "Errors by source and type" show the affected service and error class (`errors_total{source="http",type=...}`, which counts domain errors, so a 5xx from an unexpected exception shows only in the HTTP panels and the logs).
+1. Panels "Error rate" and "Errors by source and type" show the affected service and error class (`errors_total{source="http",type=...}`, which includes unexpected exceptions; see Errors above for what each service counts).
 2. `curl -H "X-Internal-Token: $TOKEN" .../health/details` for a `down` dependency (database, Redis, broker).
 3. Find a failing request in the logs (`AccessLog` lines with status 5xx at `error` level) and follow its `correlationId`; the stack is logged next to it.
 

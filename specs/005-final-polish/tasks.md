@@ -9,10 +9,10 @@ description: "Task list for the final feature: docs, deployment, observability, 
 **Commit prefix**: `feat(INO-12)`
 
 **Acceptance criteria** (the spec item):
-- [ ] All documentation is complete and accurate
-- [ ] Deployment guides are working
-- [ ] Monitoring and logging are configured
-- [ ] Environment management is proper
+- [X] All documentation is complete and accurate ([B7-docs-check](./impl/run/B7-docs-check.md), [B6-evidence](./impl/run/B6-evidence.md))
+- [X] Deployment guides are working ([B5-evidence](./impl/run/B5-evidence.md), [B8-evidence](./impl/run/B8-evidence.md))
+- [X] Monitoring and logging are configured ([B3-evidence](./impl/run/B3-evidence.md), [B4-evidence](./impl/run/B4-evidence.md))
+- [X] Environment management is proper ([B2-evidence](./impl/run/B2-evidence.md))
 
 ## Format: `[ID] [tags] Description`
 
@@ -250,11 +250,11 @@ All doc lanes read `specs/005-final-polish/impl/progress.md` Global decisions (e
 
 ## Phase 8: Final review and verification — Batch B8 (solo)
 
-- [ ] T079 [orch] `/code-review high` over `main...HEAD` (Skill `code-review`); triage the findings into fix/skip with a reason
-- [ ] T080 Fix the confirmed findings (lanes allowed for large ones; same ownership rules)
-- [ ] T081 [gate] Full gate from clean installs: `npm ci`, `npx turbo run build type-check lint:check`, `npm run test:cov` for the 3 backends + shared, core e2e, notifications e2e
-- [ ] T082 [evidence] Re-run T047 (clean deploy with `-p innogram-verify`) and T048 (Playwright) on the final code
-- [ ] T083 [orch] Tick the acceptance criteria at the top of this file with evidence links (`impl/run/*`); write `specs/005-final-polish/impl/pr-description.md` (summary, audit before/after table, how to verify, follow-ups)
+- [X] T079 [orch] `/code-review high` over `main...HEAD` (Skill `code-review`); triage the findings into fix/skip with a reason
+- [X] T080 Fix the confirmed findings (lanes allowed for large ones; same ownership rules)
+- [X] T081 [gate] Full gate from clean installs: `npm ci`, `npx turbo run build type-check lint:check`, `npm run test:cov` for the 3 backends + shared, core e2e, notifications e2e
+- [X] T082 [evidence] Re-run T047 (clean deploy with `-p innogram-verify`) and T048 (Playwright) on the final code
+- [X] T083 [orch] Tick the acceptance criteria at the top of this file with evidence links (`impl/run/*`); write `specs/005-final-polish/impl/pr-description.md` (summary, audit before/after table, how to verify, follow-ups)
 - [ ] T084 [human] Push, open the PR, CI (`ci.yml`, `docker-images.yml`) green; after merge, GHCR images published
 
 **Checkpoint**: All four acceptance criteria are ticked with evidence.

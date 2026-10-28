@@ -1,8 +1,9 @@
 import type { Server } from 'node:http';
 import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { BaseExceptionFilter } from '@nestjs/core';
 import { Test, type TestingModuleBuilder } from '@nestjs/testing';
 import {
-  DomainExceptionFilter,
+  AllExceptionsFilter,
   WinstonLogger,
   accessLogMiddleware,
   createErrorsCounter,
@@ -31,7 +32,8 @@ export interface E2eApp {
 
 /**
  * Boots the full `AppModule` like `src/main.ts` does for requests (global
- * `ValidationPipe` + `DomainExceptionFilter`), listening on an ephemeral port.
+ * `ValidationPipe` + `AllExceptionsFilter`, which maps domain errors and
+ * counts every error response in `errors_total`), listening on an ephemeral port.
  *
  * `env` is applied to `process.env` BEFORE `AppModule` is imported, so config
  * read at import or construction time (e.g. `PERF_INSTRUMENTATION=true`, short
@@ -92,7 +94,10 @@ export async function createE2eApp(
       new ValidationPipe({ whitelist: true, transform: true }),
     );
     app.useGlobalFilters(
-      new DomainExceptionFilter(createErrorsCounter(registry)),
+      new AllExceptionsFilter(
+        new BaseExceptionFilter(app.getHttpAdapter()),
+        createErrorsCounter(registry),
+      ),
     );
     await app.listen(0);
     return {

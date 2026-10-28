@@ -1,9 +1,11 @@
 import { ValidationPipe } from '@nestjs/common';
-import { NestFactory } from '@nestjs/core';
+import { BaseExceptionFilter, NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { DataSource } from 'typeorm';
 import {
-  DomainExceptionFilter,
+  AllExceptionsFilter,
+  CORS_ALLOWED_HEADERS,
+  CORS_EXPOSED_HEADERS,
   WinstonLogger,
   accessLogMiddleware,
   createErrorsCounter,
@@ -54,7 +56,9 @@ async function bootstrap() {
 
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
 
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+    // The request id header is allowed and exposed, so the client can quote it in error reports.
+    allowedHeaders: [...CORS_ALLOWED_HEADERS],
+    exposedHeaders: [...CORS_EXPOSED_HEADERS],
   });
 
   appConfig.assertSafeForEnvironment();
@@ -76,9 +80,13 @@ async function bootstrap() {
   // Validate & sanitize all incoming DTOs (strips unknown props, coerces types).
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
 
-  // Map framework-agnostic domain errors (entities/repositories) to HTTP responses.
+  // Map framework-agnostic domain errors (entities/repositories) to HTTP responses;
+  // everything else keeps Nest's default response. Every error response is counted.
   app.useGlobalFilters(
-    new DomainExceptionFilter(createErrorsCounter(registry)),
+    new AllExceptionsFilter(
+      new BaseExceptionFilter(app.getHttpAdapter()),
+      createErrorsCounter(registry),
+    ),
   );
 
   // Swagger UI at /api (http://localhost:3001/api); off by default in production.

@@ -1,12 +1,14 @@
 import { ValidationPipe } from '@nestjs/common';
-import { NestFactory } from '@nestjs/core';
+import { BaseExceptionFilter, NestFactory } from '@nestjs/core';
 import {
   accessLogMiddleware,
+  AllExceptionsFilter,
   createErrorsCounter,
   type DbPoolStats,
-  DomainExceptionFilter,
   httpMetricsMiddleware,
   registerDbPoolGauge,
+  CORS_ALLOWED_HEADERS,
+  CORS_EXPOSED_HEADERS,
   requestIdMiddleware,
   WinstonLogger,
   type createMetricsRegistry,
@@ -40,13 +42,19 @@ async function bootstrap() {
     origin: appConfig.clientUrl,
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+    // The request id header is allowed and exposed, so the client can quote it in error reports.
+    allowedHeaders: [...CORS_ALLOWED_HEADERS],
+    exposedHeaders: [...CORS_EXPOSED_HEADERS],
   });
 
-  // Validate & sanitize incoming DTOs; map domain errors -> HTTP (shared infra).
+  // Validate & sanitize incoming DTOs; map domain errors -> HTTP (shared infra),
+  // other errors keep Nest's default response. Every error response is counted.
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   app.useGlobalFilters(
-    new DomainExceptionFilter(createErrorsCounter(registry)),
+    new AllExceptionsFilter(
+      new BaseExceptionFilter(app.getHttpAdapter()),
+      createErrorsCounter(registry),
+    ),
   );
 
   // On by default; off in production unless SWAGGER_ENABLED=true.

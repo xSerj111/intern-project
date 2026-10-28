@@ -10,6 +10,10 @@ import {
   CHAT_REALTIME_PORT,
   type IChatRealtimePort,
 } from './../src/modules/chats/domain/interfaces/chat-realtime.port';
+import {
+  ChatsGateway,
+  chatRoom,
+} from './../src/modules/chats/infrastructure/realtime/chats.gateway';
 import { cleanupE2eData } from './helpers/cleanup.helpers';
 import {
   type ConnectResult,
@@ -294,6 +298,19 @@ describe('Realtime chat, US1 (e2e)', () => {
         track(c.accessToken),
       ]);
       expect([sA1.ok, sA2.ok, sB.ok, sC.ok]).toEqual([true, true, true, true]);
+
+      // The client sees `connect` before handleConnection has joined the chat
+      // rooms; typing from a socket outside the room is dropped, so wait.
+      const room = app.get(ChatsGateway).server.in(chatRoom(chatId));
+      const ids = [sA1, sA2, sB].map((s) => s.socket.id as string);
+      let inRoom: string[] = [];
+      const deadline = Date.now() + 3000;
+      while (Date.now() < deadline) {
+        inRoom = (await room.fetchSockets()).map((s) => s.id);
+        if (ids.every((id) => inRoom.includes(id))) break;
+        await sleep(25);
+      }
+      expect(inRoom).toEqual(expect.arrayContaining(ids));
     });
 
     it('relays typing:start to the other participant, never to the sender or an outsider', async () => {

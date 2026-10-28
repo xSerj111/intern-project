@@ -90,7 +90,6 @@ All three backends follow Ports & Adapters: domain entities and port interfaces 
     "lint:check": { "dependsOn": ["^build"] },
     "type-check": { "dependsOn": ["^build"] },
     "client_app#type-check": { "dependsOn": ["^build", "build"] },
-    "clean": { "cache": false },
     "db:migrate": { "cache": false },
     "db:seed": { "cache": false },
   },

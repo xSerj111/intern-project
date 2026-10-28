@@ -24,14 +24,16 @@ export function createErrorHandler(
     // eslint-disable-next-line @typescript-eslint/no-unused-vars -- required for Express arity
     next: NextFunction,
   ): void => {
+    // Every error response counts as errors_total{source="http",type=<class>}.
+    recordError(errorsCounter, 'http', err);
+
     if (isMalformedJson(err)) {
-      // Client error: neither logged nor counted, and the body is never echoed.
+      // Client error: not logged, and the body is never echoed.
       res.status(400).json({ message: 'Malformed JSON body' });
       return;
     }
 
     if (!(err instanceof DomainError)) {
-      recordError(errorsCounter, 'http', err);
       // Message + stack only: never the raw error object or the request body.
       // Nest-style (message, stack, context) puts the stack in its own field.
       logger.error(`Unhandled Server Error: ${err?.message}`, err?.stack, 'ErrorHandler');
