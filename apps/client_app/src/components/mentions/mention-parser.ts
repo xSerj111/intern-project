@@ -1,22 +1,55 @@
+import { HASHTAG_PATTERN_SOURCE, normalizeHashtag } from '@repo/contracts';
+
 /** Characters allowed inside a handle; usernames come from email local parts. */
 const HANDLE = String.raw`[\w.-]*\w`;
 const MIN_SEARCH_LENGTH = 2;
 
 export type MentionPart =
   | { type: 'text'; value: string }
-  | { type: 'mention'; value: string; username: string };
+  | { type: 'mention'; value: string; username: string }
+  | { type: 'hashtag'; value: string; tag: string };
 
-/** Split text into plain runs and `@username` mentions (not `a@b.com`). */
-export function splitMentions(text: string): MentionPart[] {
-  const parts: MentionPart[] = [];
-  let last = 0;
+/**
+ * Split text into plain runs, `@username` mentions (not `a@b.com`) and
+ * `#hashtags`. The text is NFC-normalized first, as core does when it extracts
+ * hashtags, so an NFD `#Café` yields the same tag on both sides.
+ */
+export function splitMentions(raw: string): MentionPart[] {
+  const text = raw.normalize('NFC');
+  const spans: { start: number; end: number; part: MentionPart }[] = [];
+
   for (const match of text.matchAll(new RegExp(`@(${HANDLE})`, 'g'))) {
     const start = match.index;
     // `name@host` is an email address, not a mention.
     if (start > 0 && /[\w.-]/.test(text[start - 1])) continue;
-    if (start > last) parts.push({ type: 'text', value: text.slice(last, start) });
-    parts.push({ type: 'mention', value: match[0], username: match[1] });
-    last = start + match[0].length;
+    spans.push({
+      start,
+      end: start + match[0].length,
+      part: { type: 'mention', value: match[0], username: match[1] },
+    });
+  }
+  for (const match of text.matchAll(new RegExp(HASHTAG_PATTERN_SOURCE, 'gu'))) {
+    spans.push({
+      start: match.index,
+      end: match.index + match[0].length,
+      part: {
+        type: 'hashtag',
+        value: match[0],
+        tag: normalizeHashtag(match[1]),
+      },
+    });
+  }
+
+  spans.sort((a, b) => a.start - b.start);
+  const parts: MentionPart[] = [];
+  let last = 0;
+  for (const span of spans) {
+    if (span.start < last) continue; // overlaps an earlier match
+    if (span.start > last) {
+      parts.push({ type: 'text', value: text.slice(last, span.start) });
+    }
+    parts.push(span.part);
+    last = span.end;
   }
   if (last < text.length) parts.push({ type: 'text', value: text.slice(last) });
   return parts;

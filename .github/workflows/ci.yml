@@ -56,6 +56,7 @@ jobs:
           - { name: auth, ws: auth_microservice, dir: apps/auth_microservice }
           - { name: notifications, ws: notifications_consumer_microservice, dir: apps/notifications_consumer_microservice }
           - { name: shared, ws: '@repo/shared', dir: packages/shared }
+          - { name: client, ws: client_app, dir: apps/client_app }
 
     steps:
       - name: Checkout repository

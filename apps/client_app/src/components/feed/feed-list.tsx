@@ -3,9 +3,9 @@
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { Camera } from 'lucide-react';
 import Link from 'next/link';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, type ReactNode } from 'react';
 
-import type { IPostResponse } from '@repo/contracts';
+import type { IFeedPage, IPostResponse } from '@repo/contracts';
 
 import { getFeed } from '../../lib/api/feed';
 import { postKeys } from '../../lib/api/posts';
@@ -32,27 +32,58 @@ function FeedSkeletons({ count }: { count: number }) {
   );
 }
 
-/** Home feed: the signed-in user's posts, loaded page by page while scrolling. */
-export function FeedList() {
+function fetchHomePage(
+  cursor?: string,
+  token?: string | null,
+  signal?: AbortSignal,
+): Promise<IFeedPage> {
+  return getFeed({ cursor, limit: PAGE_SIZE, token, signal });
+}
+
+interface FeedListProps {
+  /**
+   * Query key prefix; the user id is appended. Keep it under `postKeys.all`
+   * so post mutations (create, delete, comment, profile edit) refetch it.
+   * Defaults to the home feed key.
+   */
+  queryKey?: readonly unknown[];
+  /** Loads one page; defaults to the home feed (`GET /posts/feed`). */
+  fetchPage?: (cursor?: string, token?: string | null) => Promise<IFeedPage>;
+  /** Shown when the first page has no posts; defaults to the home feed text. */
+  emptyState?: ReactNode;
+}
+
+/**
+ * Signed-in user's posts, loaded page by page while scrolling. Home feed by
+ * default; pass `queryKey` and `fetchPage` to list any other post feed.
+ */
+export function FeedList({
+  queryKey,
+  fetchPage,
+  emptyState,
+}: FeedListProps = {}) {
   const { getAccessToken, isHydrated, isSignedIn, user } = useAuth();
   const sentinel = useRef<HTMLDivElement>(null);
+  // A custom feed (e.g. a tag page) is public; only the home feed needs login.
+  const isCustom = fetchPage !== undefined;
 
   const query = useInfiniteQuery({
-    queryKey: [...postKeys.feed(), user?.id ?? null],
+    queryKey: [...(queryKey ?? postKeys.feed()), user?.id ?? null],
     queryFn: ({ pageParam, signal }) =>
-      getFeed({
-        cursor: pageParam,
-        limit: PAGE_SIZE,
-        token: getAccessToken(),
-        signal,
-      }),
+      fetchPage
+        ? fetchPage(pageParam, getAccessToken())
+        : fetchHomePage(pageParam, getAccessToken(), signal),
     initialPageParam: undefined as string | undefined,
     getNextPageParam: (last) => last.nextCursor ?? undefined,
-    enabled: isHydrated && isSignedIn,
+    enabled: isHydrated && (isCustom || isSignedIn),
   });
 
-  const { hasNextPage, isFetchingNextPage, isFetchNextPageError, fetchNextPage } =
-    query;
+  const {
+    hasNextPage,
+    isFetchingNextPage,
+    isFetchNextPageError,
+    fetchNextPage,
+  } = query;
 
   // Load the next page shortly before the sentinel scrolls into view.
   useEffect(() => {
@@ -89,7 +120,7 @@ export function FeedList() {
     return <FeedSkeletons count={2} />;
   }
 
-  if (!isSignedIn) {
+  if (!isCustom && !isSignedIn) {
     return (
       <EmptyState
         icon={Camera}
@@ -134,11 +165,13 @@ export function FeedList() {
 
   if (posts.length === 0) {
     return (
-      <EmptyState
-        icon={Camera}
-        title="Follow people to fill your feed"
-        description="Posts from the people you follow will show up here."
-      />
+      emptyState ?? (
+        <EmptyState
+          icon={Camera}
+          title="Follow people to fill your feed"
+          description="Posts from the people you follow will show up here."
+        />
+      )
     );
   }
 

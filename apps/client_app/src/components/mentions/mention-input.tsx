@@ -8,12 +8,14 @@ import {
   useState,
   type ChangeEvent,
   type KeyboardEvent,
+  type ReactNode,
   type Ref,
   type SyntheticEvent,
 } from 'react';
 
 import { searchProfiles } from '../../lib/api/profile';
 import { useAuth } from '../../lib/auth/auth-context';
+import { cx } from '../../lib/cx';
 import { Avatar } from '../ui/avatar';
 import { Textarea } from '../ui/input';
 
@@ -39,6 +41,15 @@ interface MentionInputProps {
   rows?: number;
   /** Called on Esc while the suggestion list is closed (e.g. cancel an inline form). */
   onEscape?: () => void;
+  disabled?: boolean;
+  /** Helper text under a multiline field (e.g. a character counter). */
+  hint?: ReactNode;
+  /** Error text under a multiline field. */
+  error?: ReactNode;
+  /** Full-width block (not a flex item) whose suggestions open below, for form composers. */
+  block?: boolean;
+  /** Ref to the underlying `<input>` / `<textarea>`. */
+  fieldRef?: Ref<Field>;
 }
 
 type Field = HTMLInputElement | HTMLTextAreaElement;
@@ -60,10 +71,20 @@ export function MentionInput({
   autoFocus,
   rows,
   onEscape,
+  disabled,
+  hint,
+  error,
+  block = false,
+  fieldRef: externalRef,
 }: MentionInputProps) {
   const { accessToken } = useAuth();
   const listId = useId();
   const fieldRef = useRef<Field>(null);
+  const setField = (node: Field | null) => {
+    fieldRef.current = node;
+    if (typeof externalRef === 'function') externalRef(node);
+    else if (externalRef) externalRef.current = node;
+  };
   const pendingCaret = useRef<number | null>(null);
   const [trigger, setTrigger] = useState<MentionTrigger | null>(null);
   const [dismissedAt, setDismissedAt] = useState<number | null>(null);
@@ -154,6 +175,7 @@ export function MentionInput({
     maxLength,
     placeholder,
     autoFocus,
+    disabled,
     autoComplete: 'off',
     role: 'combobox',
     'aria-label': ariaLabel,
@@ -168,17 +190,19 @@ export function MentionInput({
   };
 
   return (
-    <div className={styles.wrapper}>
+    <div className={cx(styles.wrapper, block && styles.block)}>
       {multiline ? (
         <Textarea
           {...shared}
-          ref={fieldRef as Ref<HTMLTextAreaElement>}
+          ref={setField}
           rows={rows}
+          hint={hint}
+          error={error}
         />
       ) : (
         <input
           {...shared}
-          ref={fieldRef as Ref<HTMLInputElement>}
+          ref={setField}
           className={inputClassName}
         />
       )}
@@ -187,7 +211,7 @@ export function MentionInput({
           id={listId}
           role="listbox"
           aria-label="Mention suggestions"
-          className={styles.list}
+          className={cx(styles.list, block && styles.listBelow)}
           // Keep focus in the field so the blur handler doesn't close the list first.
           onMouseDown={(event) => event.preventDefault()}
         >

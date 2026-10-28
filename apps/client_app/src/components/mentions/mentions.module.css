@@ -1,8 +1,10 @@
-.mention {
+.mention,
+.hashtag {
   font-weight: var(--weight-semibold);
   color: var(--color-link);
 }
 
-.mention:hover {
+.mention:hover,
+.hashtag:hover {
   text-decoration: underline;
 }
