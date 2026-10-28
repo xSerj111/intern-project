@@ -34,8 +34,8 @@ export class AppConfigService {
       type: 'postgres' as const,
       host: this.config.get<string>('POSTGRES_HOST', 'localhost'),
       port: parseInt(this.config.get<string>('POSTGRES_PORT', '5432'), 10),
-      username: this.config.get<string>('POSTGRES_USER', 'postgres'),
-      password: this.config.get<string>('POSTGRES_PASSWORD', 'postgres'),
+      username: this.config.getOrThrow<string>('POSTGRES_USER'),
+      password: this.config.getOrThrow<string>('POSTGRES_PASSWORD'),
       database: this.config.get<string>('DB_NAME_CORE', 'innogram_core'),
       synchronize: false, // Strict migrations mode
     };

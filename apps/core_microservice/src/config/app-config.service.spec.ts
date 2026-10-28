@@ -154,16 +154,30 @@ describe('AppConfigService', () => {
 
   describe('postgres', () => {
     it('uses local defaults and never synchronizes', () => {
-      expect(build().postgres).toEqual({
+      expect(
+        build({ POSTGRES_USER: 'u', POSTGRES_PASSWORD: 'p' }).postgres,
+      ).toEqual({
         type: 'postgres',
         host: 'localhost',
         port: 5432,
-        username: 'postgres',
-        password: 'postgres',
+        username: 'u',
+        password: 'p',
         database: 'innogram_core',
         synchronize: false,
       });
     });
+
+    it.each(['POSTGRES_USER', 'POSTGRES_PASSWORD'])(
+      'has no default for %s',
+      (key) => {
+        const env: Record<string, string> = {
+          POSTGRES_USER: 'u',
+          POSTGRES_PASSWORD: 'p',
+        };
+        delete env[key];
+        expect(() => build(env).postgres).toThrow(key);
+      },
+    );
 
     it('parses the overrides', () => {
       expect(

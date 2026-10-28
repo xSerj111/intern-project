@@ -10,6 +10,8 @@ const valid = (): Record<string, unknown> => ({
   SMTP_PORT: '1025',
   SMTP_SECURE: 'false',
   SMTP_FROM: 'Innogram <no-reply@innogram.local>',
+  POSTGRES_USER: 'innogram_user',
+  POSTGRES_PASSWORD: 'db-password',
 });
 
 describe('notifications env validation', () => {
@@ -27,6 +29,7 @@ describe('notifications env validation', () => {
         NOTIFICATIONS_PORT: '3003',
         POSTGRES_PORT: '5432',
         REDIS_PORT: '6379',
+        REDIS_PASSWORD: 'redis-password',
         SMTP_USER: '',
         SMTP_PASS: '',
       }),
@@ -43,6 +46,8 @@ describe('notifications env validation', () => {
     'SMTP_PORT',
     'SMTP_SECURE',
     'SMTP_FROM',
+    'POSTGRES_USER',
+    'POSTGRES_PASSWORD',
   ])('names the missing required variable %s', (key) => {
     const env = valid();
     delete env[key];
@@ -149,18 +154,37 @@ describe('notifications env validation', () => {
     }
   });
 
-  it.each(['JWT_SECRET', 'INTERNAL_API_TOKEN'])(
-    'rejects the CHANGE_ME placeholder for %s in production only',
-    (key) => {
-      const config = { ...valid(), [key]: 'CHANGE_ME'.padEnd(40, '_') };
-      expect(() => validate({ ...config, NODE_ENV: 'production' })).toThrow(
-        new RegExp(
-          `${key}: must not be the \\.env\\.production\\.example placeholder`,
-        ),
-      );
-      expect(() =>
-        validate({ ...config, NODE_ENV: 'development' }),
-      ).not.toThrow();
-    },
-  );
+  it.each([
+    'JWT_SECRET',
+    'INTERNAL_API_TOKEN',
+    'POSTGRES_PASSWORD',
+    'REDIS_PASSWORD',
+    'RABBITMQ_URL',
+    'SMTP_PASS',
+  ])('rejects the CHANGE_ME placeholder for %s in production only', (key) => {
+    const config = {
+      ...valid(),
+      REDIS_PASSWORD: 'redis-password',
+      [key]: 'CHANGE_ME'.padEnd(40, '_'),
+    };
+    expect(() => validate({ ...config, NODE_ENV: 'production' })).toThrow(
+      new RegExp(
+        `${key}: must not be the \\.env\\.production\\.example placeholder`,
+      ),
+    );
+    expect(() =>
+      validate({ ...config, NODE_ENV: 'development' }),
+    ).not.toThrow();
+  });
+  it('requires REDIS_PASSWORD in production only', () => {
+    expect(() => validate({ ...valid(), NODE_ENV: 'production' })).toThrow(
+      'REDIS_PASSWORD: is required in production',
+    );
+    expect(() =>
+      validate({ ...valid(), NODE_ENV: 'production', REDIS_PASSWORD: '' }),
+    ).toThrow('REDIS_PASSWORD: is required in production');
+    expect(() =>
+      validate({ ...valid(), NODE_ENV: 'development' }),
+    ).not.toThrow();
+  });
 });

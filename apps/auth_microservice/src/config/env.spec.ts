@@ -4,11 +4,14 @@ const REQUIRED = {
   CORE_SERVICE_URL: 'http://core.test:3001',
   AUTH_ALLOWED_ORIGINS: 'http://localhost:3000',
   INTERNAL_API_TOKEN: 'a'.repeat(40),
+  POSTGRES_USER: 'db-user',
+  POSTGRES_PASSWORD: 'db-password',
 };
 
 const PROD_SECRETS = {
   JWT_SECRET: 'p'.repeat(40),
   JWT_REFRESH_SECRET: 'r'.repeat(40),
+  REDIS_PASSWORD: 'redis-password',
 };
 
 const MANAGED_KEYS = [
@@ -110,8 +113,8 @@ describe('config/env', () => {
       expect(env.db).toEqual({
         host: 'localhost',
         port: 5432,
-        username: 'innogram_user',
-        password: 'innogram_password',
+        username: REQUIRED.POSTGRES_USER,
+        password: REQUIRED.POSTGRES_PASSWORD,
         database: 'innogram_auth',
       });
       expect(env.redis).toEqual({ host: 'localhost', port: 6379, password: undefined });
@@ -278,5 +281,27 @@ describe('config/env', () => {
     it('does not apply the length rule outside production', () => {
       expect(loadEnv({ JWT_SECRET: 'short' }).jwt.accessTokenSecret).toBe('short');
     });
+  });
+
+  describe('production credential guard', () => {
+    it('requires REDIS_PASSWORD in production only', () => {
+      expect(() =>
+        loadEnv({ NODE_ENV: 'production', ...PROD_SECRETS, REDIS_PASSWORD: undefined }),
+      ).toThrow('Missing required enviroment variable: REDIS_PASSWORD');
+      expect(loadEnv({ NODE_ENV: 'development' }).redis.password).toBeUndefined();
+    });
+
+    it.each(['POSTGRES_PASSWORD', 'REDIS_PASSWORD'] as const)(
+      'rejects the CHANGE_ME placeholder for %s in production only',
+      (key) => {
+        const placeholder = 'CHANGE_ME'.padEnd(40, '_');
+        expect(() =>
+          loadEnv({ NODE_ENV: 'production', ...PROD_SECRETS, [key]: placeholder }),
+        ).toThrow(`${key} must not be the .env.production.example placeholder`);
+        expect(() =>
+          loadEnv({ NODE_ENV: 'development', [key]: placeholder }),
+        ).not.toThrow();
+      },
+    );
   });
 });

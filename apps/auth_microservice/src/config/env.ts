@@ -59,6 +59,31 @@ const requireJwtSecret = (key: string, devDefault: string): string => {
   return secret;
 };
 
+// Production refuses the .env.production.example placeholder in every secret.
+const rejectProductionPlaceholder = (key: string, value: string): void => {
+  if (
+    process.env.NODE_ENV === 'production' &&
+    value.includes(PRODUCTION_SECRET_PLACEHOLDER)
+  ) {
+    throw new Error(
+      `${key} must not be the .env.production.example placeholder in production`,
+    );
+  }
+};
+
+// A credential with no default; in production also placeholder-free.
+const requireSecret = (key: string): string => {
+  const value = requireEnv(key);
+  rejectProductionPlaceholder(key, value);
+  return value;
+};
+
+// Optional in development (the local Redis has no password), required in production.
+const requireRedisPassword = (): string | undefined =>
+  process.env.NODE_ENV === 'production'
+    ? requireSecret('REDIS_PASSWORD')
+    : process.env.REDIS_PASSWORD || undefined;
+
 const SAME_SITE_VALUES = ['strict', 'lax', 'none'] as const;
 type SameSite = (typeof SAME_SITE_VALUES)[number];
 
@@ -102,8 +127,8 @@ export const env = {
   db: {
     host: requireEnv('POSTGRES_HOST', 'localhost'),
     port: parseInt(requireEnv('POSTGRES_PORT', '5432'), 10),
-    username: requireEnv('POSTGRES_USER', 'innogram_user'),
-    password: requireEnv('POSTGRES_PASSWORD', 'innogram_password'),
+    username: requireEnv('POSTGRES_USER'),
+    password: requireSecret('POSTGRES_PASSWORD'),
     // Must match data-source.ts, which the migration CLI uses, or the app talks
     // to a different database than the one the migrations built.
     database: requireEnv('DB_NAME_AUTH', 'innogram_auth'),
@@ -111,7 +136,7 @@ export const env = {
   redis: {
     host: requireEnv('REDIS_HOST', 'localhost'),
     port: parseInt(requireEnv('REDIS_PORT', '6379'), 10),
-    password: process.env.REDIS_PASSWORD || undefined, // Password may be empty
+    password: requireRedisPassword(),
   },
   jwt: {
     accessTokenSecret: requireJwtSecret('JWT_SECRET', 'your-super-secret-jwt-key-here'),

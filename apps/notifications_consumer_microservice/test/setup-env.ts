@@ -17,6 +17,8 @@ const fixtures: Record<string, string> = {
   SMTP_PORT: '1025',
   SMTP_SECURE: 'false',
   SMTP_FROM: 'Innogram <no-reply@innogram.local>',
+  POSTGRES_USER: 'test-user',
+  POSTGRES_PASSWORD: 'test-password',
 };
 
 for (const [key, value] of Object.entries(fixtures)) {

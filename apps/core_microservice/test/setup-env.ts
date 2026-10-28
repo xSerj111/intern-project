@@ -21,6 +21,8 @@ const defaults: Record<string, string> = {
   S3_PRIVATE_BUCKET_NAME: 'innogram-private',
   JWT_SECRET: 'test-jwt-secret',
   INTERNAL_API_TOKEN: 'test-internal-api-token-0123456789abcdef',
+  POSTGRES_USER: 'test-user',
+  POSTGRES_PASSWORD: 'test-password',
 };
 
 for (const [key, value] of Object.entries(defaults)) {

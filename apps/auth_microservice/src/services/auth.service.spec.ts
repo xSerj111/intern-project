@@ -2,6 +2,8 @@
 process.env.CORE_SERVICE_URL = 'http://localhost:3001';
 process.env.AUTH_ALLOWED_ORIGINS = 'http://localhost:3000';
 process.env.INTERNAL_API_TOKEN = 'x'.repeat(32);
+process.env.POSTGRES_USER = 'test-user';
+process.env.POSTGRES_PASSWORD = 'test-password';
 
 import { RedisKeys, UnauthorizedError, WinstonLogger } from '@repo/shared';
 import { AuthService } from './auth.service';

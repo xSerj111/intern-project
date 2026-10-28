@@ -74,13 +74,14 @@ Replace every `CHANGE_ME`. Generate each secret with `openssl rand -hex 32` (64 
 | Variable                           | Notes                                                                           |
 | ---------------------------------- | ------------------------------------------------------------------------------- |
 | `POSTGRES_PASSWORD`                | Used only when the Postgres volume is first created; see Troubleshooting        |
+| `REDIS_PASSWORD`                   | Required in production; the `redis` container enables `requirepass` with it     |
 | `RABBITMQ_DEFAULT_PASS`            | Must also appear inside `RABBITMQ_URL` (`amqp://innogram:<pass>@rabbitmq:5672`) |
 | `JWT_SECRET`, `JWT_REFRESH_SECRET` | 32+ characters, different from each other                                       |
 | `INTERNAL_API_TOKEN`               | 32+ characters, the same value for all services                                 |
 | `S3_ACCESS_KEY`, `S3_SECRET_KEY`   | SeaweedFS S3 credentials                                                        |
 | `GRAFANA_ADMIN_PASSWORD`           | Required only with the monitoring profile                                       |
 
-With `NODE_ENV=production` the three services refuse to start while `JWT_SECRET`, `JWT_REFRESH_SECRET` or `INTERNAL_API_TOKEN` still contain `CHANGE_ME` or are too short. Core also refuses to start with `PERF_INSTRUMENTATION=true`, so keep it `false`.
+With `NODE_ENV=production` the three services refuse to start while any secret they read (`JWT_SECRET`, `JWT_REFRESH_SECRET`, `INTERNAL_API_TOKEN`, `POSTGRES_PASSWORD`, `REDIS_PASSWORD`, `RABBITMQ_URL`, the S3 keys, `SMTP_PASS`) still contains `CHANGE_ME`, while `REDIS_PASSWORD` is empty, or while a JWT secret or the internal token is too short. Grafana refuses a `GRAFANA_ADMIN_PASSWORD` containing `CHANGE_ME`. Core also refuses to start with `PERF_INSTRUMENTATION=true`, so keep it `false`.
 
 Then set the environment-specific values:
 
@@ -131,10 +132,10 @@ The compose files publish these host ports:
 | ----------------------------------------- | --------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | 3000, 3001, 3002, 3003                    | client, core, auth, notifications                                     | Public entry points                                                                     |
 | 9000                                      | SeaweedFS S3                                                          | Browsers upload and download through it, so it must be reachable (`S3_PUBLIC_ENDPOINT`) |
-| 5432, 6379, 6380, 5672, 15672, 1025, 8025 | Postgres, Redis, redis-cache, RabbitMQ (AMQP, UI), Mailpit (SMTP, UI) | Published by `docker-compose.yml` for local development                                 |
-| 3030                                      | Grafana (monitoring profile)                                          |                                                                                         |
+| 5432, 6379, 6380, 5672, 15672, 1025, 8025 | Postgres, Redis, redis-cache, RabbitMQ (AMQP, UI), Mailpit (SMTP, UI) | Bound to `127.0.0.1` only: reachable from the host itself, never from the network       |
+| 3030                                      | Grafana (monitoring profile)                                          | Bound to `127.0.0.1` only                                                               |
 
-In a real deployment, firewall everything except the four app ports and 9000, or remove the infra `ports:` entries in an override file. **Port 3012 is auth's internal listener (`/internal/users/:id/contact`, guarded by `X-Internal-Token`). It is never published and must never be exposed publicly**; notifications reaches it over the compose network through `AUTH_INTERNAL_URL=http://auth:3012`. `/health/details` and `/metrics` on the app ports also require `X-Internal-Token`. TLS is not part of the stack: terminate it in a reverse proxy in front of the four app ports (cross-site refresh cookies need HTTPS, see `AUTH_COOKIE_SAMESITE`).
+The infra ports are loopback-only, so on a server only the four app ports and 9000 face the network; reach the others over an SSH tunnel. Firewall the host as well. **Port 3012 is auth's internal listener (`/internal/users/:id/contact`, guarded by `X-Internal-Token`). It is never published and must never be exposed publicly**; notifications reaches it over the compose network through `AUTH_INTERNAL_URL=http://auth:3012`. `/health/details` and `/metrics` on the app ports also require `X-Internal-Token`. TLS is not part of the stack: terminate it in a reverse proxy in front of the four app ports (cross-site refresh cookies need HTTPS, see `AUTH_COOKIE_SAMESITE`).
 
 Swagger UI is off by default when `NODE_ENV=production`; set `SWAGGER_ENABLED=true` to serve it (see [docs/API.md](API.md)).
 

@@ -12,7 +12,7 @@ services:
       DB_NAME_CORE: ${DB_NAME_CORE}
       DB_NAME_NOTIFICATIONS: ${DB_NAME_NOTIFICATIONS}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
@@ -28,12 +28,18 @@ services:
     image: redis:7-alpine
     container_name: innogram-redis
     restart: unless-stopped
+    # Holds sessions and token blacklists. With REDIS_PASSWORD set (required by the
+    # apps in production) clients must authenticate; empty keeps local dev open.
+    # Re-enters the image entrypoint so Redis still drops root.
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+    command: ["sh", "-c", "exec docker-entrypoint.sh redis-server $${REDIS_PASSWORD:+--requirepass \"$$REDIS_PASSWORD\"}"]
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli $${REDIS_PASSWORD:+--no-auth-warning -a \"$$REDIS_PASSWORD\"} ping | grep -q PONG"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -48,7 +54,7 @@ services:
     restart: unless-stopped
     command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
     ports:
-      - "6380:6379"
+      - "127.0.0.1:6380:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -65,8 +71,8 @@ services:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS}
     ports:
-      - "5672:5672"
-      - "15672:15672"
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
@@ -81,8 +87,8 @@ services:
     container_name: innogram-mailpit
     restart: unless-stopped
     ports:
-      - "1025:1025"
-      - "8025:8025"
+      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8025:8025"
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8025/livez"]
       interval: 5s
@@ -175,7 +181,9 @@ services:
     entrypoint:
       - /bin/sh
       - -c
-      - ': "$${GF_SECURITY_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in the root .env}"; exec /run.sh'
+      - ': "$${GF_SECURITY_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD in the root .env}";
+        case "$$GF_SECURITY_ADMIN_PASSWORD" in *CHANGE_ME*) echo "GRAFANA_ADMIN_PASSWORD still holds the CHANGE_ME placeholder" >&2; exit 1;; esac;
+        exec /run.sh'
     environment:
       # Required, but checked by the entrypoint below: `${VAR:?}` here would make
       # `docker compose config/up` fail for the default (non-monitoring) services.
@@ -186,7 +194,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
-      - "3030:3000"
+      - "127.0.0.1:3030:3000"
     volumes:
       - ./docker/monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ./docker/monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro

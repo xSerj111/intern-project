@@ -51,14 +51,13 @@ export class EnvironmentVariables {
   @Max(PORT.max)
   POSTGRES_PORT?: number;
 
-  @IsOptional()
   @IsString()
   @IsNotEmpty()
-  POSTGRES_USER?: string;
+  POSTGRES_USER!: string;
 
-  @IsOptional()
   @IsString()
-  POSTGRES_PASSWORD?: string;
+  @IsNotEmpty()
+  POSTGRES_PASSWORD!: string;
 
   @IsOptional()
   @IsString()
@@ -127,12 +126,28 @@ export class EnvironmentVariables {
 
 /** Placeholder that `.env.production.example` puts in every secret. */
 export const PRODUCTION_SECRET_PLACEHOLDER = 'CHANGE_ME';
-const PRODUCTION_SECRETS = ['JWT_SECRET', 'INTERNAL_API_TOKEN'] as const;
+/** Every secret notifications reads; none may keep the placeholder in production. */
+const PRODUCTION_SECRETS = [
+  'JWT_SECRET',
+  'INTERNAL_API_TOKEN',
+  'POSTGRES_PASSWORD',
+  'REDIS_PASSWORD',
+  'RABBITMQ_URL',
+  'SMTP_PASS',
+] as const;
+/** Optional in development, required when `NODE_ENV=production`. */
+const REQUIRED_IN_PRODUCTION = ['REDIS_PASSWORD'] as const;
 
-/** In production, a secret still holding the example placeholder is an error. */
-function placeholderErrors(config: Record<string, unknown>): string[] {
+/**
+ * In production, a secret still holding the example placeholder is an error,
+ * and so is a missing production-only secret.
+ */
+function productionErrors(config: Record<string, unknown>): string[] {
   if (config.NODE_ENV !== 'production') return [];
-  return PRODUCTION_SECRETS.filter((key) => {
+  const missing = REQUIRED_IN_PRODUCTION.filter(
+    (key) => config[key] === undefined,
+  ).map((key) => `${key}: is required in production`);
+  const placeholders = PRODUCTION_SECRETS.filter((key) => {
     const value = config[key];
     return (
       typeof value === 'string' && value.includes(PRODUCTION_SECRET_PLACEHOLDER)
@@ -141,6 +156,7 @@ function placeholderErrors(config: Record<string, unknown>): string[] {
     (key) =>
       `${key}: must not be the .env.production.example placeholder in production`,
   );
+  return [...missing, ...placeholders];
 }
 
 /**
@@ -162,7 +178,7 @@ export function validate(
     ...errors.map(
       (e) => `${e.property}: ${Object.values(e.constraints ?? {}).join('; ')}`,
     ),
-    ...placeholderErrors(present),
+    ...productionErrors(present),
   ];
   if (lines.length > 0) {
     throw new Error(
