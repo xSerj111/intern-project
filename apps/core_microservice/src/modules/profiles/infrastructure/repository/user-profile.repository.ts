@@ -3,17 +3,10 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { In, type Repository } from 'typeorm';
 
 import { TypeormRepositoryBase } from '@repo/shared';
+import { escapeLikePattern } from '../../../../common/db/like-pattern';
 import { UserProfile } from '../../domain/entities/user-profile.entity';
 import type { UserProfileProps } from '../../domain/interfaces/user-profile.props';
 import type { IUserProfileRepository } from '../../domain/interfaces/user-profile-repository.port';
-
-/**
- * Escapes LIKE metacharacters so `value` is matched literally with
- * `ESCAPE '\'`. The backslash is escaped first, then `%` and `_`.
- */
-export function escapeLikePattern(value: string): string {
-  return value.replace(/\\/g, '\\\\').replace(/%/g, '\\%').replace(/_/g, '\\_');
-}
 
 /**
  * TypeORM adapter for the profile repository port. Inherits the full data-access
@@ -49,19 +42,32 @@ export class UserProfileRepository
   }
 
   public async searchByUsername(
-    prefix: string,
+    query: string,
     limit: number,
     excludeAuthUserId: string,
   ): Promise<UserProfile[]> {
-    // lower(username) LIKE lower(:q) || '%' matches the expression index
-    // IDX_user_profiles_username_lower (text_pattern_ops) for prefix scans.
+    // The infix LIKEs on lower(username) / lower("displayName") are served by the
+    // GIN trigram indexes IDX_user_profiles_username_trgm and
+    // IDX_user_profiles_display_name_trgm. Known limit: a 2-char query has no
+    // full trigram, so the index can't narrow it (fine at current volume; raise
+    // the minimum to 3 or add a prefix-only path if perf runs show a problem).
+    // Ranking: exact username, then username prefix, then best trigram
+    // similarity of username or display name, then username.
     return this.repository
       .createQueryBuilder('p')
-      .where("lower(p.username) LIKE (lower(:q) || '%') ESCAPE '\\'", {
-        q: escapeLikePattern(prefix),
-      })
+      .where(
+        "(lower(p.username) LIKE '%' || lower(:q) || '%' ESCAPE '\\' OR lower(p.\"displayName\") LIKE '%' || lower(:q) || '%' ESCAPE '\\')",
+        { q: escapeLikePattern(query) },
+      )
       .andWhere('p.authUserId != :excludeAuthUserId', { excludeAuthUserId })
-      .orderBy('p.username', 'ASC')
+      .setParameter('raw', query)
+      .orderBy('lower(p.username) = lower(:raw)', 'DESC')
+      .addOrderBy("lower(p.username) LIKE lower(:q) || '%' ESCAPE '\\'", 'DESC')
+      .addOrderBy(
+        'greatest(similarity(lower(p.username), lower(:raw)), similarity(lower(coalesce(p."displayName", \'\')), lower(:raw)))',
+        'DESC',
+      )
+      .addOrderBy('p.username', 'ASC')
       .take(limit)
       .getMany();
   }

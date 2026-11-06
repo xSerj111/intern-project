@@ -45,6 +45,43 @@ export class PostsService {
     return { items: posts, nextCursor };
   }
 
+  /** Hashtags starting with `q` (already normalized by the DTO), most used first. */
+  async searchHashtags(
+    q: string,
+    limit: number,
+  ): Promise<{ tag: string; postCount: number }[]> {
+    const results = await this.postRepository.searchHashtags(q, limit);
+
+    this.logger.debug('Hashtags searched', {
+      props: { q, count: results.length },
+    });
+
+    return results;
+  }
+
+  /**
+   * One keyset page of published posts carrying `tag` (already normalized),
+   * newest first. `cursor` was already validated by the DTO; omit it for the
+   * first page.
+   */
+  async getHashtagFeed(
+    tag: string,
+    cursor: string | undefined,
+    limit: number,
+  ): Promise<{ items: Post[]; nextCursor: string | null }> {
+    const { posts, nextCursor } = await this.postRepository.findByHashtagPage(
+      tag,
+      cursor === undefined ? null : FeedCursor.decode(cursor),
+      limit,
+    );
+
+    this.logger.debug('Hashtag feed retrieved', {
+      props: { tag, count: posts.length, hasMore: nextCursor !== null },
+    });
+
+    return { items: posts, nextCursor };
+  }
+
   /**
    * One author's posts in `status`, newest first. Published posts are public;
    * any other status is only listed for the author themself.
@@ -144,7 +181,7 @@ export class PostsService {
       throw new ForbiddenException('You are not allowed to update this post');
     }
     if (updatePostDto.content) {
-      post.content = updatePostDto.content;
+      post.editContent(updatePostDto.content);
     }
     const updatedPost = await this.postRepository.save(post);
     this.logger.debug('Post updated', { props: { postId: updatedPost.id } });

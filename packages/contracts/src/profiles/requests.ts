@@ -24,11 +24,12 @@ export interface IUpdateProfileRequest {
 }
 
 /**
- * Query for searching users by username prefix (starting conversations).
+ * Query for searching users by any part of the username or display name
+ * (starting conversations).
  */
 export interface ISearchProfilesQuery {
-  /** Username prefix, 2-50 chars */
+  /** Text matched anywhere in the username or display name, 2-50 chars */
   q: string;
-  /** Max results, 1-20 (default 10) */
+  /** Max results, 1-50 (default 10) */
   limit?: number;
 }

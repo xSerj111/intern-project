@@ -21,7 +21,7 @@ import { Avatar } from '../ui/avatar';
 import { Button, IconButton } from '../ui/button';
 import { ConfirmDialog } from '../ui/confirm-dialog';
 import { Dialog } from '../ui/dialog';
-import { Textarea } from '../ui/input';
+import { MentionInput } from '../mentions/mention-input';
 import { Spinner } from '../ui/spinner';
 
 import styles from './create-post-dialog.module.css';
@@ -251,16 +251,18 @@ function Composer({ onClose }: { onClose: () => void }) {
             <span className={styles.authorName}>{profileName}</span>
           </div>
 
-          <Textarea
+          <MentionInput
+            multiline
+            block
             aria-label="Post text"
             placeholder="What's on your mind?"
             rows={4}
             maxLength={POST_MAX_LENGTH}
             value={content}
-            onChange={(event) => setContent(event.target.value)}
+            onValueChange={setContent}
             disabled={submit.isPending}
             hint={`${content.length}/${POST_MAX_LENGTH}`}
-            ref={textarea}
+            fieldRef={textarea}
           />
 
           {attachments.length > 0 && (

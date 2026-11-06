@@ -1,0 +1,9 @@
+.page {
+  padding-bottom: var(--space-4);
+}
+
+.title {
+  margin: 0 0 var(--space-4);
+  font-size: var(--text-2xl);
+  overflow-wrap: anywhere;
+}

@@ -19,6 +19,40 @@ describe('Post', () => {
       expect(post.status).toBe(PostStatus.Draft);
       expect(post.content).toBe('hello');
     });
+
+    it('extracts hashtags from the content', () => {
+      const post = Post.create({
+        authorId: 'author-1',
+        content: 'hi #Foo and #bar',
+      });
+
+      expect(post.hashtags).toEqual(['foo', 'bar']);
+    });
+
+    it('sets no hashtags when the content has none', () => {
+      const post = Post.create({ authorId: 'author-1', content: 'hello' });
+
+      expect(post.hashtags).toEqual([]);
+    });
+  });
+
+  describe('editContent', () => {
+    it('replaces the content and recomputes the hashtags', () => {
+      const post = Post.create({ authorId: 'author-1', content: '#old' });
+
+      post.editContent('now #new #tags');
+
+      expect(post.content).toBe('now #new #tags');
+      expect(post.hashtags).toEqual(['new', 'tags']);
+    });
+
+    it('clears the hashtags when the new content has none', () => {
+      const post = Post.create({ authorId: 'author-1', content: '#old' });
+
+      post.editContent('plain');
+
+      expect(post.hashtags).toEqual([]);
+    });
   });
 
   describe('canPublish', () => {

@@ -23,6 +23,26 @@ export interface IPostRepository extends RepositoryPort<Post, PostProps> {
     cursor: FeedCursor | null,
     limit: number,
   ): Promise<{ posts: Post[]; nextCursor: string | null }>;
+  /**
+   * Hashtags starting with the normalized prefix, with the number of
+   * published, non-deleted posts carrying each one. Ordered `postCount DESC,
+   * tag ASC`, at most `limit` entries.
+   */
+  searchHashtags(
+    prefix: string,
+    limit: number,
+  ): Promise<{ tag: string; postCount: number }[]>;
+  /**
+   * One keyset page of published, non-deleted posts carrying the hashtag,
+   * ordered `createdAt DESC, id DESC`, strictly after `cursor` (first page
+   * when null). Posts carry author and assets (with each asset's file).
+   * `nextCursor` is null when this is the last page.
+   */
+  findByHashtagPage(
+    tag: string,
+    cursor: FeedCursor | null,
+    limit: number,
+  ): Promise<{ posts: Post[]; nextCursor: string | null }>;
   /** Published posts whose content contains the keyword (case-insensitive). */
   searchPublishedPosts(
     keyword: string,

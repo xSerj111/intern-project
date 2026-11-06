@@ -14,9 +14,13 @@ export interface IUserProfileRepository extends RepositoryPort<
   findByAuthUserId(authUserId: string): Promise<UserProfile | null>;
   /** Single `IN` lookup; missing ids are simply absent from the result. */
   findByAuthUserIds(authUserIds: string[]): Promise<UserProfile[]>;
-  /** Case-insensitive username prefix match; deleted profiles and `excludeAuthUserId` left out. */
+  /**
+   * Case-insensitive match on username or display name containing `query`,
+   * ranked exact → prefix → similarity → username; deleted profiles and
+   * `excludeAuthUserId` left out.
+   */
   searchByUsername(
-    prefix: string,
+    query: string,
     limit: number,
     excludeAuthUserId: string,
   ): Promise<UserProfile[]>;
