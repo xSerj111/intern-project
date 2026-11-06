@@ -17,8 +17,8 @@ import { useAuth } from '../../lib/auth/auth-context';
 import { Button } from '../ui/button';
 import { ConfirmDialog } from '../ui/confirm-dialog';
 import { Dialog } from '../ui/dialog';
+import { MentionInput } from '../mentions/mention-input';
 import { Menu, type MenuEntry } from '../ui/menu';
-import { Textarea } from '../ui/input';
 
 export const POST_MAX_LENGTH = 500;
 
@@ -134,12 +134,14 @@ export function PostMenu({ post, onDeleted }: PostMenuProps) {
         }
       >
         <form id={`edit-post-${post.id}`} onSubmit={submitEdit}>
-          <Textarea
+          <MentionInput
+            multiline
+            block
             aria-label="Post text"
             rows={5}
             value={draft}
             maxLength={POST_MAX_LENGTH}
-            onChange={(event) => setDraft(event.target.value)}
+            onValueChange={setDraft}
             hint={`${draft.length}/${POST_MAX_LENGTH}`}
             error={edit.isError ? "Couldn't save your changes." : undefined}
           />

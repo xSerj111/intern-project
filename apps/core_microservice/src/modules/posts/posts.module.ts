@@ -1,6 +1,8 @@
 import { Module } from '@nestjs/common';
 import { PostsService } from './posts.service';
 import { PostsController } from './posts.controller';
+import { HashtagsController } from './hashtags.controller';
+import { PostResponseMapper } from './post-response.mapper';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { Post } from './domain/entities/post.entity';
 import { PostLike } from './domain/entities/post-like.entity';
@@ -16,9 +18,10 @@ import { POST_REPOSITORY } from './domain/interfaces/post-repository.port';
     LoggerModule.forFeature('PostsService'),
     AssetsModule,
   ],
-  controllers: [PostsController],
+  controllers: [PostsController, HashtagsController],
   providers: [
     PostsService,
+    PostResponseMapper,
     PostRepository,
     { provide: POST_REPOSITORY, useExisting: PostRepository },
   ],

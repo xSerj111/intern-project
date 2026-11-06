@@ -11,6 +11,7 @@
     "lint:check": "eslint \"src/**/*.{ts,tsx}\"",
     "type-check": "tsc --noEmit",
     "test": "jest --passWithNoTests",
+    "test:cov": "jest --coverage --passWithNoTests",
     "test:e2e": "playwright test"
   },
   "dependencies": {
@@ -45,7 +46,20 @@
       "<rootDir>/e2e/"
     ],
     "modulePathIgnorePatterns": [
-      "<rootDir>/e2e/"
-    ]
+      "<rootDir>/e2e/",
+      "<rootDir>/.next/"
+    ],
+    "testEnvironment": "node",
+    "transform": {
+      "^.+\\.tsx?$": [
+        "ts-jest",
+        {
+          "tsconfig": {
+            "module": "commonjs",
+            "jsx": "react-jsx"
+          }
+        }
+      ]
+    }
   }
 }

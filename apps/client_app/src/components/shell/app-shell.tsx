@@ -10,6 +10,7 @@ import {
   MessageCircle,
   Monitor,
   Moon,
+  Search,
   Settings,
   SquarePlus,
   Sun,
@@ -67,6 +68,13 @@ function useNavEntries(): NavEntry[] {
   if (!isSignedIn) {
     return [
       { key: 'home', label: 'Home', icon: House, href: '/', active: pathname === '/' },
+      {
+        key: 'search',
+        label: 'Search',
+        icon: Search,
+        href: '/search',
+        active: pathname.startsWith('/search') || pathname.startsWith('/tags'),
+      },
       { key: 'login', label: 'Log in', icon: LogIn, href: '/login' },
       { key: 'signup', label: 'Sign up', icon: UserPlus, href: '/signup' },
     ];
@@ -75,6 +83,13 @@ function useNavEntries(): NavEntry[] {
   const name = profile.data?.displayName ?? user?.email ?? 'You';
   return [
     { key: 'home', label: 'Home', icon: House, href: '/', active: pathname === '/' },
+    {
+      key: 'search',
+      label: 'Search',
+      icon: Search,
+      href: '/search',
+      active: pathname.startsWith('/search') || pathname.startsWith('/tags'),
+    },
     {
       key: 'messages',
       label: 'Messages',

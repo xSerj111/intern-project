@@ -31,3 +31,19 @@ export interface IFeedQuery {
   /** `1..50`, default 20. */
   limit?: number;
 }
+
+/** Query of `GET /hashtags/search`. */
+export interface ISearchHashtagsQuery {
+  /** Tag prefix, with or without a leading `#`. */
+  q: string;
+  /** `1..50`. */
+  limit?: number;
+}
+
+/** Query of `GET /hashtags/:tag/posts`. Cursor-based, like the feed. */
+export interface IHashtagFeedQuery {
+  /** Opaque value from a previous `nextCursor`. Omit for the first page. */
+  cursor?: string;
+  /** `1..50`, default 20. */
+  limit?: number;
+}

@@ -16,6 +16,7 @@ import {
 // Type-only, string-target relations: no runtime coupling to other modules.
 import type { Comment } from '../../../comments/domain/entities/comment.entity';
 import type { UserProfile } from '../../../profiles/domain/entities/user-profile.entity';
+import { extractHashtags } from '../hashtags';
 import { PostAsset } from './post-asset.entity';
 
 export enum PostStatus {
@@ -60,6 +61,10 @@ export class Post extends TypeormEntityBase {
   @Column({ type: 'text' })
   content!: string;
 
+  /** Normalized tags found in `content`; derived, never set directly. */
+  @Column('text', { array: true, default: () => "'{}'" })
+  hashtags!: string[];
+
   @Column({ type: 'enum', enum: PostStatus, default: PostStatus.Draft })
   status!: PostStatus;
 
@@ -78,12 +83,19 @@ export class Post extends TypeormEntityBase {
     const post = new Post();
     post.authorId = props.authorId;
     post.content = props.content;
+    post.hashtags = extractHashtags(props.content);
     post.status = PostStatus.Draft;
 
     if (props.assets) {
       post.assets = props.assets;
     }
     return post;
+  }
+
+  /** Replaces the body; hashtags are always re-derived from it. */
+  editContent(content: string): void {
+    this.content = content;
+    this.hashtags = extractHashtags(content);
   }
 
   get canPublish(): boolean {

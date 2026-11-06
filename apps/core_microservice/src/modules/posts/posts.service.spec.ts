@@ -22,6 +22,8 @@ describe('PostsService', () => {
     save: jest.fn(),
     findOneByIdOrThrow: jest.fn(),
     findFeedPage: jest.fn(),
+    searchHashtags: jest.fn(),
+    findByHashtagPage: jest.fn(),
     softDelete: jest.fn(),
   };
   const cache = { invalidateCounts: jest.fn() };
@@ -87,6 +89,59 @@ describe('PostsService', () => {
 
       expect(postRepository.findFeedPage).toHaveBeenCalledWith(
         AUTHOR,
+        expect.objectContaining({ t: cursor.t, id: cursor.id }),
+        5,
+      );
+      expect(result).toEqual({ items: [], nextCursor: null });
+    });
+  });
+
+  describe('searchHashtags', () => {
+    it('delegates the normalized query and limit to the repository', async () => {
+      const results = [
+        { tag: 'summer', postCount: 2 },
+        { tag: 'summit', postCount: 1 },
+      ];
+      postRepository.searchHashtags.mockResolvedValue(results);
+
+      await expect(service.searchHashtags('sum', 10)).resolves.toEqual(results);
+      expect(postRepository.searchHashtags).toHaveBeenCalledWith('sum', 10);
+    });
+  });
+
+  describe('getHashtagFeed', () => {
+    const cursor = FeedCursor.fromRow({
+      t: '2026-01-02T03:04:05.123456Z',
+      id: '22222222-2222-2222-2222-222222222222',
+    });
+
+    it('asks for the first page with a null cursor and passes nextCursor through', async () => {
+      const post = fakePost();
+      postRepository.findByHashtagPage.mockResolvedValue({
+        posts: [post],
+        nextCursor: 'next-1',
+      });
+
+      const result = await service.getHashtagFeed('summer', undefined, 20);
+
+      expect(postRepository.findByHashtagPage).toHaveBeenCalledWith(
+        'summer',
+        null,
+        20,
+      );
+      expect(result).toEqual({ items: [post], nextCursor: 'next-1' });
+    });
+
+    it('decodes the cursor before querying', async () => {
+      postRepository.findByHashtagPage.mockResolvedValue({
+        posts: [],
+        nextCursor: null,
+      });
+
+      const result = await service.getHashtagFeed('summer', cursor.encode(), 5);
+
+      expect(postRepository.findByHashtagPage).toHaveBeenCalledWith(
+        'summer',
         expect.objectContaining({ t: cursor.t, id: cursor.id }),
         5,
       );
@@ -237,6 +292,29 @@ describe('PostsService', () => {
       expect(postRepository.getCommentCounts).not.toHaveBeenCalled();
     });
   });
+
+  describe('updatePost', () => {
+    it('recomputes the hashtags on the saved entity', async () => {
+      const post = fakePost({
+        authorId: AUTHOR,
+        content: '#old',
+        hashtags: ['old'],
+      });
+      postRepository.findOneByIdOrThrow.mockResolvedValue(post);
+      postRepository.save.mockImplementation((p: unknown) =>
+        Promise.resolve(p),
+      );
+
+      const result = await service.updatePost(AUTHOR, post.id, {
+        content: 'fresh #New',
+      });
+
+      expect(result.content).toBe('fresh #New');
+      expect(result.hashtags).toEqual(['new']);
+      expect(postRepository.save).toHaveBeenCalledWith(post);
+    });
+  });
+
   describe('counts cache invalidation', () => {
     it('invalidates the author counts after publishing a draft', async () => {
       const draft = fakePost({ id: 'p-1', authorId: AUTHOR });

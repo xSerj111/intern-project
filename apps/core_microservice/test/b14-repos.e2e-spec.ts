@@ -668,7 +668,7 @@ describe('B14 repositories against real Postgres (e2e)', () => {
       expect(await search(`${base}_`)).toEqual([]);
     });
 
-    it('stays a case-insensitive prefix search, regardless of case', async () => {
+    it('is a case-insensitive infix search, regardless of case', async () => {
       expect(await search(`${base}MIXED`)).toEqual([`${base}Mixed7`]);
       expect((await search(base.toUpperCase())).sort()).toEqual(
         [
@@ -681,8 +681,9 @@ describe('B14 repositories against real Postgres (e2e)', () => {
           `${base}eXf6`,
         ].sort(),
       );
-      // a prefix only: a middle fragment does not match
-      expect(await search('ixed7')).toEqual([]);
+      // infix: a middle fragment matches too, in any case
+      expect(await search(`${tag}MIXED7`)).toEqual([`${base}Mixed7`]);
+      expect(await search('ixed7')).toContain(`${base}Mixed7`);
     });
 
     it('applies the limit and excludes the requesting user', async () => {
